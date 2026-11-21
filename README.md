@@ -20,8 +20,8 @@ rozdíly jsou v sekci [Přehraj.to](#přehrajto--rozdíly).
   oblíbená videa a playlisty, které se uloží jako kolekce). Na pozadí se umí synchronizovat
   automaticky a videa smazaná z účtu z katalogu odebere.
 - **Automatické třídění** – z názvů souborů (`Pelisky.1999.1080p.CZ.mkv`,
-  `Hra o trůny S01E02 cz tit`, `Vyprávěj - díl 12` …) pozná název, rok, sérii a díl, jazyk
-  (dabing/titulky) a kvalitu. Víc verzí téhož filmu (CZ / EN, 720p / 1080p) se sloučí
+  `Hra o trůny S01E02 cz tit`, `Vyprávěj - díl 12`, `Ulice 4012. díl`, `Johnny English (2003) CZ` …)
+  pozná název, rok, sérii a díl, jazyk (dabing/titulky) a kvalitu. Víc verzí téhož filmu (CZ / EN, 720p / 1080p) se sloučí
   pod jeden titul, díly seriálů pod seriál a série.
 - **Hodnocení, popisy a plakáty** z ČSFD (hodnocení v %, žánry, země, režie, herci, děj).
   Když ČSFD není dostupné, použije se TMDB (vlastní zdarma API klíč) – viz níže.
@@ -110,6 +110,22 @@ nebo vše najednou) nastavíte v **Nastavení → Hledat → Položek katalogu n
 Doplněk si pamatuje posledních 20 online hledání (10 minut) a odpovědi TMDB (žánry a země týden,
 seznamy 6 hodin, detaily den), takže návrat zpět a opakované otevření nečekají na síť.
 Doplnění a obnova metadat čtou z TMDB vždy aktuální data.
+Mezipaměť lze kdykoli smazat v **Nástroje → Vymazat mezipaměť** (katalog ani historie se tím nemění).
+Řazení v Kodi přeskládá jen zobrazenou stránku; pořadí celého výpisu (podle názvu, data přidání,
+hodnocení nebo roku) změníte položkou **Řazení celého katalogu** nahoře na první stránce.
+
+V **Nastavení → Synchronizace** lze k automatické synchronizaci zapnout **Rychlou automatickou
+synchronizaci**: skončí u první stránky nahraných videí, na které není nic nového. Úplná
+synchronizace, která jediná odebírá smazaná videa, proběhne dál nejméně jednou denně a při každém
+ručním spuštění. Rychlá předpokládá, že Přehraj.to řadí nahraná videa od nejnovějších; pokud by se
+vám nová videa objevovala až po úplné synchronizaci, volbu vypněte.
+Když ČSFD není dostupné nebo je vypnuté, doplňují se metadata z TMDB čtyřmi dotazy souběžně.
+Výsledek TMDB, u kterého nesedí název a rok se liší o víc než rok, doplněk nepřijme a titul zůstane
+mezi nerozpoznanými.
+
+Export do knihovny Kodi po sobě uklízí: soubory titulů, které z katalogu zmizely (smazané video,
+přečíslovaný díl, opravený název), smaže a odebere i odpovídající položky z knihovny Kodi. Soubory,
+které jste v cílové složce ručně upravili, nechává být.
 Výchozí výpis spojuje dvě stránky služby, pokud jsou dostupné.
 
 **Další části** v detailu filmu vycházejí z filmových kolekcí TMDB. Pokud je

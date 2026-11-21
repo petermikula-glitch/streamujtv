@@ -354,11 +354,15 @@ def test_restore_rejects_wrong_value_types_and_repairs_missing_titles(tmp_path):
         lib.upsert_video("8:film:%016x" % 8, "Film 2001 CZ", "account", nameparser.parse("Film 2001 CZ"))
         backup = lib.export_backup("addon")
         for table, column, value in (("videos", "season", "x"), ("videos", "raw_title", 5),
-                                     ("meta", "genres", "{bad"), ("meta", "genres", "[[1]]")):
+                                     ("meta", "genres", "{bad"), ("meta", "genres", "5")):
             broken = json.loads(json.dumps(backup))
             broken["tables"][table][0][column] = value
             with pytest.raises(ValueError):
                 lib.restore_backup(broken, "addon")
+        odd = json.loads(json.dumps(backup))
+        odd["tables"]["meta"][0]["genres"] = '[["vnořený"], "Drama"]'  # neobvyklé položky se jen přeskočí
+        lib.restore_backup(odd, "addon")
+        assert lib.genres() == [("Drama", 1)]
         without_meta = json.loads(json.dumps(backup))
         without_meta["tables"]["meta"] = []
         lib.restore_backup(without_meta, "addon")

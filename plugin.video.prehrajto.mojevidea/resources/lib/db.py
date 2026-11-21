@@ -153,16 +153,15 @@ META_FIELDS = ("status", "source", "csfd_id", "csfd_url", "tmdb_id", "title", "o
 
 
 def _json_list(text):
-    """Sloupec se seznamem (žánry, země…) obsahuje JSON seznam řetězců."""
+    """Sloupec se seznamem (žánry, země…) obsahuje JSON seznam."""
     try:
-        value = json.loads(text or "[]")
+        return isinstance(json.loads(text or "[]"), list)
     except (TypeError, ValueError):
         return False
-    return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
 def _json_items(text):
-    return json.loads(text) if text and _json_list(text) else []
+    return [item for item in json.loads(text) if isinstance(item, str)] if text and _json_list(text) else []
 
 
 def meta_key_for(kind, title, year):
@@ -358,8 +357,10 @@ class Library(object):
                     not isinstance(row, dict) or set(row) != set(columns)
                     or any(value is not None and type(value) not in (str, int, float)
                            for value in row.values())
-                    or any(row[name] is not None and (type(row[name]) is str) == (name in numeric)
-                           for name in columns) for row in rows):
+                    # čísla série, dílu, roku… se dál formátují jako čísla – text by shodil výpisy i export
+                    or (table == "videos" and any(
+                        row[name] is not None and (type(row[name]) is str) == (name in numeric)
+                        for name in columns)) for row in rows):
                 raise ValueError("Invalid backup rows")
             if table == "meta" and not all(_json_list(row[name]) for row in rows for name in JSON_FIELDS):
                 raise ValueError("Invalid backup rows")
