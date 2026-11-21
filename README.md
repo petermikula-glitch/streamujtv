@@ -2,10 +2,13 @@
 
 Dva doplňky pro Kodi 19+ (Matrix, Nexus, Omega, Piers) se stejným katalogem a obrazovkami:
 
-| Doplněk | Složka | ZIP v `dist/` |
-|---|---|---|
-| **Streamuj.tv – Moje videa** | `plugin.video.streamujtv` | `plugin.video.streamujtv-1.0.2.zip` |
-| **Přehraj.to – Moje videa** | `plugin.video.prehrajto.mojevidea` | `plugin.video.prehrajto.mojevidea-1.0.0.zip` |
+| Doplněk | Složka |
+|---|---|
+| **Streamuj.tv – Moje videa** | `plugin.video.streamujtv` |
+| **Přehraj.to – Moje videa** | `plugin.video.prehrajto.mojevidea` |
+
+Instalují se z Kodi repozitáře, který je přímo v tomto GitHub repozitáři (složka `repo/`) –
+viz [Instalace](#instalace).
 
 Oba po přihlášení načtou **videa nahraná na váš účet** a udělají z nich přehledný katalog filmů
 a seriálů s hodnocením a popisy z **ČSFD** (záložně z TMDB). Vše níže platí pro oba doplňky,
@@ -37,12 +40,22 @@ rozdíly jsou v sekci [Přehraj.to](#přehrajto--rozdíly).
 
 ## Instalace
 
-1. Stáhněte ZIP (nebo ho sestavte příkazem `python3 tools/build_zip.py`, vznikne v `dist/`).
-2. V Kodi: *Nastavení → Systém → Doplňky → povolit Neznámé zdroje*.
-3. *Doplňky → Instalovat ze ZIP souboru* → vyberte ZIP doplňku (viz tabulka nahoře).
-4. Otevřete nastavení doplňku a vyplňte **přihlašovací údaje** (streamuj.tv: jméno a heslo,
+Kodi neumí instalovat přímo z gitu, proto je tu **Kodi repozitář**. Nainstaluje se jednou
+a pak se z něj instalují oba doplňky – včetně automatických aktualizací.
+
+1. V Kodi: *Nastavení → Systém → Doplňky → povolit Neznámé zdroje*.
+2. Stáhněte ZIP repozitáře
+   **[repository.petermikula-1.0.0.zip](https://raw.githubusercontent.com/petermikula-glitch/streamujtv/main/repo/zips/repository.petermikula/repository.petermikula-1.0.0.zip)**
+   a dostaňte ho do zařízení s Kodi (USB disk, síťová složka, stažení prohlížečem na Android TV…).
+3. *Doplňky → Instalovat ze ZIP souboru* → vyberte `repository.petermikula-1.0.0.zip`.
+4. *Doplňky → Instalovat z repozitáře → Repozitář petermikula → Doplňky pro video* →
+   **Streamuj.tv – Moje videa** a/nebo **Přehraj.to – Moje videa** → *Instalovat*.
+5. Otevřete nastavení doplňku a vyplňte **přihlašovací údaje** (streamuj.tv: jméno a heslo,
    Přehraj.to: e-mail a heslo).
-5. Spusťte *Nástroje → Synchronizovat s účtem*.
+6. Spusťte *Nástroje → Synchronizovat s účtem*.
+
+Doplňky jdou nainstalovat i samostatně ze ZIPu v `repo/zips/<doplněk>/`, pak se ale
+neaktualizují samy.
 
 V *Nástroje → Stav účtu* ověříte přihlášení a platnost premia.
 
@@ -102,8 +115,9 @@ python3 -m pytest tests_prehrajto        # testy Přehraj.to (spouštět zvláš
 STREAMUJ_LIVE=1 python3 -m pytest tests -k live            # živý test API streamuj.tv
 PREHRAJTO_LIVE=1 python3 -m pytest tests_prehrajto -k live  # živý test přihlášení Přehraj.to
 python3 tools/sync_shared.py             # po úpravě sdíleného kódu
+# nová verze doplňku: zvyšte version v addon.xml, spusťte build_zip.py a pushněte do main
 python3 tools/strings.py                 # po úpravě textů vygeneruje strings.po (cs/en) pro oba doplňky
-python3 tools/build_zip.py               # instalační ZIPy do dist/
+python3 tools/build_zip.py               # sestaví Kodi repozitář do repo/ (ZIPy + addons.xml)
 ```
 
 Licence: GPL-2.0-or-later.
