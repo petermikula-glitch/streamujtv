@@ -1,5 +1,3 @@
-import pytest
-
 import csfd
 from conftest import fixture
 

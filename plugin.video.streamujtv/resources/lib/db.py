@@ -10,8 +10,8 @@ SCHEMA_VERSION = 1
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
-    id TEXT PRIMARY KEY,           -- ID videa na streamuj.tv
-    raw_title TEXT NOT NULL,       -- název tak, jak je na streamuj.tv
+    id TEXT PRIMARY KEY,           -- ID videa u poskytovatele
+    raw_title TEXT NOT NULL,       -- název tak, jak je u poskytovatele
     source TEXT NOT NULL,          -- account | favorites | playlist | manual
     added_at INTEGER NOT NULL,
     last_seen INTEGER NOT NULL,

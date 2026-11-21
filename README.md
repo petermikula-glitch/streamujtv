@@ -1,8 +1,15 @@
-# Streamuj.tv – Moje videa (doplněk pro Kodi)
+# Moje videa – doplňky pro Kodi (streamuj.tv a Přehraj.to)
 
-Doplněk pro Kodi 19+ (Matrix, Nexus, Omega, Piers), který z vašeho **premium účtu streamuj.tv**
-načte nahraná videa a udělá z nich přehledný katalog filmů a seriálů s hodnocením a popisy
-z **ČSFD** (záložně z TMDB).
+Dva doplňky pro Kodi 19+ (Matrix, Nexus, Omega, Piers) se stejným katalogem a obrazovkami:
+
+| Doplněk | Složka | ZIP v `dist/` |
+|---|---|---|
+| **Streamuj.tv – Moje videa** | `plugin.video.streamujtv` | `plugin.video.streamujtv-1.0.2.zip` |
+| **Přehraj.to – Moje videa** | `plugin.video.prehrajto.mojevidea` | `plugin.video.prehrajto.mojevidea-1.0.0.zip` |
+
+Oba po přihlášení načtou **videa nahraná na váš účet** a udělají z nich přehledný katalog filmů
+a seriálů s hodnocením a popisy z **ČSFD** (záložně z TMDB). Vše níže platí pro oba doplňky,
+rozdíly jsou v sekci [Přehraj.to](#přehrajto--rozdíly).
 
 ## Co umí
 
@@ -32,11 +39,27 @@ z **ČSFD** (záložně z TMDB).
 
 1. Stáhněte ZIP (nebo ho sestavte příkazem `python3 tools/build_zip.py`, vznikne v `dist/`).
 2. V Kodi: *Nastavení → Systém → Doplňky → povolit Neznámé zdroje*.
-3. *Doplňky → Instalovat ze ZIP souboru* → vyberte `plugin.video.streamujtv-1.0.1.zip`.
-4. Otevřete nastavení doplňku a vyplňte **uživatelské jméno a heslo** k streamuj.tv.
-5. Spusťte *Nástroje → Synchronizovat s účtem streamuj.tv*.
+3. *Doplňky → Instalovat ze ZIP souboru* → vyberte ZIP doplňku (viz tabulka nahoře).
+4. Otevřete nastavení doplňku a vyplňte **přihlašovací údaje** (streamuj.tv: jméno a heslo,
+   Přehraj.to: e-mail a heslo).
+5. Spusťte *Nástroje → Synchronizovat s účtem*.
 
 V *Nástroje → Stav účtu* ověříte přihlášení a platnost premia.
+
+## Přehraj.to – rozdíly
+
+- Synchronizace čte stránku **Nahraná videa** (`/profil/nahrana-videa`) vašeho účtu.
+  Další videa můžete přidat odkazem (`https://prehraj.to/<název>/<kód>`) přes *Nástroje → Přidat
+  odkaz* nebo importem textového souboru s odkazy.
+- Přehrávání: s **Premium** se přehrává **originální soubor** (JSON API Přehraj.to, záložně
+  stažení přes web), bez premia nebo při chybě nejlepší **překódovaná verze** (až 1080p).
+  Titulky ze stránky videa se načtou automaticky.
+- Přihlášení se ukládá (cookies v profilu doplňku) – každé nové přihlášení totiž na Přehraj.to
+  zakládá další záznam ve „Správě přihlášených zařízení“.
+- Oblíbená videa a playlisty Přehraj.to nemá, volby v nastavení proto chybí.
+- Ověřeno naostro: přihlašovací formulář a odmítnutí špatného hesla. Stránku nahraných videí
+  a stránku videa s premium jsem bez vašeho účtu neviděl – parser je napsaný podle známého
+  markupu webu a je tolerantní (bere všechny odkazy na videa na stránce).
 
 ## Hodnocení z ČSFD – důležité upozornění
 
@@ -68,11 +91,19 @@ Heslo se do logu Kodi nikdy nezapisuje (ani jeho hash).
 
 ## Vývoj
 
+Kanonická verze sdíleného kódu (katalog, ČSFD/TMDB, obrazovky, služba) je v
+`plugin.video.streamujtv`; do ostatních doplňků ji kopíruje `tools/sync_shared.py`
+(test hlídá, že se kopie nerozešly). Specifický je jen klient služby (`streamuj.py`,
+`prehrajto.py`) a tenká vrstva `provider.py`.
+
 ```bash
-python3 -m pytest tests          # testy (s náhradou Kodi API)
-STREAMUJ_LIVE=1 python3 -m pytest tests -k live   # živý test API streamuj.tv
-python3 tools/strings.py         # po úpravě textů vygeneruje strings.po (cs/en)
-python3 tools/build_zip.py       # instalační ZIP do dist/
+python3 -m pytest tests                  # testy streamuj.tv + sdíleného kódu (náhrada Kodi API)
+python3 -m pytest tests_prehrajto        # testy Přehraj.to (spouštět zvlášť)
+STREAMUJ_LIVE=1 python3 -m pytest tests -k live            # živý test API streamuj.tv
+PREHRAJTO_LIVE=1 python3 -m pytest tests_prehrajto -k live  # živý test přihlášení Přehraj.to
+python3 tools/sync_shared.py             # po úpravě sdíleného kódu
+python3 tools/strings.py                 # po úpravě textů vygeneruje strings.po (cs/en) pro oba doplňky
+python3 tools/build_zip.py               # instalační ZIPy do dist/
 ```
 
 Licence: GPL-2.0-or-later.

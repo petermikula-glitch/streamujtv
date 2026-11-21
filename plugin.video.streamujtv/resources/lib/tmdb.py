@@ -32,7 +32,7 @@ class Tmdb(object):
 
     def _get(self, path, **params):
         params["language"] = self.language
-        headers = {"Accept": "application/json", "User-Agent": "Kodi plugin.video.streamujtv"}
+        headers = {"Accept": "application/json", "User-Agent": "Kodi addon"}
         if len(self.key) > 40:  # v4 token
             headers["Authorization"] = "Bearer " + self.key
         else:

@@ -360,8 +360,8 @@ msgid "ČSFD is currently blocking automated requests (anti-bot protection). The
 msgstr "ČSFD momentálně blokuje automatické dotazy (ochrana proti botům). Doplněk ji neobchází. Pro hodnocení z TMDB vyplň v nastavení TMDB API klíč, případně zadej hodnocení ručně (kontextové menu → Přiřadit ČSFD / TMDB)."
 
 msgctxt "#30217"
-msgid "Paste a streamuj.tv video link or ID (optionally: Title | link)"
-msgstr "Vlož odkaz na video streamuj.tv nebo jeho ID (případně: Název | odkaz)"
+msgid "Paste a streamuj.tv video link (optionally: Title | link)"
+msgstr "Vlož odkaz na video z streamuj.tv (případně: Název | odkaz)"
 
 msgctxt "#30218"
 msgid "Invalid link"
@@ -380,8 +380,8 @@ msgid "No streamuj.tv links found in the file"
 msgstr "V souboru nejsou žádné odkazy na streamuj.tv"
 
 msgctxt "#30222"
-msgid "Fill in your streamuj.tv username and password in the add-on settings first."
-msgstr "Nejdřív vyplň jméno a heslo k streamuj.tv v nastavení doplňku."
+msgid "Fill in your streamuj.tv login and password in the add-on settings first."
+msgstr "Nejdřív vyplň přihlašovací údaje k streamuj.tv v nastavení doplňku."
 
 msgctxt "#30223"
 msgid "Premium is active until %s"

@@ -360,7 +360,7 @@ msgid "ČSFD is currently blocking automated requests (anti-bot protection). The
 msgstr ""
 
 msgctxt "#30217"
-msgid "Paste a streamuj.tv video link or ID (optionally: Title | link)"
+msgid "Paste a streamuj.tv video link (optionally: Title | link)"
 msgstr ""
 
 msgctxt "#30218"
@@ -380,7 +380,7 @@ msgid "No streamuj.tv links found in the file"
 msgstr ""
 
 msgctxt "#30222"
-msgid "Fill in your streamuj.tv username and password in the add-on settings first."
+msgid "Fill in your streamuj.tv login and password in the add-on settings first."
 msgstr ""
 
 msgctxt "#30223"

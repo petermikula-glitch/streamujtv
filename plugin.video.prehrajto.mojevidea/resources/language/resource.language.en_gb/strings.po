@@ -1,0 +1,556 @@
+# Kodi Media Center language file
+# Addon Name: Prehraj.to
+# Addon id: plugin.video.prehrajto.mojevidea
+# Addon Provider: petermikula-glitch
+msgid ""
+msgstr ""
+"Project-Id-Version: plugin.video.prehrajto.mojevidea\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en_GB\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "#30000"
+msgid "Account"
+msgstr ""
+
+msgctxt "#30001"
+msgid "E-mail"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Password"
+msgstr ""
+
+msgctxt "#30003"
+msgid "Server location"
+msgstr ""
+
+msgctxt "#30004"
+msgid "Location 1"
+msgstr ""
+
+msgctxt "#30005"
+msgid "Location 2"
+msgstr ""
+
+msgctxt "#30006"
+msgid "Premium (filled by account check)"
+msgstr ""
+
+msgctxt "#30007"
+msgid "Account and login"
+msgstr ""
+
+msgctxt "#30010"
+msgid "Synchronization"
+msgstr ""
+
+msgctxt "#30011"
+msgid "Also load favourite videos"
+msgstr ""
+
+msgctxt "#30012"
+msgid "Import playlists as collections"
+msgstr ""
+
+msgctxt "#30013"
+msgid "Remove videos deleted from the account"
+msgstr ""
+
+msgctxt "#30014"
+msgid "Automatic synchronization in the background"
+msgstr ""
+
+msgctxt "#30015"
+msgid "Synchronization interval (hours)"
+msgstr ""
+
+msgctxt "#30016"
+msgid "Fetch ratings and plots after synchronization"
+msgstr ""
+
+msgctxt "#30020"
+msgid "Metadata"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Use ČSFD"
+msgstr ""
+
+msgctxt "#30022"
+msgid "TMDB API key (optional fallback source)"
+msgstr ""
+
+msgctxt "#30023"
+msgid "Show rating in titles"
+msgstr ""
+
+msgctxt "#30024"
+msgid "Ratings and descriptions"
+msgstr ""
+
+msgctxt "#30030"
+msgid "Playback"
+msgstr ""
+
+msgctxt "#30031"
+msgid "Preferred language"
+msgstr ""
+
+msgctxt "#30032"
+msgid "Preferred quality"
+msgstr ""
+
+msgctxt "#30033"
+msgid "Always offer stream selection"
+msgstr ""
+
+msgctxt "#30034"
+msgid "Load subtitles"
+msgstr ""
+
+msgctxt "#30035"
+msgid "Best available"
+msgstr ""
+
+msgctxt "#30036"
+msgid "Any"
+msgstr ""
+
+msgctxt "#30037"
+msgid "Czech"
+msgstr ""
+
+msgctxt "#30038"
+msgid "Slovak"
+msgstr ""
+
+msgctxt "#30039"
+msgid "English"
+msgstr ""
+
+msgctxt "#30040"
+msgid "Kodi library"
+msgstr ""
+
+msgctxt "#30041"
+msgid "Export folder"
+msgstr ""
+
+msgctxt "#30042"
+msgid "Stream"
+msgstr ""
+
+msgctxt "#30043"
+msgid "2160p (UHD)"
+msgstr ""
+
+msgctxt "#30044"
+msgid "1080p (Full HD)"
+msgstr ""
+
+msgctxt "#30045"
+msgid "720p (HD)"
+msgstr ""
+
+msgctxt "#30046"
+msgid "480p (SD)"
+msgstr ""
+
+msgctxt "#30100"
+msgid "Movies"
+msgstr ""
+
+msgctxt "#30101"
+msgid "TV shows"
+msgstr ""
+
+msgctxt "#30102"
+msgid "Search"
+msgstr ""
+
+msgctxt "#30103"
+msgid "Collections"
+msgstr ""
+
+msgctxt "#30104"
+msgid "Recently added"
+msgstr ""
+
+msgctxt "#30105"
+msgid "Unrecognized titles"
+msgstr ""
+
+msgctxt "#30106"
+msgid "Tools"
+msgstr ""
+
+msgctxt "#30107"
+msgid "All movies"
+msgstr ""
+
+msgctxt "#30108"
+msgid "Top rated"
+msgstr ""
+
+msgctxt "#30109"
+msgid "By genre"
+msgstr ""
+
+msgctxt "#30110"
+msgid "By decade"
+msgstr ""
+
+msgctxt "#30111"
+msgid "By country"
+msgstr ""
+
+msgctxt "#30112"
+msgid "By rating"
+msgstr ""
+
+msgctxt "#30113"
+msgid "All TV shows"
+msgstr ""
+
+msgctxt "#30114"
+msgid "Season %d"
+msgstr ""
+
+msgctxt "#30115"
+msgid "Other videos"
+msgstr ""
+
+msgctxt "#30117"
+msgid "New search"
+msgstr ""
+
+msgctxt "#30118"
+msgid "Search the catalogue (title, actor, director, genre)"
+msgstr ""
+
+msgctxt "#30121"
+msgid "Nothing found"
+msgstr ""
+
+msgctxt "#30122"
+msgid "Remove from history"
+msgstr ""
+
+msgctxt "#30123"
+msgid "New collection"
+msgstr ""
+
+msgctxt "#30124"
+msgid "Collection name"
+msgstr ""
+
+msgctxt "#30125"
+msgid "Rename collection"
+msgstr ""
+
+msgctxt "#30126"
+msgid "Delete collection"
+msgstr ""
+
+msgctxt "#30127"
+msgid "Delete collection \"%s\"?"
+msgstr ""
+
+msgctxt "#30128"
+msgid "Add to collection"
+msgstr ""
+
+msgctxt "#30129"
+msgid "Remove from collection"
+msgstr ""
+
+msgctxt "#30130"
+msgid "Added to collection %s"
+msgstr ""
+
+msgctxt "#30131"
+msgid "Hidden videos"
+msgstr ""
+
+msgctxt "#30132"
+msgid "The catalogue is empty. Run account synchronization in Tools or import links."
+msgstr ""
+
+msgctxt "#30133"
+msgid "%d videos"
+msgstr ""
+
+msgctxt "#30134"
+msgid "All videos"
+msgstr ""
+
+msgctxt "#30135"
+msgid "%d %% and more"
+msgstr ""
+
+msgctxt "#30200"
+msgid "Synchronize with Přehraj.to account"
+msgstr ""
+
+msgctxt "#30201"
+msgid "Import links from file"
+msgstr ""
+
+msgctxt "#30202"
+msgid "Add link"
+msgstr ""
+
+msgctxt "#30203"
+msgid "Fetch missing ratings and plots"
+msgstr ""
+
+msgctxt "#30204"
+msgid "Refresh all metadata"
+msgstr ""
+
+msgctxt "#30205"
+msgid "Account status"
+msgstr ""
+
+msgctxt "#30206"
+msgid "Export to Kodi library"
+msgstr ""
+
+msgctxt "#30207"
+msgid "Clear catalogue"
+msgstr ""
+
+msgctxt "#30208"
+msgid "Settings"
+msgstr ""
+
+msgctxt "#30209"
+msgid "Catalogue statistics"
+msgstr ""
+
+msgctxt "#30210"
+msgid "Synchronizing…"
+msgstr ""
+
+msgctxt "#30211"
+msgid "Page %d, found %d videos"
+msgstr ""
+
+msgctxt "#30212"
+msgid "Done: %d videos, %d new, %d removed"
+msgstr ""
+
+msgctxt "#30213"
+msgid "Fetching ratings and plots"
+msgstr ""
+
+msgctxt "#30214"
+msgid "%d / %d: %s"
+msgstr ""
+
+msgctxt "#30215"
+msgid "Metadata: %d found (ČSFD %d, TMDB %d), %d not found, %d errors"
+msgstr ""
+
+msgctxt "#30216"
+msgid "ČSFD is currently blocking automated requests (anti-bot protection). The add-on does not circumvent it. Fill in a TMDB API key in settings to get ratings from TMDB, or enter ratings manually (context menu → Assign ČSFD / TMDB)."
+msgstr ""
+
+msgctxt "#30217"
+msgid "Paste a Přehraj.to video link (optionally: Title | link)"
+msgstr ""
+
+msgctxt "#30218"
+msgid "Invalid link"
+msgstr ""
+
+msgctxt "#30219"
+msgid "Imported: %d new, %d already in the catalogue"
+msgstr ""
+
+msgctxt "#30220"
+msgid "Choose a text file with links"
+msgstr ""
+
+msgctxt "#30221"
+msgid "No Přehraj.to links found in the file"
+msgstr ""
+
+msgctxt "#30222"
+msgid "Fill in your Přehraj.to login and password in the add-on settings first."
+msgstr ""
+
+msgctxt "#30223"
+msgid "Premium is active, remaining: %s"
+msgstr ""
+
+msgctxt "#30224"
+msgid "The account has no active premium – only the transcoded versions will play."
+msgstr ""
+
+msgctxt "#30225"
+msgid "Wrong username or password."
+msgstr ""
+
+msgctxt "#30226"
+msgid "Really clear the whole catalogue? Videos on Přehraj.to stay untouched."
+msgstr ""
+
+msgctxt "#30227"
+msgid "Exported %d movies and %d TV shows to %s"
+msgstr ""
+
+msgctxt "#30228"
+msgid "Set the export folder in the add-on settings first."
+msgstr ""
+
+msgctxt "#30229"
+msgid "Download metadata again for all titles? It may take a while."
+msgstr ""
+
+msgctxt "#30230"
+msgid "Videos: %d\nMovies: %d\nTV shows: %d\nWith rating: %d\nUnrecognized: %d"
+msgstr ""
+
+msgctxt "#30231"
+msgid "Last synchronization: %s"
+msgstr ""
+
+msgctxt "#30232"
+msgid "never"
+msgstr ""
+
+msgctxt "#30233"
+msgid "Update the Kodi video library now?"
+msgstr ""
+
+msgctxt "#30300"
+msgid "Assign ČSFD / TMDB…"
+msgstr ""
+
+msgctxt "#30301"
+msgid "Refresh metadata"
+msgstr ""
+
+msgctxt "#30302"
+msgid "Edit title and classification…"
+msgstr ""
+
+msgctxt "#30303"
+msgid "Hide"
+msgstr ""
+
+msgctxt "#30304"
+msgid "Unhide"
+msgstr ""
+
+msgctxt "#30305"
+msgid "Remove from catalogue"
+msgstr ""
+
+msgctxt "#30306"
+msgid "Search ČSFD"
+msgstr ""
+
+msgctxt "#30307"
+msgid "Enter ČSFD link or ID"
+msgstr ""
+
+msgctxt "#30308"
+msgid "Search TMDB"
+msgstr ""
+
+msgctxt "#30309"
+msgid "Enter rating manually"
+msgstr ""
+
+msgctxt "#30310"
+msgid "Search for"
+msgstr ""
+
+msgctxt "#30311"
+msgid "Rating (0–100 %)"
+msgstr ""
+
+msgctxt "#30312"
+msgid "Type"
+msgstr ""
+
+msgctxt "#30313"
+msgid "Movie"
+msgstr ""
+
+msgctxt "#30314"
+msgid "TV show episode"
+msgstr ""
+
+msgctxt "#30315"
+msgid "Title"
+msgstr ""
+
+msgctxt "#30316"
+msgid "Year"
+msgstr ""
+
+msgctxt "#30317"
+msgid "Season"
+msgstr ""
+
+msgctxt "#30318"
+msgid "Episode"
+msgstr ""
+
+msgctxt "#30319"
+msgid "TV show title"
+msgstr ""
+
+msgctxt "#30320"
+msgid "Saved"
+msgstr ""
+
+msgctxt "#30321"
+msgid "Choose stream"
+msgstr ""
+
+msgctxt "#30322"
+msgid "The video has no available streams"
+msgstr ""
+
+msgctxt "#30323"
+msgid "Playback error: %s"
+msgstr ""
+
+msgctxt "#30325"
+msgid "Video details"
+msgstr ""
+
+msgctxt "#30326"
+msgid "Remove \"%s\" from the catalogue? The video on Přehraj.to stays."
+msgstr ""
+
+msgctxt "#30327"
+msgid "TMDB API key is not set in the add-on settings."
+msgstr ""
+
+msgctxt "#30328"
+msgid "Error: %s"
+msgstr ""
+
+msgctxt "#30329"
+msgid "Rating"
+msgstr ""
+
+msgctxt "#30330"
+msgid "File"
+msgstr ""
+
+msgctxt "#30331"
+msgid "Language"
+msgstr ""
+
+msgctxt "#30332"
+msgid "Quality"
+msgstr ""

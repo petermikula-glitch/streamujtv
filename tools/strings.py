@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Jediný zdroj textů doplňku. Spuštěním se vygenerují strings.po pro cs_CZ a en_GB:
+"""Jediný zdroj textů doplňků. Spuštěním se vygenerují strings.po (cs_CZ, en_GB) pro každý doplněk.
+
+``{svc}`` se nahradí názvem služby, ``OVERRIDES`` mění texty jen pro jeden doplněk:
 
     python3 tools/strings.py
 """
@@ -80,7 +82,7 @@ STRINGS = {
     30134: ("All videos", "Všechna videa"),
     30135: ("%d %% and more", "%d %% a více"),
     # --- nástroje ---
-    30200: ("Synchronize with streamuj.tv account", "Synchronizovat s účtem streamuj.tv"),
+    30200: ("Synchronize with {svc} account", "Synchronizovat s účtem {svc}"),
     30201: ("Import links from file", "Importovat odkazy ze souboru"),
     30202: ("Add link", "Přidat odkaz"),
     30203: ("Fetch missing ratings and plots", "Doplnit chybějící hodnocení a popisy"),
@@ -103,19 +105,19 @@ STRINGS = {
             "ČSFD momentálně blokuje automatické dotazy (ochrana proti botům). Doplněk ji neobchází. "
             "Pro hodnocení z TMDB vyplň v nastavení TMDB API klíč, případně zadej hodnocení ručně "
             "(kontextové menu → Přiřadit ČSFD / TMDB)."),
-    30217: ("Paste a streamuj.tv video link or ID (optionally: Title | link)",
-            "Vlož odkaz na video streamuj.tv nebo jeho ID (případně: Název | odkaz)"),
+    30217: ("Paste a {svc} video link (optionally: Title | link)",
+            "Vlož odkaz na video z {svc} (případně: Název | odkaz)"),
     30218: ("Invalid link", "Neplatný odkaz"),
     30219: ("Imported: %d new, %d already in the catalogue", "Importováno: %d nových, %d už v katalogu"),
     30220: ("Choose a text file with links", "Vyber textový soubor s odkazy"),
-    30221: ("No streamuj.tv links found in the file", "V souboru nejsou žádné odkazy na streamuj.tv"),
-    30222: ("Fill in your streamuj.tv username and password in the add-on settings first.",
-            "Nejdřív vyplň jméno a heslo k streamuj.tv v nastavení doplňku."),
+    30221: ("No {svc} links found in the file", "V souboru nejsou žádné odkazy na {svc}"),
+    30222: ("Fill in your {svc} login and password in the add-on settings first.",
+            "Nejdřív vyplň přihlašovací údaje k {svc} v nastavení doplňku."),
     30223: ("Premium is active until %s", "Premium je aktivní do %s"),
     30224: ("The account has no active premium.", "Účet nemá aktivní premium."),
     30225: ("Wrong username or password.", "Špatné jméno nebo heslo."),
-    30226: ("Really clear the whole catalogue? Videos on streamuj.tv stay untouched.",
-            "Opravdu vymazat celý katalog? Videa na streamuj.tv zůstanou beze změny."),
+    30226: ("Really clear the whole catalogue? Videos on {svc} stay untouched.",
+            "Opravdu vymazat celý katalog? Videa na {svc} zůstanou beze změny."),
     30227: ("Exported %d movies and %d TV shows to %s", "Exportováno %d filmů a %d seriálů do %s"),
     30228: ("Set the export folder in the add-on settings first.", "Nejdřív nastav složku pro export v nastavení doplňku."),
     30229: ("Download metadata again for all titles? It may take a while.",
@@ -151,8 +153,8 @@ STRINGS = {
     30322: ("The video has no available streams", "Video nemá žádné dostupné streamy"),
     30323: ("Playback error: %s", "Chyba přehrávání: %s"),
     30325: ("Video details", "Podrobnosti o videu"),
-    30326: ("Remove \"%s\" from the catalogue? The video on streamuj.tv stays.",
-            "Odebrat „%s“ z katalogu? Video na streamuj.tv zůstane."),
+    30326: ("Remove \"%s\" from the catalogue? The video on {svc} stays.",
+            "Odebrat „%s“ z katalogu? Video na {svc} zůstane."),
     30327: ("TMDB API key is not set in the add-on settings.", "V nastavení doplňku není vyplněný TMDB API klíč."),
     30328: ("Error: %s", "Chyba: %s"),
     30329: ("Rating", "Hodnocení"),
@@ -181,23 +183,40 @@ def esc(s):
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
+ADDONS = {
+    "plugin.video.streamujtv": {"svc": "streamuj.tv", "name": "Streamuj.tv", "overrides": {}},
+    "plugin.video.prehrajto.mojevidea": {"svc": "Přehraj.to", "name": "Prehraj.to", "overrides": {
+        30001: ("E-mail", "E-mail"),
+        30006: ("Premium (filled by account check)", "Premium (vyplní ověření účtu)"),
+        30223: ("Premium is active, remaining: %s", "Premium je aktivní, zbývá: %s"),
+        30224: ("The account has no active premium – only the transcoded versions will play.",
+                "Účet nemá aktivní premium – přehrají se jen překódované verze."),
+    }},
+}
+
+
 def main():
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "plugin.video.streamujtv",
-                        "resources", "language")
-    for folder, lang, translate in (("resource.language.en_gb", "en_GB", False),
-                                    ("resource.language.cs_cz", "cs_CZ", True)):
-        out = [HEADER.format(lang=lang)]
-        if not translate:
-            out[0] = out[0].replace("nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;",
-                                    "nplurals=2; plural=(n != 1);")
-        for sid in sorted(STRINGS):
-            en, cs = STRINGS[sid]
-            out.append('msgctxt "#%d"\nmsgid "%s"\nmsgstr "%s"\n\n' % (sid, esc(en), esc(cs) if translate else ""))
-        path = os.path.join(base, folder, "strings.po")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("".join(out).rstrip("\n") + "\n")
-        print("zapsáno", os.path.normpath(path))
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    for addon_id, conf in ADDONS.items():
+        strings = dict(STRINGS)
+        strings.update(conf["overrides"])
+        base = os.path.join(root, addon_id, "resources", "language")
+        for folder, lang, translate in (("resource.language.en_gb", "en_GB", False),
+                                        ("resource.language.cs_cz", "cs_CZ", True)):
+            header = HEADER.format(lang=lang).replace("Streamuj.tv", conf["name"]).replace(
+                "plugin.video.streamujtv", addon_id)
+            if not translate:
+                header = header.replace("nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;",
+                                        "nplurals=2; plural=(n != 1);")
+            out = [header]
+            for sid in sorted(strings):
+                en, cs = (t.replace("{svc}", conf["svc"]) for t in strings[sid])
+                out.append('msgctxt "#%d"\nmsgid "%s"\nmsgstr "%s"\n\n' % (sid, esc(en), esc(cs) if translate else ""))
+            path = os.path.join(base, folder, "strings.po")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("".join(out).rstrip("\n") + "\n")
+            print("zapsáno", os.path.normpath(path))
 
 
 if __name__ == "__main__":

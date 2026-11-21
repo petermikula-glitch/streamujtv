@@ -5,7 +5,7 @@ import time
 
 import csfd
 import nameparser
-import streamuj
+import provider
 from tmdb import TmdbError
 
 
@@ -15,7 +15,7 @@ def _parsed(title):
 
 def sync_account(client, lib, include_favorites=False, include_playlists=False, remove_missing=True,
                  progress=None, log=None):
-    """Načte videa z účtu streamuj.tv do katalogu.
+    """Načte videa z účtu do katalogu.
 
     ``progress(stage, pages, count)`` může vrátit True = zrušit.
     """
@@ -41,7 +41,7 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
     if include_favorites and not stats["cancelled"]:
         try:
             favs = client.my_favorites(progress=prog("my_favorites"))
-        except streamuj.StreamujError as e:
+        except provider.ProviderError as e:
             log("oblíbené nelze načíst: %s" % e)
             favs = []
         for v in favs:
@@ -54,7 +54,7 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
     if include_playlists and not stats["cancelled"]:
         try:
             playlists = client.my_playlists()
-        except streamuj.StreamujError as e:
+        except provider.ProviderError as e:
             log("playlisty nelze načíst: %s" % e)
             playlists = []
         for name, url in playlists:
@@ -62,7 +62,7 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
                 break
             try:
                 items = client.fetch_listing(url, progress=prog("playlist"))
-            except streamuj.StreamujError as e:
+            except provider.ProviderError as e:
                 log("playlist %s nelze načíst: %s" % (name, e))
                 continue
             cid = lib.create_collection(name, source="playlist")
@@ -86,12 +86,11 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
 def parse_link_lines(text):
     """Řádky se seznamem odkazů → [(id, název nebo '')].
 
-    Podporované tvary řádku::
+    Podporované tvary řádku (odkaz pozná ``provider.find_video_id``)::
 
-        https://www.streamuj.tv/video/0645c382f89879db00bc
-        0645c382f89879db00bc
-        Matrix (1999) CZ | https://www.streamuj.tv/video/...
-        https://www.streamuj.tv/video/... ; Matrix (1999)
+        <odkaz>
+        Matrix (1999) CZ | <odkaz>
+        <odkaz> ; Matrix (1999)
     """
     out = []
     seen = set()
@@ -99,12 +98,7 @@ def parse_link_lines(text):
         line = line.strip().lstrip("﻿")
         if not line or line.startswith("#"):
             continue
-        vid = streamuj.extract_video_id(line)
-        if not vid:
-            for token in line.replace("|", " ").replace(";", " ").replace("\t", " ").split():
-                if streamuj.BARE_ID_RE.match(token):
-                    vid = token.lower()
-                    break
+        vid = provider.find_video_id(line)
         if not vid or vid in seen:
             continue
         seen.add(vid)
@@ -112,11 +106,11 @@ def parse_link_lines(text):
         for sep in ("|", ";", "\t"):
             if sep in title:
                 parts = [p.strip() for p in title.split(sep)]
-                parts = [p for p in parts if p and streamuj.extract_video_id(p) != vid]
+                parts = [p for p in parts if p and provider.find_video_id(p) != vid]
                 title = parts[0] if parts else ""
                 break
         else:
-            title = "" if streamuj.extract_video_id(title) == vid else title
+            title = "" if provider.find_video_id(title) == vid else title
         out.append((vid, title.strip()))
     return out
 
@@ -130,13 +124,13 @@ def import_links(client, lib, links, progress=None, log=None):
             stats["cancelled"] = True
             break
         description = ""
-        thumb = streamuj.thumb_url(vid)
+        thumb = provider.thumb_url(vid)
         if not title:
             try:
                 info = client.video_info(vid)
                 title = info.get("title") or vid
                 description = info.get("description", "")
-            except streamuj.StreamujError as e:
+            except provider.ProviderError as e:
                 log("název videa %s nelze zjistit: %s" % (vid, e))
                 stats["failed"] += 1
                 title = vid

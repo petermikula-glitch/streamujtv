@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Sestaví instalační ZIP pro Kodi do složky dist/:
+"""Sestaví instalační ZIPy pro Kodi (všechny doplňky) do složky dist/:
 
     python3 tools/build_zip.py
 """
@@ -8,15 +8,21 @@ import re
 import zipfile
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-ADDON_DIR = os.path.join(ROOT, "plugin.video.streamujtv")
+ADDONS = ["plugin.video.streamujtv", "plugin.video.prehrajto.mojevidea"]
 
 
 def main():
+    for addon_id in ADDONS:
+        build(addon_id)
+
+
+def build(addon_id):
+    ADDON_DIR = os.path.join(ROOT, addon_id)
     with open(os.path.join(ADDON_DIR, "addon.xml"), encoding="utf-8") as f:
         version = re.search(r'<addon[^>]*\bversion="([^"]+)"', f.read()).group(1)
     dist = os.path.join(ROOT, "dist")
     os.makedirs(dist, exist_ok=True)
-    target = os.path.join(dist, "plugin.video.streamujtv-%s.zip" % version)
+    target = os.path.join(dist, "%s-%s.zip" % (addon_id, version))
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
         for folder, dirs, files in os.walk(ADDON_DIR):
             dirs[:] = [d for d in dirs if d not in ("__pycache__",)]

@@ -12,14 +12,14 @@ import xbmcvfs
 import catalog
 import csfd
 import exporter
-import streamuj
+import provider
 from db import Library
-from kodiutils import (_, ADDON, FANART, ICON, KODI_MAJOR, Progress, keyboard, log,
+from kodiutils import (_, ADDON, ADDON_ID, FANART, ICON, KODI_MAJOR, Progress, keyboard, log,
                        log_error, log_info, notify, number, ok, profile_path, select, set_setting,
                        setting, setting_bool, setting_int, text_viewer, yesno)
 from tmdb import Tmdb, TmdbError
 
-BASE_URL = sys.argv[0] if len(sys.argv) > 0 else "plugin://plugin.video.streamujtv/"
+BASE_URL = sys.argv[0] if len(sys.argv) > 0 else "plugin://%s/" % ADDON_ID
 HANDLE = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].lstrip("-").isdigit() else -1
 
 LANG_OPTIONS = ["CZ", "SK", "EN", ""]
@@ -37,9 +37,9 @@ def open_library():
 
 
 def make_client():
-    return streamuj.StreamujClient(setting("username"), setting("password"),
-                                   location=setting("location") or "1",
-                                   cookie_file=profile_path("cookies.lwp"), log=log)
+    return provider.make_client(setting("username"), setting("password"),
+                                location=setting("location") or "1",
+                                cookie_file=profile_path("cookies.lwp"), log=log)
 
 
 def make_tmdb():
@@ -665,9 +665,9 @@ def sync(params):
         return
     try:
         run_sync()
-    except streamuj.LoginError as e:
+    except provider.LoginError as e:
         ok(str(e))
-    except streamuj.StreamujError as e:
+    except provider.ProviderError as e:
         log_error("sync: %s" % e)
         ok(_(30328) % e)
     xbmc.executebuiltin("Container.Refresh")
@@ -771,13 +771,13 @@ def account_status(params):
         return
     try:
         result, expiration = make_client().check_user()
-    except streamuj.StreamujError as e:
+    except provider.ProviderError as e:
         ok(_(30328) % e)
         return
-    if result == streamuj.CHECK_PREMIUM:
-        set_setting("premium_until", expiration or "?")
-        ok(_(30223) % (expiration or "?"))
-    elif result == streamuj.CHECK_NO_PREMIUM:
+    if result == provider.CHECK_PREMIUM:
+        set_setting("premium_until", provider.premium_text(expiration))
+        ok(_(30223) % provider.premium_text(expiration))
+    elif result == provider.CHECK_NO_PREMIUM:
         set_setting("premium_until", "-")
         ok(_(30224))
     else:
@@ -953,7 +953,7 @@ def video_info(params):
     if not v:
         return
     lines = ["%s: %s" % (_(30330), v["raw_title"]),
-             "ID: %s" % v["id"], streamuj.video_page_url(v["id"]),
+             "ID: %s" % v["id"], provider.video_page_url(v["id"]),
              "%s: %s" % (_(30331), v["lang"] or "?"), "%s: %s" % (_(30332), v["quality"] or "?")]
     if meta:
         lines.append("")
@@ -971,14 +971,14 @@ def _pick_stream(streams):
     if len(streams) == 1:
         return streams[0]
     if setting_bool("ask_stream"):
-        labels = ["%s %s%s" % (s["lang"], streamuj.QUALITY_LABEL.get(s["quality"], s["quality"]),
-                               (" + tit. " + ", ".join(s["subtitles"])) if s["subtitles"] else "")
+        labels = [" ".join(x for x in (s["lang"], provider.QUALITY_LABEL.get(s["quality"], s["quality"])) if x)
+                  + ((" + tit. " + ", ".join(s["subtitles"])) if s["subtitles"] else "")
                   for s in streams]
         idx = select(_(30321), labels)
         return streams[idx] if idx >= 0 else None
     pref_lang = LANG_OPTIONS[setting_int("pref_lang", 0)] if setting_int("pref_lang", 0) < len(LANG_OPTIONS) else ""
     pref_q = QUALITY_OPTIONS[setting_int("pref_quality", 0)] if setting_int("pref_quality", 0) < len(QUALITY_OPTIONS) else ""
-    order = streamuj.QUALITY_ORDER
+    order = provider.QUALITY_ORDER
 
     def score(s):
         lang_score = 0 if (not pref_lang or s["lang"] == pref_lang) else 1
@@ -999,7 +999,7 @@ def play(params):
     try:
         streams, message = client.get_streams(vid)
         if not streams:
-            raise streamuj.StreamujError(message or _(30322))
+            raise provider.ProviderError(message or _(30322))
         if message:
             notify(message)
         stream = _pick_stream(streams)
@@ -1007,12 +1007,12 @@ def play(params):
             xbmcplugin.setResolvedUrl(HANDLE, False, xbmcgui.ListItem())
             return
         final = client.resolve(stream["url"])
-    except streamuj.StreamujError as e:
+    except provider.ProviderError as e:
         log_error("play %s: %s" % (vid, e))
         notify(_(30323) % e, time_ms=8000)
         xbmcplugin.setResolvedUrl(HANDLE, False, xbmcgui.ListItem())
         return
-    li = xbmcgui.ListItem(path=final + "|User-Agent=" + urllib.parse.quote(streamuj.USER_AGENT))
+    li = xbmcgui.ListItem(path=final + "|User-Agent=" + urllib.parse.quote(provider.USER_AGENT))
     if final.split("?")[0].lower().endswith(".mp4"):
         li.setMimeType("video/mp4")
         li.setContentLookup(False)
