@@ -51,10 +51,15 @@ Kodi neumí instalovat přímo z gitu, proto je tu **Kodi repozitář**. Nainsta
 a pak se z něj instalují oba doplňky – včetně automatických aktualizací.
 
 1. V Kodi: *Nastavení → Systém → Doplňky → povolit Neznámé zdroje*.
-2. Stáhněte ZIP repozitáře
-   **[repository.petermikula-1.0.0.zip](https://raw.githubusercontent.com/petermikula-glitch/streamujtv/main/repo/zips/repository.petermikula/repository.petermikula-1.0.0.zip)**
-   a dostaňte ho do zařízení s Kodi (USB disk, síťová složka, stažení prohlížečem na Android TV…).
-3. *Doplňky → Instalovat ze ZIP souboru* → vyberte `repository.petermikula-1.0.0.zip`.
+2. Přidejte zdroj: *Nastavení → Správce souborů → Přidat zdroj → <Žádný>* a zadejte adresu
+   **`https://petermikula-glitch.github.io/streamujtv/`**, pojmenujte ho třeba `petermikula`.
+   (Adresa funguje, až je v GitHubu zapnuté GitHub Pages: *Settings → Pages → Deploy from a branch →
+   `main` / `/docs`*.)
+3. *Doplňky → Instalovat ze ZIP souboru → petermikula* → `repository.petermikula-1.0.0.zip`.
+
+   Bez GitHub Pages: stáhněte
+   [repository.petermikula-1.0.0.zip](https://raw.githubusercontent.com/petermikula-glitch/streamujtv/main/repo/zips/repository.petermikula/repository.petermikula-1.0.0.zip)
+   jinde (počítač, telefon), nahrajte na USB disk / do sdílené složky a v kroku 3 vyberte ten disk.
 4. *Doplňky → Instalovat z repozitáře → Repozitář petermikula → Doplňky pro video* →
    **Streamuj.tv – Moje videa** a/nebo **Přehraj.to – Moje videa** → *Instalovat*.
 5. Otevřete nastavení doplňku a vyplňte **přihlašovací údaje** (streamuj.tv: jméno a heslo,

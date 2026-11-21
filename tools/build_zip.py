@@ -60,6 +60,32 @@ def main():
     with open(os.path.join(REPO, "addons.xml.md5"), "w", encoding="ascii", newline="\n") as f:
         f.write(hashlib.md5(addons_xml.encode("utf-8")).hexdigest())
     print("repo/addons.xml")
+    publish_docs()
+
+
+def publish_docs():
+    """docs/ = GitHub Pages: jednoduchý výpis souborů, který Kodi umí procházet
+    jako zdroj ve Správci souborů (raw.githubusercontent.com výpis složek nemá)."""
+    docs = os.path.join(ROOT, "docs")
+    os.makedirs(docs, exist_ok=True)
+    for name in os.listdir(docs):
+        if name.endswith(".zip"):
+            os.remove(os.path.join(docs, name))  # jen staré ZIPy v docs/
+    links = []
+    for addon_id in ADDONS:
+        version = re.search(r'<addon[^>]*\bversion="([^"]+)"', read_addon_xml(addon_id)).group(1)
+        name = "%s-%s.zip" % (addon_id, version)
+        shutil.copyfile(os.path.join(ZIPS, addon_id, name), os.path.join(docs, name))
+        links.append(name)
+    rows = "\n".join('<a href="%s">%s</a><br>' % (n, n) for n in links)
+    page = ("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>Repozitář petermikula</title></head>\n"
+            "<body>\n<h1>Repozitář petermikula pro Kodi</h1>\n"
+            "<p>V Kodi nainstalujte <b>repository.petermikula</b> (Doplňky → Instalovat ze ZIP souboru) "
+            "a doplňky pak instalujte z repozitáře.</p>\n" + rows + "\n</body></html>\n")
+    with open(os.path.join(docs, "index.html"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(page)
+    open(os.path.join(docs, ".nojekyll"), "a").close()
+    print("docs/index.html")
 
 
 if __name__ == "__main__":
