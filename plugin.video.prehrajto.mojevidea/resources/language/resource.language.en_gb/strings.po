@@ -1314,3 +1314,127 @@ msgstr ""
 msgctxt "#30527"
 msgid "Country filters use movie metadata. Fetch the missing details to see more countries."
 msgstr ""
+
+msgctxt "#30531"
+msgid "Include online results automatically"
+msgstr ""
+
+msgctxt "#30532"
+msgid "Did you mean %s?"
+msgstr ""
+
+msgctxt "#30535"
+msgid "Found on Přehraj.to"
+msgstr ""
+
+msgctxt "#30536"
+msgid "Only titles found on Přehraj.to"
+msgstr ""
+
+msgctxt "#30537"
+msgid "Show all titles"
+msgstr ""
+
+msgctxt "#30538"
+msgid "Check more titles on this page"
+msgstr ""
+
+msgctxt "#30539"
+msgid "No matches confirmed on this page yet"
+msgstr ""
+
+msgctxt "#30540"
+msgid "Try without the quality limit"
+msgstr ""
+
+msgctxt "#30541"
+msgid "Include videos with unspecified audio language"
+msgstr ""
+
+msgctxt "#30542"
+msgid "Retry online search"
+msgstr ""
+
+msgctxt "#30543"
+msgid "Year not verified"
+msgstr ""
+
+msgctxt "#30545"
+msgid "Action"
+msgstr ""
+
+msgctxt "#30546"
+msgid "Adventure"
+msgstr ""
+
+msgctxt "#30547"
+msgid "Animation"
+msgstr ""
+
+msgctxt "#30548"
+msgid "Comedy"
+msgstr ""
+
+msgctxt "#30549"
+msgid "Crime"
+msgstr ""
+
+msgctxt "#30550"
+msgid "Documentary"
+msgstr ""
+
+msgctxt "#30551"
+msgid "Drama"
+msgstr ""
+
+msgctxt "#30552"
+msgid "Horror"
+msgstr ""
+
+msgctxt "#30553"
+msgid "Romance"
+msgstr ""
+
+msgctxt "#30554"
+msgid "Science fiction"
+msgstr ""
+
+msgctxt "#30555"
+msgid "Thriller"
+msgstr ""
+
+msgctxt "#30556"
+msgid "Family"
+msgstr ""
+
+msgctxt "#30557"
+msgid "War"
+msgstr ""
+
+msgctxt "#30558"
+msgid "Fantasy"
+msgstr ""
+
+msgctxt "#30559"
+msgid "History"
+msgstr ""
+
+msgctxt "#30560"
+msgid "Mystery"
+msgstr ""
+
+msgctxt "#30561"
+msgid "Music"
+msgstr ""
+
+msgctxt "#30562"
+msgid "Western"
+msgstr ""
+
+msgctxt "#30563"
+msgid "TV Movie"
+msgstr ""
+
+msgctxt "#30564"
+msgid "Remove the quality limit and include unspecified audio"
+msgstr ""

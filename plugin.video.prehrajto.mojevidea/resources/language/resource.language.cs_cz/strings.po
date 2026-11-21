@@ -1314,3 +1314,127 @@ msgstr "Podle země v TMDB"
 msgctxt "#30527"
 msgid "Country filters use movie metadata. Fetch the missing details to see more countries."
 msgstr "Seznam zemí vychází z metadat filmů. Zobrazí se po doplnění chybějících údajů."
+
+msgctxt "#30531"
+msgid "Include online results automatically"
+msgstr "Zahrnout online výsledky automaticky"
+
+msgctxt "#30532"
+msgid "Did you mean %s?"
+msgstr "Mysleli jste %s?"
+
+msgctxt "#30535"
+msgid "Found on Přehraj.to"
+msgstr "Nalezeno na Přehraj.to"
+
+msgctxt "#30536"
+msgid "Only titles found on Přehraj.to"
+msgstr "Jen nalezené na Přehraj.to"
+
+msgctxt "#30537"
+msgid "Show all titles"
+msgstr "Zobrazit všechny tituly"
+
+msgctxt "#30538"
+msgid "Check more titles on this page"
+msgstr "Ověřit další tituly na této stránce"
+
+msgctxt "#30539"
+msgid "No matches confirmed on this page yet"
+msgstr "Na této stránce zatím žádná potvrzená shoda"
+
+msgctxt "#30540"
+msgid "Try without the quality limit"
+msgstr "Zkusit bez omezení kvality"
+
+msgctxt "#30541"
+msgid "Include videos with unspecified audio language"
+msgstr "Zobrazit i videa s neznámým jazykem"
+
+msgctxt "#30542"
+msgid "Retry online search"
+msgstr "Zopakovat online hledání"
+
+msgctxt "#30543"
+msgid "Year not verified"
+msgstr "Rok neověřen"
+
+msgctxt "#30545"
+msgid "Action"
+msgstr "Akční"
+
+msgctxt "#30546"
+msgid "Adventure"
+msgstr "Dobrodružný"
+
+msgctxt "#30547"
+msgid "Animation"
+msgstr "Animovaný"
+
+msgctxt "#30548"
+msgid "Comedy"
+msgstr "Komedie"
+
+msgctxt "#30549"
+msgid "Crime"
+msgstr "Krimi"
+
+msgctxt "#30550"
+msgid "Documentary"
+msgstr "Dokumentární"
+
+msgctxt "#30551"
+msgid "Drama"
+msgstr "Drama"
+
+msgctxt "#30552"
+msgid "Horror"
+msgstr "Horor"
+
+msgctxt "#30553"
+msgid "Romance"
+msgstr "Romantický"
+
+msgctxt "#30554"
+msgid "Science fiction"
+msgstr "Sci-fi"
+
+msgctxt "#30555"
+msgid "Thriller"
+msgstr "Thriller"
+
+msgctxt "#30556"
+msgid "Family"
+msgstr "Rodinný"
+
+msgctxt "#30557"
+msgid "War"
+msgstr "Válečný"
+
+msgctxt "#30558"
+msgid "Fantasy"
+msgstr "Fantasy"
+
+msgctxt "#30559"
+msgid "History"
+msgstr "Historický"
+
+msgctxt "#30560"
+msgid "Mystery"
+msgstr "Mysteriózní"
+
+msgctxt "#30561"
+msgid "Music"
+msgstr "Hudební"
+
+msgctxt "#30562"
+msgid "Western"
+msgstr "Western"
+
+msgctxt "#30563"
+msgid "TV Movie"
+msgstr "Televizní film"
+
+msgctxt "#30564"
+msgid "Remove the quality limit and include unspecified audio"
+msgstr "Zkusit bez omezení kvality a zahrnout neznámý jazyk"

@@ -63,6 +63,13 @@ SEARCH_COUNTRIES = {
     "IT": {"italie", "italy", "italske"},
     "JP": {"japonsko", "japan", "japonske"},
 }
+COUNTRY_QUERY_ALIASES = {
+    alias: code for code, names in SEARCH_COUNTRIES.items()
+    for alias in names | FILM_ORIGINS.get(code, (0, set()))[1]
+    if len(alias) > 2
+}
+AVAILABILITY_BATCH = 4
+ACTOR_PAGE_SIZE = 20
 
 
 def url_for(action, **params):
@@ -176,6 +183,13 @@ def make_client():
 
 def make_tmdb():
     return Tmdb(setting("tmdb_key"), log=log)
+
+
+def _search_client():
+    client = make_client()
+    client.request_timeout = 5
+    client.request_retries = 0
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -523,10 +537,12 @@ def tmdb_categories(params):
 
 
 def _tmdb_selection(params):
-    return {"kind": params.get("kind", "movie"),
-            "category": "recent" if params.get("category") == "recent" else "discover",
-            "genre": params.get("genre", ""), "year": params.get("year", ""),
-            "origin": params.get("origin", "")}
+    selection = {"kind": params.get("kind", "movie"),
+                 "category": "recent" if params.get("category") == "recent" else "discover",
+                 "genre": params.get("genre", ""), "year": params.get("year", ""),
+                 "origin": params.get("origin", "")}
+    selection.update({flag: "1" for flag in ("catalogue", "found_only", "local_only") if params.get(flag) == "1"})
+    return selection
 
 
 def tmdb_facets(params):
@@ -535,21 +551,27 @@ def tmdb_facets(params):
         if field != "origin" or selection["kind"] == "movie":
             add_dir(_(label), "tmdb_filters", filter_by=field, **selection)
     if any(selection[field] for field in ("genre", "year", "origin")):
-        add_dir(_(30496), "tmdb_titles", kind=selection["kind"], category=selection["category"])
+        add_dir(_(30496), "tmdb_titles", **dict(selection, genre="", year="", origin=""))
     end(cache=False)
 
 
 def _tmdb_filter_options(client, kind, field):
     if field == "genre":
+        if not client.enabled:
+            return sorted(((code, _(genre[0])) for code, genre in search_results.GENRES.items()),
+                          key=lambda entry: normalize(entry[1]))
         return [(genre["id"], genre["name"]) for genre in client.genres(kind)]
     if field == "origin":
         names = {country["iso_3166_1"]: country.get("native_name") or country["english_name"]
-                 for country in client.countries()}
+                 for country in client.countries()} if client.enabled else {
+                     code: code for code in SEARCH_COUNTRIES if len(code) == 2}
         options = [(origin, _(FILM_ORIGINS[origin][0])) for origin in ("CZSK", "CZ", "SK")]
         options.extend(sorted(((code, name) for code, name in names.items() if code not in ("CZ", "SK")),
                               key=lambda entry: normalize(entry[1])))
         return options
-    return [(year, str(year)) for year in range(date.today().year, 1873, -1)]
+    current_year = date.today().year
+    decades = [("%ds" % year, "%d–%d" % (year, year + 9)) for year in range(current_year // 10 * 10, 1879, -10)]
+    return decades + [(year, str(year)) for year in range(current_year, 1873, -1)]
 
 
 def tmdb_filters(params):
@@ -620,13 +642,101 @@ def _tmdb_page_batch(load, page=1):
     return list(items.values()), page, False
 
 
-def tmdb_titles(params):
+def _discovery_summary(selection):
+    labels = []
+    origin = selection["origin"]
+    if origin:
+        labels.append(_(FILM_ORIGINS[origin][0]) if origin in FILM_ORIGINS else origin)
+    genre = search_results.GENRES.get(selection["genre"])
+    if genre:
+        labels.append(_(genre[0]))
+    start, end_year = search_results.period(selection["year"])
+    if start:
+        labels.append(str(start) if start == end_year else "%d–%d" % (start, end_year))
+    return " · ".join([_(30495), *labels])
+
+
+def _availability_cache(lib, key, now):
+    saved = _json_object(lib.get_kv(key))
+    return {name: entry for name, entry in saved.items() if isinstance(entry, list) and len(entry) == 2
+            and isinstance(entry[0], (int, float)) and isinstance(entry[1], bool)
+            and 0 <= now - entry[0] < (1200 if entry[1] else 300)}
+
+
+def _check_title_availability(titles, default_kind):
+    key = "search:availability:" + _account_scope()
+    with open_library() as lib:
+        cached = _availability_cache(lib, key, time.time())
+    candidates = {}
+    for item in titles:
+        kind = item.get("media_type") or default_kind
+        card = search_results.remote_card(item, kind, None)
+        if not card or not card["year"]:
+            continue
+        cache_id = "%s:%s" % (kind, item["id"])
+        candidates[cache_id] = card
+    todo = [(cache_id, card) for cache_id, card in candidates.items() if cache_id not in cached]
+    checked = {}
+    failed = False
+    if todo:
+        client = _search_client()
+        for cache_id, card in islice(todo, AVAILABILITY_BATCH):
+            item = card["tmdb"]
+            original = item.get("original_title") or item.get("original_name") or ""
+            expected_kind = "movie" if card["kind"] == "movie" else "episode"
+            found = False
+            try:
+                for title in dict.fromkeys((card["title"], original)):
+                    if not title:
+                        continue
+                    videos, _cursor = provider.search_catalog(client, title, 1, "")
+                    found = any(search_results.filename_matches(parse(video["title"]), card["names"], card["year"],
+                                                                 kind=expected_kind, require_year=True)
+                                and not search_results.is_preview(video["title"], (card["title"], original))
+                                for video in videos)
+                    if found:
+                        break
+            except (provider.ProviderError, provider.RateLimited):
+                failed = True
+                break
+            checked[cache_id] = [time.time(), found]
+    if checked:
+        with open_library() as lib, lib.conn:
+            lib.conn.execute("BEGIN IMMEDIATE")
+            saved = _availability_cache(lib, key, time.time())
+            saved.update(checked)
+            newest = sorted(saved, key=lambda name: saved[name][0], reverse=True)[:250]
+            lib.set_kv(key, json.dumps({name: saved[name] for name in newest}))
+        cached.update(checked)
+    found_ids = {cache_id for cache_id in candidates if cached.get(cache_id, (0, False))[1]}
+    return found_ids, len(todo) > len(checked), failed
+
+
+def _availability_controls(action, params, titles, default_kind):
+    found, pending, failed = _check_title_availability(titles, default_kind)
+    found_only = params.get("found_only") == "1"
+    flip = dict(params, found_only="" if found_only else "1")
+    add_dir(_(30537 if found_only else 30536), action, "DefaultGenre.png", **flip)
+    if pending:
+        add_dir(_(30542 if failed else 30538), action, "DefaultAddonsSearch.png", **params)
+    if failed:
+        notify(_(30469) % "Přehraj.to")
+    elif found_only and not found:
+        notify(_(30539))
+    return found
+
+
+def tmdb_titles(params, *, cache=False):
     selection = _tmdb_selection(params)
     kind = selection["kind"]
     category = params.get("category", "popular")
     origin = selection["origin"]
     allowed = ("popular", "top_rated", "discover", "upcoming", "recent") if kind == "movie" else (
         "popular", "top_rated", "discover", "on_the_air")
+    catalogue = selection.get("catalogue") == "1"
+    local_only = catalogue and selection.get("local_only") == "1"
+    found_only = selection.get("found_only") == "1"
+    titles, next_page, partial = [], None, False
     try:
         page = int(params.get("page", 1))
         if kind not in ("movie", "tv") or category not in allowed or not 1 <= page <= 500:
@@ -638,11 +748,9 @@ def tmdb_titles(params):
         if origin:
             filters["origin"] = origin.upper()
         client = make_tmdb()
-        if not client.enabled:
+        if not client.enabled and not local_only:
             notify(_(30355))
             add_action(_(30356), "settings")
-            end(cache=False)
-            return
 
         def load(current):
             if origin != "CZSK":
@@ -655,30 +763,59 @@ def tmdb_titles(params):
                             reverse=True)
             return titles, max(cz_pages, sk_pages)
 
-        titles, next_page, partial = _tmdb_page_batch(load, page)
+        if client.enabled and not local_only:
+            titles, next_page, partial = _tmdb_page_batch(load, page)
+        elif not catalogue:
+            end(cache=False)
+            return
     except (ValueError, TmdbError) as e:
         notify(str(e), time_ms=8000)
-        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
-        return
+        if not catalogue or isinstance(e, ValueError):
+            xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+            return
 
     refine = None
     if category in ("discover", "recent"):
-        add_action(_(30495), "tmdb_refine", "DefaultGenre.png", **selection)
+        add_action(_discovery_summary(selection), "tmdb_refine", "DefaultGenre.png", **selection)
         refine = _run_action(30495, "tmdb_refine", **selection)
+    if local_only:
+        add_dir(_(30464), "tmdb_titles", "DefaultAddonsSearch.png", **dict(selection, local_only=""))
+    found = set()
+    if titles and kind == "movie" and (origin or catalogue or found_only):
+        found = _availability_controls("tmdb_titles", dict(selection, category=category, page=page), titles, kind)
     with open_library() as lib:
         library_items = lib.movies() if kind == "movie" else lib.shows()
+        shown = set()
         for item in titles:
-            add_tmdb_title(item, kind, lib, library_items, refine=refine)
+            verified = "%s:%s" % (kind, item["id"]) in found
+            if not found_only or verified:
+                key = add_tmdb_title(item, kind, lib, library_items, refine=refine, provider_found=verified)
+                if key:
+                    shown.add(key)
+        if catalogue and page == 1 and not found_only:
+            start, end_year = search_results.period(selection["year"])
+            genre = search_results.GENRES.get(selection["genre"])
+            countries = {alias for alias, code in COUNTRY_QUERY_ALIASES.items() if code == origin}
+            countries |= FILM_ORIGINS.get(origin, (0, set()))[1] | {origin.lower()}
+            for movie in library_items:
+                if movie["key"] in shown or (start and not start <= _display_year(movie) <= end_year):
+                    continue
+                if origin and not any(normalize(name) in countries for name in movie["countries"]):
+                    continue
+                if genre and not any(normalize(name) in genre[1] | {normalize(_(genre[0]))} for name in movie["genres"]):
+                    continue
+                add_movie(movie, lib)
+                shown.add(movie["key"])
     if partial:
         notify(_(30497))
     if next_page:
         add_dir(_(30341), "tmdb_titles", page=next_page, **dict(selection, category=category))
-    if not titles:
+    if not titles and not shown and client.enabled:
         notify(_(30121))
-    end("movies" if kind == "movie" else "tvshows", cache=False)
+    end("movies" if kind == "movie" else "tvshows", cache=cache)
 
 
-def add_tmdb_title(item, kind, lib, library_items, status=None, refine=None):
+def add_tmdb_title(item, kind, lib, library_items, status=None, refine=None, provider_found=False):
     title = item.get("title") or item.get("name")
     if not title or not item.get("id"):
         return
@@ -697,6 +834,8 @@ def add_tmdb_title(item, kind, lib, library_items, status=None, refine=None):
         label += " · " + _(30363)
     elif match and kind == "tv":
         label += " · " + _(30364)
+    if provider_found:
+        label += " · " + _(30535)
     li = xbmcgui.ListItem(label)
     _set_info(li, {"title": title, "originaltitle": original, "year": released_year,
                    "plot": item.get("overview") or "", "rating": item.get("vote_average") or 0,
@@ -734,19 +873,24 @@ def add_tmdb_title(item, kind, lib, library_items, status=None, refine=None):
         context.insert(0, (_(30364), "Container.Update(%s)" % target))
     li.addContextMenuItems(context)
     xbmcplugin.addDirectoryItem(HANDLE, target, li, folder)
+    return match["key"] if match else None
 
 
 def _online_filters(params):
     return {"audio": params.get("audio") if params.get("audio") in ("CZ", "SK") else "",
             "quality": "FHD" if params.get("quality") == "FHD" else "",
-            "hide_previews": "1" if params.get("hide_previews") == "1" else ""}
+            "hide_previews": "1" if params.get("hide_previews") == "1" else "",
+            "unknown_audio": "1" if params.get("unknown_audio") == "1" else ""}
 
 
 def _provider_matches_filter(video, parsed, filters, titles=()):
     version = _provider_version(video, parsed)
     audio = filters["audio"]
-    if audio and not ({audio, audio + " dabing"} & {part.strip() for part in version["lang"].split(",")}):
-        return False
+    if audio:
+        spoken = {part.strip() for part in version["lang"].split(",")
+                  if part.strip() and not part.strip().endswith(" titulky")}
+        if not ({audio, audio + " dabing"} & spoken) and (spoken or not filters["unknown_audio"]):
+            return False
     if filters["quality"] and provider.quality_token(version["quality"]) not in ("FHD", "UHD"):
         return False
     return not filters["hide_previews"] or not search_results.is_preview(video["title"], titles)
@@ -757,9 +901,11 @@ def _filter_online_videos(videos, filters, titles=()):
 
 
 def _add_online_filters(action, params):
-    args = {key: params.get(key) for key in ("q", "title", "original", "year", "tmdb_id", "online")}
+    args = {key: params.get(key) for key in ("q", "title", "original", "year", "tmdb_id", "online", "series")}
     filters = _online_filters(params)
     active = [_(30508 if filters["audio"] == "CZ" else 30509)] if filters["audio"] else []
+    if active and filters["unknown_audio"]:
+        active.append(_(30512))
     if filters["quality"]:
         active.append(_(30510))
     if filters["hide_previews"]:
@@ -774,59 +920,101 @@ def online_filters(params):
         end(cache=False)
         return
     options = ({}, {"audio": "CZ"}, {"audio": "SK"}, {"quality": "FHD"},
-               {"hide_previews": "1"})
-    choice = select(_(30507), [_(label) for label in (30496, 30508, 30509, 30510, 30511)])
+               {"hide_previews": "1"}, {"unknown_audio": "1"})
+    choice = select(_(30507), [_(label) for label in (30496, 30508, 30509, 30510, 30511, 30541)])
     xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
     if choice < 0:
         return
     filters = _online_filters(params) if choice else {}
     for field, value in options[choice].items():
         filters[field] = "" if filters.get(field) == value else value
-    args = {key: params.get(key) for key in ("q", "title", "original", "year", "tmdb_id", "online")}
+    args = {key: params.get(key) for key in ("q", "title", "original", "year", "tmdb_id", "online", "series")}
     xbmc.executebuiltin("Container.Update(%s,replace)" % url_for(target, **args, **filters))
 
 
-def _suitable_provider_video(videos, title, original, year, position, filters):
-    names = search_results.aliases(title, original)
+def _suitable_provider_video(videos, titles, year, position, filters, *, require_year=False):
+    names = search_results.filename_names(titles)
     for video in videos:
         parsed = parse(video["title"])
-        if normalize(parsed["title"]) not in names or (year and parsed["year"] not in (0, year)):
+        if not search_results.filename_matches(parsed, names, year, position, require_year=require_year):
             continue
-        if position and (parsed["season"], parsed["episode"]) != position:
-            continue
-        if not search_results.is_preview(video["title"], (title, original)) and _provider_matches_filter(
-                video, parsed, filters, (title, original)):
+        if not search_results.is_preview(video["title"], titles) and _provider_matches_filter(video, parsed, filters, titles):
             return True
     return False
 
 
-def _extend_with_original(client, videos, title, original, year, position, filters):
-    if not original or normalize(title) == normalize(original) or _suitable_provider_video(
-            videos, title, original, year, position, filters):
-        return videos
-    query = "%s S%02dE%02d" % (original, *position) if position else original
-    alternatives, _next_cursor = provider.search_catalog(client, query, 1, "")
+def _expand_provider_search(client, videos, query, title, year, position, filters, tmdb, item=None):
+    titles = [title]
+    if item:
+        original = item.get("original_title") or item.get("original_name") or ""
+        if original and normalize(original) != normalize(title):
+            titles.append(original)
+    if _suitable_provider_video(videos, titles, year, position, filters, require_year=True):
+        return videos, False, False
+
     merged = {provider.video_key(video["id"]): video for video in videos}
-    for video in alternatives:
-        if _suitable_provider_video([video], title, original, year, position, filters):
-            merged.setdefault(provider.video_key(video["id"]), video)
-    return list(merged.values())
+    tried = {normalize(query)}
+    tmdb_error = False
+    deferred = list(titles[1:]) + [title]
+    for _ in range(4):
+        if not deferred and item and not item.get("_skip_aliases"):
+            try:
+                alternatives = tmdb.alternative_titles(item)
+            except TmdbError:
+                tmdb_error = True
+                break
+            deferred = [name for name in alternatives if normalize(name) not in search_results.aliases(*titles)][:2]
+            titles.extend(deferred)
+            item["_search_aliases"] = deferred.copy()
+            item = None
+        if not deferred:
+            break
+        alternate = search_results.format_query(deferred.pop(0), position=position)
+        key = normalize(alternate)
+        if key in tried:
+            continue
+        tried.add(key)
+        try:
+            entries, _cursor = provider.search_catalog(client, alternate, 1, "")
+        except (provider.ProviderError, provider.RateLimited):
+            return list(merged.values()), True, tmdb_error
+        names = search_results.filename_names(titles)
+        for video in entries:
+            if search_results.filename_matches(parse(video["title"]), names, year, position):
+                merged.setdefault(provider.video_key(video["id"]), video)
+        if _suitable_provider_video(merged.values(), titles, year, position, filters, require_year=True):
+            break
+    return list(merged.values()), False, tmdb_error
 
 
-def _movie_result_key(video, parsed, title, original, year):
+def _add_relaxed_searches(action, params, videos, filters, titles=()):
+    args = {key: value for key, value in params.items() if key != "retry"}
+    if action == "search":
+        args["reuse"] = 1
+    suggested = False
+    for field, value, label in (("quality", "", 30540), ("unknown_audio", "1", 30541)):
+        change = filters["quality"] if field == "quality" else filters["audio"] and not filters["unknown_audio"]
+        relaxed = dict(filters, **{field: value})
+        if change and _filter_online_videos(videos, relaxed, titles):
+            add_dir(_(label), action, "DefaultAddonsSearch.png", **dict(args, **relaxed))
+            suggested = True
+    if not suggested and filters["quality"] and filters["audio"] and not filters["unknown_audio"]:
+        relaxed = dict(filters, quality="", unknown_audio="1")
+        if _filter_online_videos(videos, relaxed, titles):
+            add_dir(_(30564), action, "DefaultAddonsSearch.png", **dict(args, **relaxed))
+
+
+def _movie_result_key(video, parsed, title, original, year, alternatives=()):
     # Handles punctuation and bilingual names in either order. Use the raw
     # filename to detect trailers even when parse() strips everything after the year.
-    localized, original = normalize(title), normalize(original)
-    aliases = {name.strip() for name in (localized, original, localized + " " + original,
-                                         original + " " + localized) if name.strip()}
-    name = normalize(parsed["title"])
-    extras = {"trailer", "teaser", "ukazka", "upoutavka"}
-    raw_words = set(normalize(video["title"]).split())
-    title_words = set(localized.split()) | set(original.split())
-    preview = bool(extras & (raw_words - title_words))
-    exact = name in aliases and parsed["kind"] == "movie"
-    year_matches = not year or parsed["year"] in (0, year)
-    rank = 0 if exact and year_matches else 1
+    titles = (title, original, *alternatives)
+    preview = search_results.is_preview(video["title"], titles)
+    exact = search_results.filename_matches(parsed, search_results.filename_names(titles), kind="movie")
+    rank = 2
+    if exact and (not year or parsed["year"] == year):
+        rank = 0
+    elif exact and not parsed["year"]:
+        rank = 1
     version = _provider_version(video, parsed)
     return (preview, rank, _version_score(version))
 
@@ -861,24 +1049,29 @@ def tmdb_movie_versions(params):
             local_ids.add(provider.video_key(video["id"]))
     videos, cursor, partial = [], None, False
     try:
-        client = make_client()
+        client = _search_client()
         videos, next_page, cursor, partial = _provider_page_batch(client, query, page, params.get("cursor", ""))
+        tmdb = make_tmdb()
+        item = {"media_type": "movie", "id": tmdb_id, "original_title": original}
         if page == 1 and not partial and normalize(query) == normalize(title):
-            try:
-                videos = _extend_with_original(client, videos, title, original, year, None, filters)
-            except (provider.ProviderError, provider.RateLimited):
-                partial = True
-        videos = _filter_online_videos(videos, filters, (title, original))
+            # U uložených odkazů s ručně zadaným původním názvem nemusí být TMDB k dispozici.
+            if not tmdb_id or not tmdb.enabled:
+                item["_skip_aliases"] = True
+            videos, partial, _metadata_error = _expand_provider_search(
+                client, videos, query, title, year, None, filters, tmdb, item)
+        names = (title, original, *item.get("_search_aliases", ()))
+        filtered = _filter_online_videos(videos, filters, names)
     except provider.LoginError:
         notify(_(30368), time_ms=8000)
         add_action(_(30356), "settings")
     except (ValueError, provider.ProviderError, provider.RateLimited) as e:
         notify(_(30369) % e, time_ms=8000)
+        add_dir(_(30542), "tmdb_movie_versions", q=query, page=page, cursor=params.get("cursor"), **args)
     else:
         versions = []
-        for result in videos:
+        for result in filtered:
             parsed = parse(result["title"])
-            versions.append((_movie_result_key(result, parsed, title, original, year),
+            versions.append((_movie_result_key(result, parsed, title, original, year, names[2:]),
                              _provider_version(result, parsed)))
         for sort_key, video in sorted(versions, key=lambda item: item[0]):
             preview, rank = sort_key[:2]
@@ -890,10 +1083,14 @@ def tmdb_movie_versions(params):
             # A descriptive second line plus the original filename help distinguish versions
             # that happen to have the same language, resolution and file size.
             add_provider_result(video, label or video["title"])
-        if not videos and not local_ids and not cursor:
+        if not filtered:
+            _add_relaxed_searches("tmdb_movie_versions", dict(args, q=query, page=page, cursor=params.get("cursor")),
+                                  videos, filters, names)
+        if not filtered and not local_ids and not cursor:
             notify(_(30370))
     if partial:
         notify(_(30497) if cursor else _(30469) % "Přehraj.to")
+        add_dir(_(30542), "tmdb_movie_versions", q=query, page=page, cursor=params.get("cursor"), **args)
     if cursor:
         add_dir(_(30341), "tmdb_movie_versions", q=query, page=next_page, cursor=cursor, **args)
     if page == 1 and original and normalize(original) != normalize(query):
@@ -961,12 +1158,14 @@ def tmdb_title(params):
     title = detail["title"] or detail["orig_title"]
     if title:
         if want_series:
-            add_option(_(30340), "provider_search", q=title)
+            add_option(_(30486), "provider_search", q=title, series=1, tmdb_id=tmdb_id, title=title,
+                       original=detail["orig_title"], year=detail["year"])
         else:
             add_option(_(30340), "tmdb_movie_versions", title=title, original=detail["orig_title"],
                        year=detail["year"], tmdb_id=tmdb_id)
     if detail["orig_title"] and detail["orig_title"] != title:
-        add_option(_(30359), "provider_search", q=detail["orig_title"])
+        args = {"series": 1, "title": title, "original": detail["orig_title"], "year": detail["year"]} if want_series else {}
+        add_option(_(30359), "provider_search", q=detail["orig_title"], **args)
     add_action(_(30376 if saved else 30375), "watchlist_change", kind=kind, tmdb_id=tmdb_id,
                remove=int(saved), title=title, year=detail["year"], poster=detail["poster"])
     end("tvshows" if want_series else "movies", cache=False)
@@ -1928,7 +2127,7 @@ def search_menu(params):
     end(cache=False)
 
 
-def _search_cards(query, include_online, filters=None):
+def _search_cards(query, include_online, filters=None, *, retry=False, reuse=False):
     filters = filters or _online_filters({})
     title, year, position = search_results.split_query(query)
     with open_library() as lib:
@@ -1944,43 +2143,55 @@ def _search_cards(query, include_online, filters=None):
             kind = "movie" if meta["kind"] == "movie" else "tv"
             videos = grouped.get(meta["key"], [])
             if position:
-                videos = [v for v in videos if v["episode"] == position[1]]
+                videos = [v for v in videos if v["episode"] == position[1] and (not year or v["year"] in (0, year))]
             candidates.append(search_results.new_card(
                 kind, _display_title(meta), _display_year(meta), position,
                 (meta.get("orig_title"), meta.get("search_title")), meta, videos))
-    online = _online_search(query, title, year, position, filters) if include_online else {}
+    online = _online_search(query, title, year, position, filters, retry=retry, reuse=reuse) if include_online else {}
     videos = _filter_online_videos(online.get("provider", []), filters, (title,))
+    if position:
+        series = search_results.matching_title(online.get("tmdb", []), title, year, episodic=True) or {}
+        names = search_results.filename_names((title, series.get("original_name"), *series.get("_search_aliases", ())))
+        videos = [video for video in videos if search_results.filename_matches(parse(video["title"]), names, year,
+                                                                               position, kind="episode")]
     cards = search_results.combine(candidates, online.get("tmdb", []), videos,
                                    position, provider.video_key)
     cards.sort(key=lambda card: (
-        not bool(card["local"]),
         bool(position and not card["videos"] and not card["provider"]),
-        bool(year and card["year"] != year),
         search_results.compare_title(title, card["names"]),
+        0 if not year or card["year"] == year else (2 if card["year"] else 1),
+        not bool(card["local"]),
+        not bool(card["provider"]),
         normalize(card["title"])))
-    return cards, online.get("errors", [])
+    return cards, online
 
 
-def _online_search(query, title, year, position, filters):
+def _online_search(query, title, year, position, filters, *, retry=False, reuse=False):
     cache_key = "search:online"
     with open_library() as lib:
         cached = lib.get_kv(cache_key)
     now = time.time()
     account = _account_scope()
-    if cached:
+    if cached and not retry:
         try:
             payload = json.loads(cached)
             ttl = 20 if payload.get("errors") else 600
+            same_filters = payload.get("filters") == filters
             if (payload.get("account") == account and payload["query"] == query
-                    and payload.get("filters") == filters and now - payload["created"] < ttl):
+                    and (same_filters or (reuse and not payload.get("errors"))) and 0 <= now - payload["created"] < ttl):
+                if not same_filters:
+                    payload["filters"] = filters
+                    with open_library() as lib:
+                        lib.set_kv(cache_key, json.dumps(payload))
                 return payload
-        except (TypeError, KeyError, ValueError):
+        except (TypeError, KeyError, ValueError, AttributeError):
             pass
 
-    client = make_client()
+    client = _search_client()
     tmdb = make_tmdb()
+    tmdb.timeout = 8
     payload = {"created": now, "query": query, "filters": filters, "account": account, "errors": []}
-    provider_query = "%s S%02dE%02d" % (title, *position) if position else query
+    provider_query = search_results.format_query(title, year, position) if position else query
     with ThreadPoolExecutor(max_workers=2) as pool:
         provider_task = pool.submit(_provider_page_batch, client, provider_query)
         tmdb_task = pool.submit(_tmdb_page_batch, lambda page: tmdb.search_titles(title, page)) if tmdb.enabled else None
@@ -1989,6 +2200,9 @@ def _online_search(query, title, year, position, filters):
             payload["provider"] = videos
             if partial:
                 payload["errors"].append("Přehraj.to")
+        except provider.LoginError:
+            payload["provider_login_failed"] = True
+            payload["errors"].append("Přehraj.to")
         except (provider.ProviderError, provider.RateLimited):
             payload["errors"].append("Přehraj.to")
         if tmdb_task:
@@ -2000,13 +2214,13 @@ def _online_search(query, title, year, position, filters):
             except TmdbError:
                 payload["errors"].append("TMDB")
     if "provider" in payload and "Přehraj.to" not in payload["errors"]:
-        original = search_results.original_title(payload.get("tmdb", []), title, year, bool(position))
-        if original:
-            try:
-                payload["provider"] = _extend_with_original(
-                    client, payload["provider"], title, original, year, position, filters)
-            except (provider.ProviderError, provider.RateLimited):
-                payload["errors"].append("Přehraj.to")
+        match = search_results.matching_title(payload.get("tmdb", []), title, year, bool(position))
+        payload["provider"], partial, alias_error = _expand_provider_search(
+            client, payload["provider"], provider_query, title, year, position, filters, tmdb, match)
+        if partial:
+            payload["errors"].append("Přehraj.to")
+        if alias_error and "TMDB" not in payload["errors"]:
+            payload["errors"].append("TMDB")
     with open_library() as lib:
         lib.set_kv(cache_key, json.dumps(payload))
     return payload
@@ -2021,8 +2235,11 @@ def _main_search_action(card):
     if card["kind"] == "tv" and not card["position"]:
         if card["local"]:
             return 30364, "show", {"key": card["local"]["key"]}, None
-        if card["provider"]:
-            return 30486, "provider_search", {"q": card["title"]}, None
+        if card["provider"] or card["tmdb"]:
+            tmdb = card["tmdb"] or {}
+            return 30486, "provider_search", {"q": card["title"], "series": 1, "title": card["title"],
+                                               "original": tmdb.get("original_name"), "year": card["year"],
+                                               "tmdb_id": tmdb.get("id")}, None
     if card["provider"]:
         videos = [_provider_version(video, parse(video["title"])) for video in card["provider"]]
         preferred = min(videos, key=lambda v: (v["id"] not in resume, _version_score(v)))
@@ -2058,12 +2275,14 @@ def _search_entry(card, label, action, args, video, context=(), direct_resume=Fa
     xbmcplugin.addDirectoryItem(HANDLE, url_for(action, **args), li, action != "play")
 
 
-def _search_label(card):
+def _search_label(card, requested_year=0):
     title = card["title"]
     if card["position"]:
         title += " S%02dE%02d" % card["position"]
     if card["year"]:
         title += " (%d)" % card["year"]
+    elif requested_year:
+        title += " · " + _(30543)
     return title
 
 
@@ -2124,19 +2343,42 @@ def person_titles(params):
         end(cache=False)
         return
     try:
-        credits = client.acting_credits(int(params["person_id"]))
+        person_id = int(params.get("person_id", 0))
+        page = max(1, int(params.get("page", 1)))
+        credits = client.acting_credits(person_id)
     except (TmdbError, ValueError) as error:
         notify(str(error))
         end(cache=False)
         return
+    start = (page - 1) * ACTOR_PAGE_SIZE
+    titles = credits[start:start + ACTOR_PAGE_SIZE]
+    found_only = params.get("found_only") == "1"
+    args = {"person_id": person_id, "page": page, "found_only": "1" if found_only else ""}
+    found = _availability_controls("person_titles", args, titles, "movie") if titles else set()
     with open_library() as lib:
         lists = {"movie": lib.movies(), "tv": lib.shows()}
-        for item in credits:
+        for item in titles:
             kind = item["media_type"]
-            add_tmdb_title(item, kind, lib, lists[kind])
-    if not credits:
+            verified = "%s:%s" % (kind, item["id"]) in found
+            if not found_only or verified:
+                add_tmdb_title(item, kind, lib, lists[kind], provider_found=verified)
+    if start + ACTOR_PAGE_SIZE < len(credits):
+        add_dir(_(30341), "person_titles", **dict(args, page=page + 1))
+    if not titles:
         notify(_(30121))
     end("videos", cache=False)
+
+
+def _add_spelling_suggestions(title, year, position, cards, params):
+    if len(normalize(title)) < 4:
+        return
+    names = [entry["title"] for entry in cards if (not year or entry["year"] in (year, 0))]
+    with open_library() as lib:
+        items = lib.shows() if position else lib.movies(year_from=year, year_to=year) + lib.shows()
+    names.extend(name for entry in items for name in (_display_title(entry), entry.get("orig_title")) if name)
+    for suggestion in search_results.spelling_suggestions(title, names):
+        corrected = search_results.format_query(suggestion, year, position)
+        add_dir(_(30532) % corrected, "search", "DefaultAddonsSearch.png", **dict(params, q=corrected))
 
 
 def search(params):
@@ -2147,30 +2389,55 @@ def search(params):
         if not query:
             xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
             return
-    include_online = params.get("online") == "1"
+    include_online = params.get("online", "0" if setting("search_online") == "false" else "1") == "1"
+    discovery = search_results.discover_query(query, COUNTRY_QUERY_ALIASES)
     with open_library() as lib:
         lib.add_search(query)
-        origin, countries = _country_query(query, lib)
-        if countries:
-            if origin:
-                add_dir(_(30525), "tmdb_titles", "DefaultCountry.png",
-                        kind="movie", category="discover", origin=origin)
-            found = False
+        origin, countries = ("", set()) if discovery else _country_query(query, lib)
+    if discovery or origin:
+        tmdb_titles(dict(discovery or {"origin": origin}, kind="movie", category="discover", catalogue="1",
+                         local_only="" if include_online else "1"),
+                    cache=from_keyboard)
+        return
+    if countries:
+        with open_library() as lib:
             for movie in lib.movies():
                 if any(normalize(country) in countries for country in movie["countries"]):
                     add_movie(movie, lib)
-                    found = True
-            if not found:
-                notify(_(30498))
-            end("movies", MOVIE_SORTS, cache=from_keyboard)
-            return
+        end("movies", MOVIE_SORTS, cache=from_keyboard)
+        return
     filters = _online_filters(params)
-    cards, errors = _search_cards(query, include_online, filters)
+    cards, online = _search_cards(query, include_online, filters, retry=params.get("retry") == "1",
+                                  reuse=params.get("reuse") == "1")
+    errors = online.get("errors", []).copy()
+    search_args = dict(filters, q=query, online=int(include_online))
+    title, year, position = search_results.split_query(query)
     if include_online:
-        _add_online_filters("search", params)
+        _add_online_filters("search", search_args)
+        unfiltered = online.get("provider", [])
+        if not _filter_online_videos(unfiltered, filters, (title,)):
+            _add_relaxed_searches("search", search_args, unfiltered, filters, (title,))
+
+    exact_title = any(search_results.compare_title(title, card["names"]) == 0
+                      and (not year or card["year"] == year)
+                      and (not position or card["videos"] or card["provider"]) for card in cards)
+    people = []
+    if not exact_title:
+        client = make_tmdb()
+        if not year and not position and client.enabled:
+            client.timeout = 5
+            try:
+                people, _pages = client.search_people(title)
+            except TmdbError:
+                if "TMDB" not in errors:
+                    errors.append("TMDB")
+        _add_people(people)
+        _add_spelling_suggestions(title, year, position, cards, search_args)
     for card in cards:
-        name = _search_label(card)
-        label, action, args, video = _main_search_action(card)
+        name = _search_label(card, year)
+        label, action, entry_args, video = _main_search_action(card)
+        if action == "provider_search":
+            entry_args.update(filters)
         if action == "play":
             name += " · " + _(label)
         if include_online:
@@ -2179,38 +2446,35 @@ def search(params):
                         if present]
             if sources:
                 name += " · " + ", ".join(sources)
-        detail = url_for("search_title", q=query, online=int(include_online),
-                         card=search_results.card_id(card), **filters)
+        versions = {provider.video_key(video["id"]) for video in card["videos"] + card["provider"]}
+        detail_args = dict(search_args, card=search_results.card_id(card))
+        detail = url_for("search_title", **detail_args)
         context = [(_(30468), "Container.Update(%s)" % detail)]
         if card["local"]:
             context.extend(_meta_context(card["local"]))
-        _search_entry(card, name, action, args, video, context)
-    people = []
-    if not cards:
-        title, year, position = search_results.split_query(query)
-        client = make_tmdb()
-        if not year and not position and client.enabled:
-            try:
-                people, _pages = client.search_people(title)
-            except TmdbError:
-                errors.append("TMDB")
-        if people:
-            _add_people(people)
-        else:
-            notify(_(30121 if include_online else 30389))
+        if include_online and len(versions) > 1 and (card["kind"] == "movie" or position):
+            name = _search_label(card, year) + " · " + _(30133) % len(versions) + " · " + ", ".join(sources)
+            action, entry_args, video = "search_title", detail_args, None
+        _search_entry(card, name, action, entry_args, video, context)
+    if not cards and not people:
+        notify(_(30121 if include_online else 30389))
     add_dir(_(30523), "search_people", "DefaultActor.png", q=query)
     if errors:
         notify(_(30469) % ", ".join(errors))
+        if include_online:
+            if online.get("provider_login_failed"):
+                add_action(_(30356), "settings")
+            add_dir(_(30542), "search", "DefaultAddonsSearch.png", retry=1, **search_args)
     if not include_online:
-        add_dir(_(30464), "search", "DefaultAddonsSearch.png", q=query, online=1)
+        add_dir(_(30464), "search", "DefaultAddonsSearch.png", **dict(search_args, online=1))
     else:
         add_dir(_(30340), "provider_search", "DefaultAddonsSearch.png", q=query, **filters)
-        add_dir(_(30372), "tmdb_search", "DefaultAddonsSearch.png", q=search_results.split_query(query)[0])
+        add_dir(_(30372), "tmdb_search", "DefaultAddonsSearch.png", q=title)
     end("videos", cache=from_keyboard)
 
 
 def search_title(params):
-    cards, _errors = _search_cards(params["q"], params.get("online") == "1", _online_filters(params))
+    cards, _online = _search_cards(params["q"], params.get("online") == "1", _online_filters(params))
     card = next((entry for entry in cards if search_results.card_id(entry) == params["card"]), None)
     if not card:
         end("videos", cache=False)
@@ -2223,7 +2487,7 @@ def search_title(params):
         if identity not in used:
             used.add(identity)
             _search_entry(card, _version_label(entry) or entry["raw_title"], "play", {"vid": entry["id"]}, entry)
-    for entry in card["provider"]:
+    for entry in sorted(card["provider"], key=lambda video: _version_score(_provider_version(video, parse(video["title"])))):
         identity = provider.video_key(entry["id"])
         if identity not in used:
             used.add(identity)
@@ -2272,15 +2536,24 @@ def provider_search(params):
             xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
             return
         params = dict(params, q=query)
-    with open_library() as lib:
-        _origin, countries = _country_query(query, lib)
-    if countries:
-        search({"q": query})
-        return
+    series = params.get("series") == "1"
+    if not series:
+        with open_library() as lib:
+            _origin, countries = _country_query(query, lib)
+        if countries or search_results.discover_query(query, COUNTRY_QUERY_ALIASES):
+            search({"q": query, "online": "1"})
+            return
     filters = _online_filters(params)
+    title, year, position = search_results.split_query(query)
+    original = params.get("original", "") if series else ""
+    route_args = dict(params, q=query)
+    if series:
+        title = params.get("title") or title
+        start, end_year = search_results.period(str(params.get("year", "")))
+        year = start if start and start == end_year else year
     try:
         page = int(params.get("page", 1))
-        client = make_client()
+        client = _search_client()
         videos, next_page, cursor, partial = _provider_page_batch(client, query, page, params.get("cursor", ""))
     except provider.LoginError:
         notify(_(30368), time_ms=8000)
@@ -2289,33 +2562,51 @@ def provider_search(params):
         return
     except (ValueError, provider.ProviderError, provider.RateLimited) as e:
         notify(_(30369) % e, time_ms=8000)
-        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+        add_dir(_(30542), "provider_search", "DefaultAddonsSearch.png", **params)
+        end(cache=False)
         return
-    title, year, position = search_results.split_query(query)
-    if page == 1 and not partial and not _suitable_provider_video(videos, title, "", year, position, filters):
+    match = None
+    if page == 1 and not partial and not _suitable_provider_video(videos, (title, original), year, position, filters,
+                                                                  require_year=not series):
         tmdb = make_tmdb()
-        if tmdb.enabled:
+        tmdb_id = str(params.get("tmdb_id", ""))
+        if series and (original or tmdb_id.isdigit()):
+            match = {"media_type": "tv", "id": int(tmdb_id) if tmdb_id.isdigit() else 0, "original_name": original,
+                     "_skip_aliases": not tmdb.enabled or not tmdb_id.isdigit()}
+        elif tmdb.enabled:
             try:
                 candidates, _pages = tmdb.search_titles(title, 1)
-                original = search_results.original_title(candidates, title, year, bool(position))
-                videos = _extend_with_original(client, videos, title, original, year, position, filters)
-            except (TmdbError, provider.ProviderError, provider.RateLimited):
+                match = search_results.matching_title(candidates, title, year, series or bool(position))
+            except TmdbError:
                 pass
-    videos = _filter_online_videos(videos, filters, (title,))
+        videos, partial, _tmdb_error = _expand_provider_search(
+            client, videos, query, title, year, position, filters, tmdb, match)
+    titles = (title, original, *((match or {}).get("_search_aliases", ())))
+    names = search_results.filename_names(titles)
+    parsed = [(video, parse(video["title"])) for video in videos]
+    if series or position:
+        parsed = [(video, parts) for video, parts in parsed if (parts["episode"] or series)
+                  and search_results.filename_matches(parts, names, year, position, kind="episode")]
+    matches = [(video, parts) for video, parts in parsed if _provider_matches_filter(video, parts, filters, titles)]
+    if series or position:
+        matches.sort(key=lambda pair: (pair[1]["season"], pair[1]["episode"],
+                                       _version_score(_provider_version(*pair))))
+    else:
+        matches.sort(key=lambda pair: _movie_result_key(*pair, title, original, year, titles[2:]))
     if not params.get("group"):
-        _add_online_filters("provider_search", params)
+        _add_online_filters("provider_search", route_args)
     groups = {}
-    for video in videos:
-        parsed = parse(video["title"])
-        title = normalize(parsed["title"])
-        if title and parsed["year"] and (parsed["kind"] == "movie" or parsed["episode"]):
-            key = (parsed["kind"], title, parsed["year"], parsed["season"], parsed["episode"])
+    for video, parts in matches:
+        name = normalize(parts["title"])
+        if name and ((parts["kind"] == "movie" and parts["year"])
+                     or (parts["episode"] and (parts["year"] or series or position))):
+            key = (parts["kind"], name, parts["year"], parts["season"], parts["episode"])
         else:
             key = (video["id"],)
-        groups.setdefault(key, []).append((video, parsed))
+        groups.setdefault(key, []).append((video, parts))
     selected = params.get("group")
     for group in groups.values():
-        first, parsed = group[0]
+        first, parts = group[0]
         if selected:
             if any(video["id"] == selected for video, _ in group):
                 for video, parts in sorted(group, key=lambda pair: _version_score(_provider_version(*pair))):
@@ -2323,24 +2614,33 @@ def provider_search(params):
                 end("videos", cache=False)
                 return
         elif len(group) == 1:
-            add_provider_result(first)
+            label = None
+            if (series or position) and parts["episode"]:
+                label = _episode_label(parts, {}) + " · " + (_version_label(_provider_version(first, parts)) or first["title"])
+                if year and not parts["year"]:
+                    label += " · " + _(30543)
+            add_provider_result(first, label)
         else:
-            if parsed["kind"] == "episode":
-                label = "%s %dx%02d (%d)" % (parsed["title"], parsed["season"], parsed["episode"], parsed["year"])
-            else:
-                label = "%s (%d)" % (parsed["title"], parsed["year"])
+            label = parts["title"]
+            if parts["kind"] == "episode":
+                label += " · " + _episode_label(parts, {})
+            if parts["year"]:
+                label += " (%d)" % parts["year"]
             add_dir("%s · %s" % (label, _(30133) % len(group)), "provider_search", first["thumb"],
-                    q=query, page=page, cursor=params.get("cursor"), group=first["id"], **filters)
+                    **dict(route_args, page=page, group=first["id"]))
     if selected:
         notify(_(30370))
         end("videos", cache=False)
         return
     if partial:
         notify(_(30497))
+        add_dir(_(30542), "provider_search", "DefaultAddonsSearch.png", **params)
     if cursor:
-        add_dir(_(30341), "provider_search", q=query, page=next_page, cursor=cursor, **filters)
-    if not videos and not cursor:
+        add_dir(_(30341), "provider_search", **dict(route_args, page=next_page, cursor=cursor))
+    if not matches and not cursor:
         notify(_(30370))
+    if not matches:
+        _add_relaxed_searches("provider_search", route_args, [video for video, _parts in parsed], filters, titles)
     end("videos", cache=from_keyboard)
 
 
@@ -3192,7 +3492,7 @@ def _version_score(video):
     return (bool(pref_lang and languages.isdisjoint(preferred_audio)), q)
 
 
-def _parse_link_cache(raw):
+def _json_object(raw):
     try:
         data = json.loads(raw) if raw else None
     except ValueError:
@@ -3202,7 +3502,7 @@ def _parse_link_cache(raw):
 
 def _link_cache_get(vid):
     with open_library() as lib:
-        data = _parse_link_cache(lib.get_kv("link:" + vid))
+        data = _json_object(lib.get_kv("link:" + vid))
     if (isinstance(data.get("url"), str) and isinstance(data.get("ts"), (int, float))
             and data.get("account") == _account_scope()
             and 0 <= time.time() - data["ts"] < provider.LINK_TTL
@@ -3276,7 +3576,7 @@ def retry_failed_playback(pending):
         with open_library() as lib:
             key = "link:" + vid
             raw = lib.get_kv(key)
-            cached = _parse_link_cache(raw)
+            cached = _json_object(raw)
             if cached.get("cache_id", cached.get("ts")) == cache_id:
                 lib.delete_kv(key, expected=raw)
     if pending["cached"]:
@@ -3470,13 +3770,13 @@ def run(argv=None):
     HANDLE = int(argv[1]) if len(argv) > 1 and argv[1].lstrip("-").isdigit() else -1
     query = argv[2][1:] if len(argv) > 2 and argv[2].startswith("?") else (argv[2] if len(argv) > 2 else "")
     params = dict(urllib.parse.parse_qsl(query))
-    action = params.get("action", "root")
+    action = params.pop("action", "root")
     if action == "play" and params.get("retry") != "1" and len(argv) > 3:
         if argv[3] == "resume:false":
             params["restart"] = "1"
         elif argv[3] == "resume:true" and params.get("offer_transfer") == "1":
             params["resume_requested"] = "1"
-    log("route %s %s" % (action, dict((k, v) for k, v in params.items() if k != "action")))
+    log("route %s %s" % (action, params))
     handler = ROUTES.get(action)
     if handler is None:
         log_error("neznámá akce %s" % action)

@@ -562,6 +562,13 @@ def test_home_search_and_tmdb_catalogue_links(plugin, monkeypatch):
             ], 1
 
     monkeypatch.setattr(plugin, "make_tmdb", TmdbSearch)
+    online = []
+
+    def fetch(_client, query, page, cursor):
+        online.append((query, page, cursor))
+        return [{"id": REF, "title": "Pelisky.1999.CZ"}], ""
+
+    monkeypatch.setattr(provider, "search_catalog", fetch)
     with plugin.open_library() as lib:
         title = "Pelisky.1999.CZ"
         lib.upsert_video(REF, title, "account", nameparser.parse(title))
@@ -577,8 +584,9 @@ def test_home_search_and_tmdb_catalogue_links(plugin, monkeypatch):
     plugin.search({})
     assert xbmc.BUILTINS == [] and xbmcplugin.ENDED[-1]
     urls = [parse_qs(urlsplit(url).query) for url, _, _ in xbmcplugin.ITEMS]
-    assert [url["action"][0] for url in urls] == ["play", "search_people", "search"]
-    assert urls[2]["q"] == ["Pelíšky"] and urls[2]["online"] == ["1"]
+    assert [url["action"][0] for url in urls] == ["online_filters", "play", "tmdb_title", "search_people",
+                                                   "provider_search", "tmdb_search"]
+    assert online == [("Pelíšky", 1, "")]
     xbmcplugin.ITEMS.clear()
 
     plugin.tmdb_search({"q": "Pelíšky"})
@@ -1085,13 +1093,13 @@ def test_search_opens_exact_episode_and_prioritizes_movie_year(plugin):
                            (newer, "Pelisky.2026.CZ"), (REF, "Pelisky.1999.CZ")):
             lib.upsert_video(vid, title, "account", nameparser.parse(title))
         lib.record_play(exact, 90, 1800)
-    plugin.search({"q": "archa 2x03"})
+    plugin.search({"q": "archa 2x03", "online": "0"})
     url, item, folder = xbmcplugin.ITEMS[0]
     assert parse_qs(urlsplit(url).query)["vid"] == [exact]
     assert not folder and "S02E03 · Pokračovat" in item.label
     assert item.tag.data["resumepoint"] == (90.0, 1800.0)
     xbmcplugin.ITEMS.clear()
-    plugin.search({"q": "pelisky 1999"})
+    plugin.search({"q": "pelisky 1999", "online": "0"})
     assert "(1999)" in xbmcplugin.ITEMS[0][1].label
     assert "(2026)" in xbmcplugin.ITEMS[1][1].label
 
@@ -1130,6 +1138,7 @@ def test_online_search_merges_verified_matches_and_shows_versions(plugin, monkey
     assert len(xbmcplugin.ITEMS) == 6  # filtry, dva tituly a odkazy na úplné výsledky
     local_label = xbmcplugin.ITEMS[1][1]
     assert "Můj katalog, Přehraj.to, TMDB" in local_label.label
+    assert xbmcplugin.ITEMS[1][2] and "action=search_title" in xbmcplugin.ITEMS[1][0]
     assert "(2026)" in xbmcplugin.ITEMS[2][1].label
     detail = local_label.context[0][1][len("Container.Update("):-1]
     xbmcplugin.ITEMS.clear()
@@ -1254,7 +1263,7 @@ def test_tmdb_news_combines_origin_genre_year_and_pages(plugin, monkeypatch):
     assert "Československé novinky (TMDB)" in {item.label for _, item, _ in xbmcplugin.ITEMS}
     xbmcplugin.ITEMS.clear()
     plugin.tmdb_titles({"category": "recent", "kind": "movie", "origin": "SK", "genre": "35", "year": "2026"})
-    assert len(xbmcplugin.ITEMS) == 42  # 40 titulů, filtry a další stránka
+    assert len(xbmcplugin.ITEMS) == 43  # 40 titulů, dva ovládací prvky a další stránka
     assert "page=3" in xbmcplugin.ITEMS[-1][0] and "origin=SK" in xbmcplugin.ITEMS[-1][0]
     assert [args["page"] for _, args in calls] == [1, 2]
     for path, args in calls:
@@ -1278,8 +1287,8 @@ def test_country_search_and_country_selection_preserve_filters(plugin, monkeypat
     xbmc.KEYBOARD_INPUT.append("Francie")
     plugin.search({})
     assert [(dict(parse_qsl(urlsplit(url).query))["action"], folder) for url, _, folder in xbmcplugin.ITEMS] == [
-        ("tmdb_titles", True), ("play", False)]
-    assert "origin=FR" in xbmcplugin.ITEMS[0][0]
+        ("settings", False), ("tmdb_refine", False), ("play", False)]
+    assert "origin=FR" in xbmcplugin.ITEMS[1][0]
 
     client = Tmdb("test")
     monkeypatch.setattr(plugin, "make_tmdb", lambda: client)
@@ -1318,10 +1327,10 @@ def test_country_search_and_country_selection_preserve_filters(plugin, monkeypat
     xbmcplugin.ITEMS.clear()
     plugin.tmdb_titles(args)
     assert calls == [("CZ", "35", "2024"), ("SK", "35", "2024")]
-    assert len(xbmcplugin.ITEMS) == 4
-    assert xbmcplugin.ITEMS[0][1].label == "Upřesnit výběr"
+    assert len(xbmcplugin.ITEMS) == 5
+    assert xbmcplugin.ITEMS[0][1].label == "Upřesnit výběr · Československé filmy · Komedie · 2024"
     assert "action=tmdb_refine" in xbmcplugin.ITEMS[0][0]
-    assert "Upřesnit výběr" in dict(xbmcplugin.ITEMS[1][1].context)
+    assert "Upřesnit výběr" in dict(xbmcplugin.ITEMS[2][1].context)
 
 
 def test_actor_search_shows_filmography_after_keyboard(plugin, monkeypatch):
@@ -1333,6 +1342,8 @@ def test_actor_search_shows_filmography_after_keyboard(plugin, monkeypatch):
     monkeypatch.setattr(plugin, "make_tmdb", lambda: client)
 
     def fetch(path, **params):
+        if path == "/search/multi":
+            return {"results": [], "total_pages": 1}
         if path == "/search/person":
             assert params["query"] == "Jiří Kodet"
             return {"results": [{"id": 71, "name": "Jiří Kodet"}], "total_pages": 1}
@@ -1341,15 +1352,181 @@ def test_actor_search_shows_filmography_after_keyboard(plugin, monkeypatch):
         return {"cast": [title, dict(title), dict(title, id=13, adult=True)]}
 
     monkeypatch.setattr(client, "_get", fetch)
+    monkeypatch.setattr(provider, "search_catalog", lambda *_: ([], ""))
     xbmc.KEYBOARD_INPUT.append("Jiří Kodet")
     plugin.search({})
-    url, item, folder = xbmcplugin.ITEMS[0]
+    url, item, folder = xbmcplugin.ITEMS[1]
     assert item.label == "Jiří Kodet" and folder
     assert url == plugin.url_for("person_titles", person_id=71)
     xbmcplugin.ITEMS.clear()
     plugin.person_titles({"person_id": "71"})
-    assert [url for url, _, _ in xbmcplugin.ITEMS] == [
-        plugin.url_for("tmdb_movie_versions", tmdb_id=12, title="Pelíšky", original="Pelíšky", year=1999)]
+    assert len(xbmcplugin.ITEMS) == 2
+    assert xbmcplugin.ITEMS[1][0] == plugin.url_for(
+        "tmdb_movie_versions", tmdb_id=12, title="Pelíšky", original="Pelíšky", year=1999)
+
+
+def test_discover_query_uses_decade_country_genre_and_keeps_local_titles(plugin, monkeypatch):
+    import xbmcplugin
+    from tmdb import Tmdb
+
+    for index, title in enumerate(("Stare.kino.1985.CZ", "Nove.kino.1995.CZ"), 1):
+        with plugin.open_library() as lib:
+            video = "%s:film:%016x" % (index, index)
+            lib.upsert_video(video, title, "account", None)
+            lib.update_meta(lib.get_video(video)["meta_key"], {"genres": ["Komedie"], "countries": ["ČSSR"]})
+    client = Tmdb("test")
+    calls = []
+
+    def fetch(path, **params):
+        assert path == "/discover/movie"
+        assert params["with_genres"] == "35"
+        assert params["primary_release_date.gte"] == "1980-01-01"
+        assert params["primary_release_date.lte"] == "1989-12-31"
+        calls.append(params["with_origin_country"])
+        return {"results": [], "total_pages": 0}
+
+    monkeypatch.setattr(plugin, "make_tmdb", lambda: client)
+    monkeypatch.setattr(client, "_get", fetch)
+    plugin.search({"q": "československé komedie z 80. let"})
+    assert calls == ["CZ", "SK"]
+    assert "Komedie · 1980–1989" in xbmcplugin.ITEMS[0][1].label
+    assert [url for url, _, _ in xbmcplugin.ITEMS if "action=play" in url] == [plugin.url_for("play", vid="1:film:0000000000000001")]
+    calls.clear()
+    plugin.search({"q": "československé komedie z 80. let", "online": "0"})
+    assert not calls
+
+
+def test_availability_checks_only_a_batch_and_never_confirms_teasers_or_wrong_year(plugin, monkeypatch):
+    import xbmcaddon
+    import xbmcplugin
+    from tmdb import Tmdb
+
+    client = Tmdb("test")
+    titles = [{"id": n, "title": title, "release_date": "1999-01-01", "media_type": "movie"}
+              for n, title in enumerate(("První film", "Druhý film", "Třetí film", "Čtvrtý film", "Pátý film"), 1)]
+    monkeypatch.setattr(plugin, "make_tmdb", lambda: client)
+    monkeypatch.setattr(client, "acting_credits", lambda _: titles)
+    calls = []
+
+    def fetch(_client, query, *_):
+        calls.append(query)
+        suffix = {"První film": ".1999.1080p", "Druhý film": ".2025.1080p",
+                  "Třetí film": ".1999.Trailer", "Čtvrtý film": ".1080p", "Pátý film": ".1999.CZ"}[query]
+        return [{"id": REF, "title": query + suffix}], ""
+
+    monkeypatch.setattr(provider, "search_catalog", fetch)
+    plugin.person_titles({"person_id": "10"})
+    assert len(calls) == 4
+    assert sum("Nalezeno na Přehraj.to" in item.label for _, item, _ in xbmcplugin.ITEMS) == 1
+    assert any(item.label == "Ověřit další tituly na této stránce" for _, item, _ in xbmcplugin.ITEMS)
+    xbmcplugin.ITEMS.clear()
+    plugin.person_titles({"person_id": "10", "found_only": "1"})
+    assert calls[-1] == "Pátý film" and len(calls) == 5
+    assert [item.label.split(" (")[0] for _, item, _ in xbmcplugin.ITEMS] == [
+        "Zobrazit všechny tituly", "První film", "Pátý film"]
+    plugin.person_titles({"person_id": "10"})
+    assert len(calls) == 5
+    xbmcaddon.SETTINGS["username"] = "other@example.com"
+    plugin.person_titles({"person_id": "10"})
+    assert len(calls) == 9
+
+
+def test_search_matches_slovak_alias_and_marks_unverified_year(plugin, monkeypatch):
+    import xbmcplugin
+    from tmdb import Tmdb
+
+    tmdb = Tmdb("test")
+    monkeypatch.setattr(plugin, "make_tmdb", lambda: tmdb)
+    requests = []
+    item = {"id": 30, "title": "Místní název", "original_title": "Original Film",
+            "media_type": "movie", "release_date": "1999-08-01"}
+
+    def metadata(path, **_):
+        if path == "/search/multi":
+            return {"results": [item], "total_pages": 1}
+        assert path == "/movie/30/alternative_titles"
+        return {"titles": [{"iso_3166_1": "SK", "title": "Slovenský názov"}]}
+
+    def fetch(_client, query, *_):
+        requests.append(query)
+        if query == "Slovenský názov":
+            return [{"id": REF, "title": "Slovensky.nazov.1999.CZ.1080p"}], ""
+        if query == "Místní název":
+            return [{"id": "2:film:aaaaaaaaaaaaaaaa", "title": "Mistni.nazev.CZ.720p"}], ""
+        return [], ""
+
+    monkeypatch.setattr(tmdb, "_get", metadata)
+    monkeypatch.setattr(provider, "search_catalog", fetch)
+    plugin.search({"q": "Místní název 1999"})
+    assert requests == ["Místní název 1999", "Original Film", "Místní název", "Slovenský názov"]
+    assert "(1999)" in xbmcplugin.ITEMS[1][1].label
+    assert "vid=" in xbmcplugin.ITEMS[1][0] and "TMDB" in xbmcplugin.ITEMS[1][1].label
+    assert "Rok neověřen" in xbmcplugin.ITEMS[2][1].label
+
+
+def test_search_retry_and_filter_suggestions_keep_query_and_playable_local_results(plugin, monkeypatch):
+    from urllib.parse import parse_qsl, urlsplit
+
+    import xbmcplugin
+
+    with plugin.open_library() as lib:
+        lib.upsert_video(REF, "Pelisky.1999.CZ", "account", None)
+    candidate = {"id": "2:film:aaaaaaaaaaaaaaaa", "title": "Pelisky.1999.720p"}
+    calls = []
+
+    def fetch(_client, query, *_):
+        calls.append(query)
+        if len(calls) == 1:
+            raise provider.TemporaryError("dočasná chyba")
+        return [candidate], ""
+
+    monkeypatch.setattr(provider, "search_catalog", fetch)
+    plugin.search({"q": "Pelíšky 1999", "audio": "CZ", "quality": "FHD"})
+    assert any("action=play" in url for url, _, _ in xbmcplugin.ITEMS)
+    retry = next(url for url, item, _ in xbmcplugin.ITEMS if item.label == "Zopakovat online hledání")
+    assert len(calls) == 1
+    xbmcplugin.ITEMS.clear()
+    plugin.run([plugin.BASE_URL, "1", urlsplit(retry).query])
+    relax = next(url for url, item, _ in xbmcplugin.ITEMS if "bez omezení kvality a zahrnout" in item.label)
+    args = dict(parse_qsl(urlsplit(relax).query))
+    assert args["q"] == "Pelíšky 1999" and args["audio"] == "CZ" and args["unknown_audio"] == "1"
+    assert "quality" not in args and "retry" not in args
+    before_relax = len(calls)
+    xbmcplugin.ITEMS.clear()
+    plugin.run([plugin.BASE_URL, "1", urlsplit(relax).query])
+    assert len(calls) == before_relax
+    assert any("action=search_title" in url for url, _, _ in xbmcplugin.ITEMS)
+
+
+def test_misspelled_title_suggestion_keeps_requested_year(plugin):
+    from urllib.parse import parse_qs, urlsplit
+
+    import xbmcplugin
+
+    with plugin.open_library() as lib:
+        lib.upsert_video(REF, "Pelíšky.1999.CZ", "account", None)
+    plugin.search({"q": "Pelisly 1999", "online": "0"})
+    url, item, folder = xbmcplugin.ITEMS[0]
+    assert folder and item.label == "Mysleli jste Pelíšky 1999?"
+    assert parse_qs(urlsplit(url).query)["q"] == ["Pelíšky 1999"]
+
+
+def test_exact_online_episode_and_series_browsing_exclude_other_titles(plugin, monkeypatch):
+    import xbmcplugin
+
+    def items(_client, _query, *_):
+        return ([{"id": REF, "title": "Archa.S02E03.CZ", "thumb": "", "duration": 2400},
+                 {"id": "2:film:aaaaaaaaaaaaaaaa", "title": "Archa.S01E03.CZ", "thumb": "", "duration": 2400},
+                 {"id": "3:film:bbbbbbbbbbbbbbbb", "title": "Jiny serial.S02E03.CZ", "thumb": "", "duration": 2400},
+                 {"id": "4:film:cccccccccccccccc", "title": "Archa.2020.CZ", "thumb": "", "duration": 6400}], "")
+
+    monkeypatch.setattr(provider, "search_catalog", items)
+    plugin.search({"q": "Archa 2x03"})
+    assert [url for url, _, _ in xbmcplugin.ITEMS if "action=play" in url] == [plugin.url_for("play", vid=REF)]
+    xbmcplugin.ITEMS.clear()
+    plugin.provider_search({"q": "Archa", "series": "1", "title": "Archa"})
+    assert [url for url, _, _ in xbmcplugin.ITEMS if "action=play" in url] == [
+        plugin.url_for("play", vid="2:film:aaaaaaaaaaaaaaaa"), plugin.url_for("play", vid=REF)]
 
 
 def test_stale_account_sync_cannot_restore_removed_videos(tmp_path):

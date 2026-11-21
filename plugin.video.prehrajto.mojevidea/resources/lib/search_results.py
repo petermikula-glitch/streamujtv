@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Rozpoznání dotazu a slučování výsledků podle ověřitelných shod."""
 import re
+from difflib import SequenceMatcher
 from hashlib import sha256
 
 from nameparser import normalize, parse
@@ -8,6 +9,20 @@ from nameparser import normalize, parse
 EPISODE_SUFFIX = re.compile(r"(?:[\s._-]+)(?:s(\d{1,2})[ ._-]*e(\d{1,3})|(\d{1,2})x(\d{1,3}))\s*$", re.I)
 YEAR_SUFFIX = re.compile(r"[\s._-]+\(?((?:18|19|20)\d{2})\)?\s*$")
 EXTRAS = {"trailer", "teaser", "ukazka", "upoutavka"}
+DECADE_SUFFIX = re.compile(r"(?:^| )(?:z )?((?:18|19|20)?[0-9]0) (?:let|leta|letech)$")
+GENRES = {
+    "28": (30545, {"akcni"}), "12": (30546, {"dobrodruzny", "dobrodruzne"}),
+    "16": (30547, {"animovany", "animovane", "animaky"}),
+    "35": (30548, {"komedie", "komedii", "komedialni"}),
+    "80": (30549, {"krimi", "kriminalni"}), "99": (30550, {"dokument", "dokumenty", "dokumentarni"}),
+    "18": (30551, {"drama", "dramata", "dramaticke"}), "27": (30552, {"horor", "horory", "hororove"}),
+    "10749": (30553, {"romanticke", "romanticky", "romantika"}),
+    "878": (30554, {"sci fi", "vedeckofantasticke"}), "53": (30555, {"thriller", "thrillery"}),
+    "10751": (30556, {"rodinne"}), "10752": (30557, {"valecne", "valecny"}),
+    "14": (30558, {"fantasy"}), "36": (30559, {"historicke", "historicky"}),
+    "9648": (30560, {"mysteriozni"}), "10402": (30561, {"hudebni", "muzikaly", "muzikal"}),
+    "37": (30562, {"western", "westerny"}), "10770": (30563, {"televizni"}),
+}
 
 
 def is_preview(filename, titles=()):
@@ -16,7 +31,7 @@ def is_preview(filename, titles=()):
     return bool(EXTRAS & (words - known))
 
 
-def original_title(items, title, year=0, episodic=False):
+def matching_title(items, title, year=0, episodic=False):
     normalized = normalize(title)
     matched = {}
     for item in items:
@@ -26,12 +41,9 @@ def original_title(items, title, year=0, episodic=False):
         localized = item.get("title") or item.get("name") or ""
         original = item.get("original_title") or item.get("original_name") or ""
         date = item.get("release_date") or item.get("first_air_date") or ""
-        if normalize(localized) == normalized and (not year or date[:4] == str(year)):
-            matched[kind, item["id"]] = original
-    if len(matched) != 1:
-        return ""
-    original = next(iter(matched.values()))
-    return original if normalize(original) != normalized else ""
+        if item.get("id") and normalized in aliases(localized, original) and (not year or date[:4] == str(year)):
+            matched[kind, item["id"]] = item
+    return next(iter(matched.values())) if len(matched) == 1 else None
 
 
 def split_query(query):
@@ -50,6 +62,67 @@ def split_query(query):
     return title.strip() or query, year, position
 
 
+def format_query(title, year=0, position=None):
+    if year:
+        title += " %d" % year
+    if position:
+        title += " S%02dE%02d" % position
+    return title
+
+
+def period(value):
+    if re.fullmatch(r"(?:18|19|20)\d{2}", value):
+        return int(value), int(value)
+    if re.fullmatch(r"(?:18|19|20)\d0s", value):
+        start = int(value[:-1])
+        return start, start + 9
+    return None, None
+
+
+def discover_query(query, countries):
+    """Uzná dotaz pouze tehdy, když lze celý text převést na alespoň dva filtry."""
+    name = normalize(query)
+    match = DECADE_SUFFIX.search(name)
+    year = ""
+    if match:
+        value = int(match[1])
+        start = value + (1900 if value >= 20 else 2000) if len(match[1]) == 2 else value
+        year = "%ds" % start
+        name = name[:match.start()]
+    else:
+        match = re.search(r"(?:^| )(?:z roku |z )?((?:18|19|20)\d{2})$", name)
+        if match:
+            year = match[1]
+            name = name[:match.start()]
+    name = re.sub(r"\b(?:filmy|film|filmu)\b", " ", name)
+    name = " ".join(name.split())
+    origin = ""
+    for alias in sorted(countries, key=lambda value: (-len(value), value)):
+        remaining, count = re.subn(r"\b" + re.escape(alias) + r"\b", "", name, count=1)
+        if count:
+            origin = countries[alias]
+            name = " ".join(remaining.split())
+            break
+    genre = next((code for code, (_label, names) in GENRES.items() if name in names), "")
+    return ({"origin": origin, "genre": genre, "year": year}
+            if (not name or genre) and sum(bool(value) for value in (origin, genre, year)) >= 2 else {})
+
+
+def spelling_suggestions(title, names, limit=2):
+    target = normalize(title)
+    if len(target) < 4:
+        return []
+    matches = {}
+    for name in names:
+        candidate = normalize(name)
+        if candidate == target or abs(len(candidate) - len(target)) > 3 or candidate in matches:
+            continue
+        score = SequenceMatcher(None, target, candidate).ratio()
+        if score >= .79:
+            matches[candidate] = (score, name)
+    return [name for _score, name in sorted(matches.values(), key=lambda item: (-item[0], item[1]))[:limit]]
+
+
 def compare_title(title, names):
     wanted = normalize(title)
     if wanted in names:
@@ -61,6 +134,19 @@ def compare_title(title, names):
 
 def aliases(*names):
     return set(filter(None, map(normalize, names)))
+
+
+def filename_names(names):
+    single = aliases(*names)
+    return single | {first + " " + second for first in single for second in single if first != second}
+
+
+def filename_matches(parsed, names, year=0, position=None, kind=None, *, require_year=False):
+    if normalize(parsed["title"]) not in names or (kind and parsed["kind"] != kind):
+        return False
+    if year and (parsed["year"] != year and (parsed["year"] or require_year)):
+        return False
+    return not position or (parsed["season"], parsed["episode"]) == position
 
 
 def new_card(kind, title, year=0, position=None, names=(), local=None, videos=(), tmdb=None):
@@ -75,7 +161,9 @@ def remote_card(item, kind, position):
     original = item.get("original_title") or item.get("original_name")
     date = item.get("release_date") or item.get("first_air_date") or ""
     year = int(date[:4]) if date[:4].isdigit() else 0
-    return new_card(kind, title, year, position, (original,), tmdb=item)
+    card = new_card(kind, title, year, position, (original, *item.get("_search_aliases", ())), tmdb=item)
+    card["names"] = filename_names(card["names"])
+    return card
 
 
 def _same_title(card, candidate):

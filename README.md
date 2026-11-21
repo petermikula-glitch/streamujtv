@@ -47,12 +47,14 @@ rozdíly jsou v sekci [Přehraj.to](#přehrajto--rozdíly).
 
 ### Vyhledávání na Přehraj.to a záloha
 
-V doplňku Přehraj.to otevřete **Hledat** a zadejte dotaz. Pod výsledky z vlastního katalogu
-vyberte **Zahrnout online výsledky**. Pod společným přehledem jsou odkazy na úplné
-výsledky jednotlivých služeb.
-Video můžete přehrát rovnou nebo ho přes kontextovou nabídku přidat do vlastního katalogu.
-Hledání jména herce zobrazí odpovídající tituly z vašeho katalogu. S nastaveným klíčem
-TMDB můžete otevřít i **Hledat herce v TMDB** a procházet jeho filmografii.
+V doplňku Přehraj.to otevřete **Hledat** a zadejte dotaz. Výsledky z vlastního katalogu,
+Přehraj.to a dostupných metadat TMDB se zobrazí společně. Pokud má titul více ověřených shod,
+otevře se seznam verzí s jazykem, kvalitou a velikostí, pokud jsou tyto údaje k dispozici.
+Automatické online hledání můžete vypnout v **Nastavení → Hledat**. Online video lze přes
+kontextovou nabídku přidat do vlastního katalogu.
+S nastaveným klíčem TMDB můžete procházet filmografii herce. V přehledu podle herce nebo země
+doplněk ověřuje první čtyři dosud nezkontrolované tituly na dané stránce. **Jen nalezené na Přehraj.to**
+zobrazí potvrzené shody a **Ověřit další tituly na této stránce** načte další dávku.
 
 V **Nástroje → Zálohovat katalog** uložíte katalog, kolekce, ruční úpravy a historii
 do souboru JSON. **Obnovit katalog** po potvrzení nahradí aktuální data zálohou
@@ -85,8 +87,8 @@ Kodi jako obsah typu Filmy a Seriály. Export zachovává ručně upravené soub
 v cílové složce.
 
 Hledání přijímá také dotazy s rokem nebo číslem dílu, například
-`Pelíšky 1999` a `Hra o trůny 2x03`. Volba **Zahrnout online výsledky** přidá
-první stránku z Přehraj.to a případně TMDB a sloučí jednoznačné shody.
+`Pelíšky 1999` a `Hra o trůny 2x03`. Filmy se správným rokem řadí před shody bez uvedeného roku.
+U seriálových dotazů s číslem dílu zůstává série i díl součástí hledání při zkoušení dalších názvů.
 **Detail výsledku a verze** v kontextové nabídce otevře přehrávání a dostupné varianty.
 
 V **Nástroje → Propojit s knihovnou Kodi** lze vybrat složku, exportovat videa,
@@ -98,8 +100,8 @@ Rozkoukaných nebo ručně v průvodci.
 Společná položka **Československé filmy** je v **Moje filmy** i v **Objevovat**.
 Ve vlastním katalogu zahrnuje českou, slovenskou i historickou československou produkci
 podle metadat ČSFD nebo TMDB. V nabídce **Hledat** lze zadat například `Francie` nebo
-`československé filmy`. V **Objevovat → Podle země** využijete katalog TMDB.
-Volba **Upřesnit výběr** v jeho výsledcích otevře dialog pro kombinaci země, žánru a roku.
+`československé komedie z 80. let`. V **Objevovat → Podle země** využijete katalog TMDB.
+Volba **Upřesnit výběr** v jeho výsledcích otevře dialog pro kombinaci země, žánru a roku či desetiletí.
 **Novinky** nabízejí nově přidaná videa z účtu a filmy vydané v posledních 90 dnech
 podle TMDB. Velikost výpisu lze upravit v **Nastavení → Hledat**.
 Výchozí výpis spojuje dvě stránky služby, pokud jsou dostupné.
@@ -110,7 +112,9 @@ dokoukání. Zapíná se to v **Nastavení → Přehrávání**.
 
 Ve výsledcích Přehraj.to lze otevřít **Filtrovat výsledky Přehraj.to**
 a zkombinovat český nebo slovenský dabing, kvalitu od 1080p a skrytí upoutávek.
-Když doplněk nenajde odpovídající video a zná původní název z TMDB, zkusí i ten.
+Pokud doplněk nenajde odpovídající video, zkusí dostupné původní, české nebo slovenské názvy
+z TMDB. Při prázdném výsledku nabídne podle situace opravu názvu, uvolnění filtrů nebo nový
+online pokus.
 **Chci vidět** označí filmy a seriály, které se objevily po synchronizaci, jako
 **Nově dostupné**. V **Dalších částech** se zobrazuje stav každého filmu a
 zkratka na první nezhlédnutý díl. Při chybě přehrávání doplněk nabídne jiné

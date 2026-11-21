@@ -368,14 +368,17 @@ class PrehrajtoClient(object):
         self._logged_in = False
         self._last_video_page = None
         self.sleep = time.sleep
+        self.request_timeout = TIMEOUT
+        self.request_retries = 2
 
     @property
     def has_credentials(self):
         return bool(self.username and self.password)
 
     # --- HTTP -------------------------------------------------------------
-    def _request(self, url, data=None, headers=None, follow=True, retries=2):
+    def _request(self, url, data=None, headers=None, follow=True, retries=None):
         """HTTP s opakováním po HTTP 429 (server dočasně omezuje dotazy)."""
+        retries = self.request_retries if retries is None else retries
         for attempt in range(retries + 1):
             try:
                 return self._request_once(url, data, headers, follow)
@@ -399,7 +402,7 @@ class PrehrajtoClient(object):
         req = urllib.request.Request(url, data=body, headers=hdrs)
         opener = self.opener if follow else self.noredirect
         try:
-            resp = opener.open(req, timeout=TIMEOUT)
+            resp = opener.open(req, timeout=self.request_timeout)
         except urllib.error.HTTPError as e:
             if not follow and e.code in (301, 302, 303, 307, 308):
                 location = e.headers.get("Location") or ""

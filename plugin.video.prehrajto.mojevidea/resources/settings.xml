@@ -148,6 +148,11 @@
         </category>
         <category id="search" label="30407" help="">
             <group id="1" label="30407">
+                <setting id="search_online" type="boolean" label="30531" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="search_result_pages" type="integer" label="30499" help="">
                     <level>0</level>
                     <default>2</default>

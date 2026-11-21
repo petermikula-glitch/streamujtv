@@ -11,6 +11,7 @@ import urllib.request
 from datetime import date, timedelta
 
 from nameparser import normalize
+from search_results import period
 
 API = "https://api.themoviedb.org/3"
 IMG = "https://image.tmdb.org/t/p/"
@@ -22,16 +23,17 @@ class TmdbError(Exception):
 
 
 class Tmdb(object):
-    def __init__(self, key, language="cs-CZ", log=None):
+    def __init__(self, key, language="cs-CZ", log=None, timeout=TIMEOUT):
         self.key = (key or "").strip()
         self.language = language
         self.log = log or (lambda m: None)
+        self.timeout = timeout
 
     @property
     def enabled(self):
         return bool(self.key)
 
-    def _get(self, path, *, timeout=TIMEOUT, **params):
+    def _get(self, path, *, timeout=None, **params):
         params["language"] = self.language
         headers = {"Accept": "application/json", "User-Agent": "Kodi addon"}
         if len(self.key) > 40:  # v4 token
@@ -41,7 +43,7 @@ class Tmdb(object):
         url = API + path + "?" + urllib.parse.urlencode(params)
         self.log("tmdb: GET %s" % path)
         try:
-            resp = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout)
+            resp = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout or self.timeout)
             try:
                 return json.loads(resp.read().decode("utf-8"))
             finally:
@@ -72,8 +74,16 @@ class Tmdb(object):
                                "primary_release_date.lte": today.isoformat()})
             if genre:
                 params["with_genres"] = genre
-            if year:
-                params["primary_release_year" if kind == "movie" else "first_air_date_year"] = year
+            start, end = period(str(year))
+            if start == end and start:
+                params["primary_release_year" if kind == "movie" else "first_air_date_year"] = str(start)
+            elif start:
+                field = "primary_release_date" if kind == "movie" else "first_air_date"
+                low, high = "%d-01-01" % start, "%d-12-31" % end
+                params[field + ".gte"] = max(low, params.get(field + ".gte", low))
+                params[field + ".lte"] = min(high, params.get(field + ".lte", high))
+                if params[field + ".gte"] > params[field + ".lte"]:
+                    return [], 0
             data = self._get("/discover/" + kind, **params)
         else:
             data = self._get("/%s/%s" % (kind, category), **params)
@@ -83,6 +93,13 @@ class Tmdb(object):
         data = self._get("/search/multi", query=query, include_adult="false", page=page)
         return ([item for item in data.get("results") or [] if item.get("media_type") in ("movie", "tv")],
                 min(data.get("total_pages") or 0, 500))
+
+    def alternative_titles(self, item):
+        kind = item["media_type"]
+        data = self._get("/%s/%d/alternative_titles" % (kind, item["id"]))
+        alternatives = data.get("titles" if kind == "movie" else "results") or []
+        return list(dict.fromkeys(entry["title"].strip() for entry in alternatives
+                                  if entry.get("iso_3166_1") in ("CZ", "SK") and entry.get("title", "").strip()))
 
     def search_people(self, query, page=1):
         data = self._get("/search/person", query=query, page=page, include_adult="false")
