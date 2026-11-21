@@ -710,3 +710,63 @@ msgstr "Hledání na Přehraj.to se nezdařilo. %s"
 msgctxt "#30370"
 msgid "No videos found on Přehraj.to."
 msgstr "Na Přehraj.to se nenašla žádná videa."
+
+msgctxt "#30372"
+msgid "Search TMDB"
+msgstr "Hledat v TMDB"
+
+msgctxt "#30373"
+msgid "Quick match with TMDB"
+msgstr "Rychlé přiřazení z TMDB"
+
+msgctxt "#30374"
+msgid "Watchlist"
+msgstr "Chci vidět"
+
+msgctxt "#30375"
+msgid "Add to watchlist"
+msgstr "Přidat do Chci vidět"
+
+msgctxt "#30376"
+msgid "Remove from watchlist"
+msgstr "Odebrat z Chci vidět"
+
+msgctxt "#30377"
+msgid "The watchlist is empty."
+msgstr "Seznam Chci vidět je prázdný."
+
+msgctxt "#30378"
+msgid "Episodes available: %d · watched: %d"
+msgstr "Dostupné díly: %d · zhlédnuto: %d"
+
+msgctxt "#30379"
+msgid "Missing episodes: %s"
+msgstr "Chybějící díly: %s"
+
+msgctxt "#30380"
+msgid "Match in TMDB: %s"
+msgstr "Přiřadit v TMDB: %s"
+
+msgctxt "#30381"
+msgid "Preferred version language"
+msgstr "Preferovaný jazyk verzí"
+
+msgctxt "#30382"
+msgid "Any language"
+msgstr "Bez preference"
+
+msgctxt "#30383"
+msgid "Czech"
+msgstr "Čeština"
+
+msgctxt "#30384"
+msgid "Slovak"
+msgstr "Slovenština"
+
+msgctxt "#30385"
+msgid "English"
+msgstr "Angličtina"
+
+msgctxt "#30389"
+msgid "No match in your library."
+msgstr "Ve vlastní knihovně není shoda."

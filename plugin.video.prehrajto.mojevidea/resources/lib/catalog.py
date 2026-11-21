@@ -152,12 +152,15 @@ def import_links(client, lib, links, progress=None, log=None):
     return stats
 
 
-def apply_details(lib, key, info, source):
+def apply_details(lib, key, info, source, lock_videos=False):
     data = dict(info)
     data["status"] = "ok" if source != "manual" else "manual"
     data["source"] = source
     data["rating_source"] = source if info.get("rating") else ""
-    lib.update_meta(key, data)
+    if lock_videos:
+        lib.update_meta(key, data, lock_videos=True)
+    else:
+        lib.update_meta(key, data)
 
 
 def enrich(lib, metas, use_csfd=True, tmdb=None, progress=None, log=None):

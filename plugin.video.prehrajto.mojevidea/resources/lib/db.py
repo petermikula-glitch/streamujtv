@@ -8,7 +8,7 @@ from nameparser import movie_key, normalize, show_key
 
 SCHEMA_VERSION = 2
 BACKUP_VERSION = 1
-BACKUP_TABLES = ("videos", "meta", "collections", "collection_items", "history", "search_history")
+BACKUP_TABLES = ("videos", "meta", "collections", "collection_items", "history", "search_history", "watchlist")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
@@ -87,6 +87,15 @@ CREATE TABLE IF NOT EXISTS history (
     plays INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_history_played ON history(last_played);
+CREATE TABLE IF NOT EXISTS watchlist (
+    kind TEXT NOT NULL CHECK(kind IN ('movie','tv')),
+    tmdb_id INTEGER NOT NULL CHECK(tmdb_id > 0),
+    title TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    poster TEXT NOT NULL,
+    added INTEGER NOT NULL,
+    PRIMARY KEY(kind, tmdb_id)
+);
 CREATE TABLE IF NOT EXISTS settings_kv (
     k TEXT PRIMARY KEY,
     v TEXT
@@ -201,8 +210,10 @@ class Library(object):
                 or backup.get("addon") != addon_id):
             raise ValueError("Unsupported backup format")
         tables = backup.get("tables")
-        if not isinstance(tables, dict) or set(tables) != set(BACKUP_TABLES):
+        expected = set(BACKUP_TABLES)
+        if not isinstance(tables, dict) or set(tables) not in (expected, expected - {"watchlist"}):
             raise ValueError("Invalid backup tables")
+        tables = {"watchlist": [], **tables}
         # Uživatel může zálohu upravit. Názvy sloupců bereme výhradně ze schématu.
         inserts = {}
         for table in BACKUP_TABLES:
@@ -375,7 +386,7 @@ class Library(object):
     def get_meta(self, key):
         return _row(self.conn.execute("SELECT * FROM meta WHERE key=?", (key,)).fetchone())
 
-    def update_meta(self, key, data):
+    def update_meta(self, key, data, lock_videos=False):
         data = dict(data)
         values = {}
         for f in META_FIELDS:
@@ -393,8 +404,10 @@ class Library(object):
             blob_parts.extend(merged.get(f) or [])
         values["search_blob"] = normalize(" ".join(str(p) for p in blob_parts if p))
         sets = ", ".join("%s=?" % k for k in values)
-        self.conn.execute("UPDATE meta SET %s WHERE key=?" % sets, list(values.values()) + [key])
-        self.conn.commit()
+        with self.conn:
+            self.conn.execute("UPDATE meta SET %s WHERE key=?" % sets, list(values.values()) + [key])
+            if lock_videos:
+                self.conn.execute("UPDATE videos SET locked=1 WHERE meta_key=?", (key,))
 
     def set_meta_status(self, key, status):
         self.conn.execute("UPDATE meta SET status=?, fetched_at=? WHERE key=?",
@@ -569,6 +582,23 @@ class Library(object):
             if r[0] not in keys and all(w in normalize(r[1]) for w in words):
                 keys.append(r[0])
         return self.movies(keys=keys), self.shows(keys=keys)
+
+    def watchlist(self):
+        return [_row(row) for row in self.conn.execute(
+            "SELECT * FROM watchlist ORDER BY added DESC, title COLLATE NOCASE")]
+
+    def watchlist_has(self, kind, tmdb_id):
+        return self.conn.execute("SELECT 1 FROM watchlist WHERE kind=? AND tmdb_id=?",
+                                 (kind, tmdb_id)).fetchone() is not None
+
+    def watchlist_add(self, kind, tmdb_id, title, year, poster):
+        with self.conn:
+            self.conn.execute("INSERT OR IGNORE INTO watchlist VALUES (?, ?, ?, ?, ?, ?)",
+                              (kind, tmdb_id, title, year, poster, int(time.time())))
+
+    def watchlist_remove(self, kind, tmdb_id):
+        with self.conn:
+            self.conn.execute("DELETE FROM watchlist WHERE kind=? AND tmdb_id=?", (kind, tmdb_id))
 
     # --- kolekce ------------------------------------------------------------
     def collections(self):

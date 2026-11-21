@@ -68,6 +68,11 @@ class Tmdb(object):
             data = self._get("/%s/%s" % (kind, category), **params)
         return data.get("results") or [], min(data.get("total_pages") or 0, 500)
 
+    def search_titles(self, query, page=1):
+        data = self._get("/search/multi", query=query, include_adult="false", page=page)
+        return ([item for item in data.get("results") or [] if item.get("media_type") in ("movie", "tv")],
+                min(data.get("total_pages") or 0, 500))
+
     def search(self, query, want_series=False):
         """Seznam kandidátů pro ruční výběr: [{id, title, year, orig_title}]."""
         data = self._get("/search/" + ("tv" if want_series else "movie"), query=query,

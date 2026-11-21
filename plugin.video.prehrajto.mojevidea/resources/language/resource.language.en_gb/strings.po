@@ -710,3 +710,63 @@ msgstr ""
 msgctxt "#30370"
 msgid "No videos found on Přehraj.to."
 msgstr ""
+
+msgctxt "#30372"
+msgid "Search TMDB"
+msgstr ""
+
+msgctxt "#30373"
+msgid "Quick match with TMDB"
+msgstr ""
+
+msgctxt "#30374"
+msgid "Watchlist"
+msgstr ""
+
+msgctxt "#30375"
+msgid "Add to watchlist"
+msgstr ""
+
+msgctxt "#30376"
+msgid "Remove from watchlist"
+msgstr ""
+
+msgctxt "#30377"
+msgid "The watchlist is empty."
+msgstr ""
+
+msgctxt "#30378"
+msgid "Episodes available: %d · watched: %d"
+msgstr ""
+
+msgctxt "#30379"
+msgid "Missing episodes: %s"
+msgstr ""
+
+msgctxt "#30380"
+msgid "Match in TMDB: %s"
+msgstr ""
+
+msgctxt "#30381"
+msgid "Preferred version language"
+msgstr ""
+
+msgctxt "#30382"
+msgid "Any language"
+msgstr ""
+
+msgctxt "#30383"
+msgid "Czech"
+msgstr ""
+
+msgctxt "#30384"
+msgid "Slovak"
+msgstr ""
+
+msgctxt "#30385"
+msgid "English"
+msgstr ""
+
+msgctxt "#30389"
+msgid "No match in your library."
+msgstr ""
