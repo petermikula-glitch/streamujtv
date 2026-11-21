@@ -81,6 +81,9 @@ def _sync_time(timestamp):
     return time.strftime("%d.%m.%Y %H:%M", time.localtime(timestamp))
 
 
+QUICK_SYNC_FULL_EVERY = 24 * 3600  # s – nejpozději po této době proběhne zase úplná synchronizace
+
+
 def run_sync(background=False):
     """Synchronizace účtu + volitelně metadata. Použitelné i ze služby."""
     views_discover._refresh_watchlist_availability(after_sync=False)
@@ -93,10 +96,16 @@ def run_sync(background=False):
             return progress.cancelled()
 
         with open_library() as lib:
+            known = None
+            if background and setting_bool("quick_sync"):
+                # rychlá jen na pozadí a jen když nedávno proběhla úplná (ta jediná umí odebírat)
+                last_full = int(lib.get_kv("last_full_sync", 0) or 0)
+                if 0 <= time.time() - last_full < QUICK_SYNC_FULL_EVERY:
+                    known = lib.account_video_keys()
             stats = catalog.sync_account(
                 client, lib, include_favorites=setting_bool("sync_favorites"),
                 include_playlists=setting_bool("sync_playlists"),
-                remove_missing=setting_bool("remove_missing"), progress=on_progress, log=log)
+                remove_missing=setting_bool("remove_missing"), progress=on_progress, log=log, known=known)
     finally:
         progress.close()
     log_info("sync: %s" % stats)

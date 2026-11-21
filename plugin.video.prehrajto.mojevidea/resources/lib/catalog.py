@@ -4,6 +4,7 @@ doplnění metadat z ČSFD/TMDB."""
 import hashlib
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import csfd
 import nameparser
@@ -11,15 +12,20 @@ import provider
 from tmdb import TmdbError
 
 
+TMDB_WORKERS = 4  # souběžné dotazy na TMDB při doplňování metadat (bez ČSFD)
+
+
 def _parsed(title):
     return nameparser.parse(title)
 
 
 def sync_account(client, lib, include_favorites=False, include_playlists=False, remove_missing=True,
-                 progress=None, log=None):
+                 progress=None, log=None, known=None):
     """Načte videa z účtu do katalogu.
 
     ``progress(stage, pages, count)`` může vrátit True = zrušit.
+    ``known`` = klíče videí, která už katalog má: výpis skončí u první stránky bez nového
+    videa (rychlá synchronizace – nic se podle ní neodebírá).
     """
     log = log or (lambda m: None)
     started = time.time_ns()
@@ -33,11 +39,16 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
             return False
         return inner
 
-    videos = client.my_videos(progress=prog("my_videos"))
+    if known:
+        videos = client.my_videos(progress=prog("my_videos"), known=known)
+    else:
+        videos = client.my_videos(progress=prog("my_videos"))
     stats["total"] = len(videos)
-    stats["incomplete"] = not getattr(client, "listing_complete", True)
-    complete = not stats["cancelled"] and not stats["incomplete"]
-    result = lib.apply_account_snapshot(videos, started, complete, remove_missing)
+    stats["quick"] = bool(known) and bool(getattr(client, "listing_partial", False))
+    stats["incomplete"] = not stats["quick"] and not getattr(client, "listing_complete", True)
+    complete = not stats["cancelled"] and not stats["incomplete"] and not stats["quick"]
+    result = lib.apply_account_snapshot(videos, started, complete, remove_missing,
+                                        partial=stats["quick"] and not stats["cancelled"])
     if result is None:
         stats["superseded"] = True
         return stats
@@ -174,6 +185,10 @@ def enrich(lib, metas, use_csfd=True, tmdb=None, progress=None, log=None):
         stats["last_error"] = "Není zapnutý žádný zdroj metadat (ČSFD ani TMDB)"
         return stats
     for idx, meta in enumerate(metas):
+        if not csfd_available and tmdb_available:
+            # Zbývá jen TMDB (ČSFD je vypnuté nebo blokuje): dotazy nemusí čekat jeden na druhý.
+            _enrich_from_tmdb(lib, metas, idx, tmdb, stats, progress, log)
+            break
         if progress and progress(idx, len(metas), meta["search_title"]):
             stats["cancelled"] = True
             break
@@ -225,6 +240,46 @@ def enrich(lib, metas, use_csfd=True, tmdb=None, progress=None, log=None):
                 lib.set_meta_status(rest["key"], "blocked")
             break
     return stats
+
+
+def _enrich_from_tmdb(lib, metas, start, tmdb, stats, progress, log):
+    """Doplní ``metas[start:]`` z TMDB po dávkách souběžných dotazů; zápis do katalogu
+    zůstává v tomto vlákně."""
+    def lookup(meta):
+        try:
+            return tmdb.find(meta["search_title"], meta.get("search_year") or 0, meta["kind"] == "show"), None
+        except TmdbError as e:
+            return None, e
+
+    total = len(metas)
+    with ThreadPoolExecutor(max_workers=TMDB_WORKERS) as pool:
+        for first in range(start, total, TMDB_WORKERS * 2):
+            batch = metas[first:first + TMDB_WORKERS * 2]
+            if progress and progress(first, total, batch[0]["search_title"]):
+                stats["cancelled"] = True
+                return
+            bad_key = False
+            for offset, (meta, (info, error)) in enumerate(zip(batch, pool.map(lookup, batch))):
+                if progress:
+                    progress(first + offset, total, meta["search_title"])
+                if info:
+                    apply_details(lib, meta["key"], info, "tmdb")
+                    stats["ok"] += 1
+                    stats["tmdb"] += 1
+                elif error:
+                    log("TMDB chyba u '%s': %s" % (meta["search_title"], error))
+                    stats["last_error"] = str(error)
+                    lib.set_meta_status(meta["key"], "error")
+                    stats["errors"] += 1
+                    bad_key = bad_key or "klíč" in str(error)
+                else:
+                    lib.set_meta_status(meta["key"], "notfound")
+                    stats["notfound"] += 1
+            if bad_key:
+                # neplatný klíč – zbytek nemá smysl zkoušet
+                for rest in metas[first + len(batch):]:
+                    lib.set_meta_status(rest["key"], "blocked")
+                return
 
 
 _SECRET_PATTERNS = [

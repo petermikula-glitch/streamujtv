@@ -1462,3 +1462,7 @@ msgstr ""
 msgctxt "#30570"
 msgid "Next page (%d/%d)"
 msgstr ""
+
+msgctxt "#30571"
+msgid "Quick automatic sync (new videos only, full sync once a day)"
+msgstr ""

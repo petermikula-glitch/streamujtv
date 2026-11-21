@@ -19,9 +19,10 @@ def _episode_position(video):
     return (season, episode) if episode > 0 else None
 
 
-def _series_progress(lib, history, resume, watched):
+def _series_progress(lib, history, resume, watched, videos=None):
     latest = history[0]
-    videos = lib.videos_for_meta(latest["meta_key"])
+    if videos is None:
+        videos = lib.videos_for_meta(latest["meta_key"])
     completed = {_episode_position(video) for video in videos if video["id"] in watched}
     completed.discard(None)
     position = _episode_position(latest)
@@ -101,8 +102,9 @@ def in_progress(params):
                     movies.add(key)
                     if vid in resume:
                         entries.append(video)
-        for history in series.values():
-            video = _series_progress(lib, history, resume, watched)
+        episodes = lib.videos_grouped(series) if series else {}  # jeden dotaz místo dotazu na každý seriál
+        for key, history in series.items():
+            video = _series_progress(lib, history, resume, watched, episodes.get(key, []))
             if video:
                 entries.append(video)
         entries.sort(key=lambda video: video["last_played"], reverse=True)

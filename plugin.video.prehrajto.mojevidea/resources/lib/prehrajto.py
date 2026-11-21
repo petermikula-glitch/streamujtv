@@ -684,8 +684,11 @@ class PrehrajtoClient(object):
         return CHECK_NO_PREMIUM, None
 
     # --- výpisy -------------------------------------------------------------
-    def fetch_listing(self, start_url, max_pages=MAX_LISTING_PAGES, progress=None, delay=0.5):
+    def fetch_listing(self, start_url, max_pages=MAX_LISTING_PAGES, progress=None, delay=0.5, known=None):
+        """``known`` = hashe videí, která volající už má: výpis skončí u první stránky,
+        na které není nic nového (``listing_partial``); úplný pak není."""
         self.listing_complete = False
+        self.listing_partial = False
         start_url = start_url if start_url.startswith("http") else BASE + start_url
         start_parts = urllib.parse.urlsplit(start_url)
         start_path = start_parts.path.rstrip("/")
@@ -718,6 +721,11 @@ class PrehrajtoClient(object):
                 if h not in seen:
                     seen.add(h)
                     videos.append(item)
+            if known and items and all(item["id"].rsplit(":", 1)[-1] in known for item in items):
+                # nic nového; zbývají-li další stránky, výpis končí jako záměrně zkrácený
+                if to_visit or any(nxt not in visited for nxt in parse_pagination(page, final)):
+                    self.listing_partial = True
+                    return videos
             if items and len(visited) > 1 and len(videos) == before:
                 # Stránka jen zopakovala už načtená videa (např. náhradní obsah za neexistující
                 # stránku). Výpis pak nelze považovat za úplný a nesmí se podle něj mazat.
@@ -769,9 +777,9 @@ class PrehrajtoClient(object):
                 break
         return parse_video_list(body), next_page
 
-    def my_videos(self, progress=None):
+    def my_videos(self, progress=None, known=None):
         self.login()
-        return self.fetch_listing(BASE + UPLOADS_PATH, progress=progress)
+        return self.fetch_listing(BASE + UPLOADS_PATH, progress=progress, known=known)
 
     def my_favorites(self, progress=None):
         return []

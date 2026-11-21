@@ -1,6 +1,7 @@
 """Katalog: synchronizace, slučování, záloha, mezipaměť, Chci vidět a hromadné úpravy."""
 
 import json
+import time
 
 import pytest
 
@@ -397,3 +398,120 @@ def test_large_key_sets_do_not_exceed_sqlite_parameter_limit(tmp_path):
         assert len(lib.movies(keys=keys, limit=5, offset=10)) == 2
         show_keys = [m["key"] for m in lib.shows()] + ["show:neexistuje %d" % i for i in range(1500)]
         assert len(lib.shows(keys=show_keys)) == 12
+
+
+class _TmdbStub(object):
+    enabled = True
+
+    def __init__(self, fail=()):
+        import threading
+        self.lock = threading.Lock()
+        self.active = self.peak = 0
+        self.calls = []
+        self.fail = dict(fail)
+
+    def find(self, title, year=0, want_series=False):
+        import tmdb
+        with self.lock:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            self.calls.append(title)
+        time.sleep(0.02)
+        with self.lock:
+            self.active -= 1
+        if title in self.fail:
+            raise tmdb.TmdbError(self.fail[title])
+        if title.endswith("neznamy"):
+            return None
+        return {"title": title.title(), "year": year, "tmdb_id": len(title), "rating": 70, "genres": ["Drama"]}
+
+
+def _catalogue_with_films(tmp_path, count):
+    import db
+    import nameparser
+    lib = db.Library(str(tmp_path / "c.db"))
+    for i in range(count):
+        raw = "Film %02d %d CZ" % (i, 1990 + i) if i != 3 else "Film neznamy 1993 CZ"
+        lib.upsert_video("%d:f:%016x" % (i + 1, i + 1), raw, "account", nameparser.parse(raw))
+    return lib
+
+
+def test_tmdb_only_enrichment_runs_in_parallel_and_writes_in_order(tmp_path):
+    import catalog
+    lib = _catalogue_with_films(tmp_path, 20)
+    stub = _TmdbStub()
+    seen = []
+    stats = catalog.enrich(lib, lib.meta_to_fetch(), use_csfd=False, tmdb=stub,
+                           progress=lambda index, total, title: seen.append(index) and False)
+    assert stats["ok"] == stats["tmdb"] == 19 and stats["notfound"] == 1 and not stats["errors"]
+    assert 1 < stub.peak <= catalog.TMDB_WORKERS
+    assert seen == sorted(seen) and seen[-1] == 19
+    assert lib.get_meta("movie:film 05|1995")["status"] == "ok"
+    assert lib.get_meta("movie:film neznamy|1993")["status"] == "notfound"
+    assert not lib.meta_to_fetch()
+    lib.close()
+
+
+def test_parallel_enrichment_stops_on_cancel_and_on_invalid_key(tmp_path):
+    import catalog
+    lib = _catalogue_with_films(tmp_path, 30)
+    stub = _TmdbStub()
+    stats = catalog.enrich(lib, lib.meta_to_fetch(), use_csfd=False, tmdb=stub,
+                           progress=lambda index, total, title: index >= 8)
+    assert stats["cancelled"] and len(stub.calls) == 8 and len(lib.meta_to_fetch()) == 22
+
+    metas = lib.meta_to_fetch()
+    stub = _TmdbStub(fail={metas[2]["search_title"]: "TMDB: neplatný API klíč"})
+    stats = catalog.enrich(lib, metas, use_csfd=False, tmdb=stub)
+    assert stats["errors"] == 1 and len(stub.calls) == catalog.TMDB_WORKERS * 2
+    statuses = [lib.get_meta(meta["key"])["status"] for meta in metas]
+    assert statuses[2] == "error" and set(statuses[catalog.TMDB_WORKERS * 2:]) == {"blocked"}
+    lib.close()
+
+
+def test_quick_sync_stops_at_known_page_and_never_prunes(plugin, monkeypatch):
+    import xbmcaddon
+
+    def page(ids, next_page=None):
+        items = "".join('<div data-video-id="%d"><a href="/film-%d/%016x" title="Film %d 2001 CZ">Film %d</a></div>'
+                        % (i, i, i, i, i) for i in ids)
+        link = '<ul class="pagination"><li><a href="/profil/nahrana-videa?videoListing-page=%d">x</a></li></ul>' \
+            % next_page if next_page else ""
+        return "<html>%s%s</html>" % (items, link)
+
+    pages = {1: page([9, 8, 7], 2), 2: page([6, 5, 4], 3), 3: page([3, 2, 1])}
+
+    class Client(Fake):
+        def _request(self, url, data=None, headers=None, follow=True):
+            if "/profil/nahrana-videa" in url:
+                self.calls.append((url, data, follow))
+                number = int(url.rsplit("page=", 1)[1]) if "page=" in url else 1
+                return pages[number], url, "", 200
+            return super()._request(url, data, headers, follow)
+
+    client = Client({"/profil": ("ok", None, "", 200)})
+    client.sleep = lambda seconds: None
+    monkeypatch.setattr(plugin.ui, "make_client", lambda: client)
+
+    def listing_requests():
+        return sum(1 for url, _data, _follow in client.calls if "nahrana-videa" in url)
+
+    assert plugin.run_sync(background=True)["total"] == 9 and listing_requests() == 3
+    xbmcaddon.SETTINGS.update(quick_sync="true", remove_missing="true")
+    # nové video na první stránce, jedno starší mezitím z účtu zmizelo
+    pages[1], pages[3] = page([10, 9, 8], 2), page([3, 2])
+    pages[2] = page([7, 6, 5, 4], 3)
+    client.calls.clear()
+    stats = plugin.run_sync(background=True)
+    assert stats["quick"] and not stats["incomplete"] and stats["new"] == 1 and stats["removed"] == 0
+    assert listing_requests() == 2  # skončila na druhé stránce, kde už nebylo nic nového
+    with plugin.open_library() as lib:
+        assert lib.count_videos() == 10
+        full = int(lib.get_kv("last_full_sync"))
+        lib.set_kv("last_full_sync", full - 25 * 3600)
+
+    client.calls.clear()
+    stats = plugin.run_sync(background=True)  # po dni zase úplná: projde vše a odebere smazané
+    assert not stats["quick"] and listing_requests() == 3 and stats["removed"] == 1
+    client.calls.clear()
+    assert not plugin.run_sync(background=False)["quick"] and listing_requests() == 3  # ruční je vždy úplná

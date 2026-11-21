@@ -174,6 +174,27 @@ def movies(params):
             _add_next_page("movies", params, (page, pages))
             end("movies", MOVIE_SORTS, cache=False)
             return
+        if any(criteria.values()) and not origin:
+            # Filtr verzí (jazyk, kvalita, zhlédnutí): pořadí zjistit jen z klíčů a plná
+            # metadata načíst až pro zobrazenou stránku.
+            grouped = lib.movie_filter_versions()
+            watched = lib.watched()
+            matches = []
+            for key in lib.movie_keys(order=order, **filters):
+                videos = grouped.get(key, [])
+                variants = _filter_versions(videos, criteria, watched)
+                if variants:
+                    matches.append((key, videos, variants))
+            if not matches:
+                notify(_(30121))
+            matches, paging = _paginate(matches, params)
+            found = {movie["key"]: movie for movie in lib.movies(keys=[key for key, _v, _c in matches])}
+            for key, videos, variants in matches:
+                if key in found:
+                    add_movie(found[key], lib, matching=(videos, variants))
+            _add_next_page("movies", params, paging)
+            end("movies", MOVIE_SORTS, cache=False)
+            return
         items = lib.movies(order=order, **filters)
         if origin:
             items = [movie for movie in items if any(normalize(country) in origin[1]

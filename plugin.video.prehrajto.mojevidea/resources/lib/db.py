@@ -373,7 +373,7 @@ class Library(object):
                 self.conn.executemany(sql, ([row[column] for column in columns] for row in rows))
             self.conn.execute("DELETE FROM watchlist_availability")
             self.conn.execute("DELETE FROM settings_kv WHERE k LIKE 'link:%' OR k LIKE 'tmdb:season:%' "
-                              "OR k IN ('last_sync', 'account_snapshot', 'sync_retry_after')")
+                              "OR k IN ('last_sync', 'last_full_sync', 'account_snapshot', 'sync_retry_after')")
             # záloha může být starší (jiná pravidla rozpoznávání) nebo ručně upravená
             for (vid,) in self.conn.execute(
                     "SELECT id FROM videos WHERE meta_key NOT IN (SELECT key FROM meta)").fetchall():
@@ -499,8 +499,15 @@ class Library(object):
                 (vid,))
         return True
 
-    def apply_account_snapshot(self, videos, started, complete, prune):
-        """Zapíše již stažený výpis v jedné transakci, včetně případného odebrání."""
+    def account_video_keys(self):
+        """Klíče (hashe) videí z účtu, která katalog už má."""
+        return {row[0] for row in self.conn.execute("SELECT vkey FROM videos WHERE source='account' AND vkey != ''")}
+
+    def apply_account_snapshot(self, videos, started, complete, prune, partial=False):
+        """Zapíše již stažený výpis v jedné transakci, včetně případného odebrání.
+
+        ``partial`` = záměrně zkrácený výpis (rychlá synchronizace): počítá se jako
+        proběhlá synchronizace, ale ne jako úplná."""
         with self.conn:
             self.conn.execute("BEGIN IMMEDIATE")
             if started <= int(self.get_kv("account_snapshot", 0)):
@@ -523,8 +530,11 @@ class Library(object):
                 removed = self.conn.execute("DELETE FROM videos WHERE id IN (" + missing + ")", (now,)).rowcount
             self._cleanup_meta()
             self.conn.execute("INSERT OR REPLACE INTO settings_kv VALUES ('account_snapshot', ?)", (str(started),))
-            if complete:
+            if complete or partial:
                 self.conn.execute("INSERT OR REPLACE INTO settings_kv VALUES ('last_sync', ?)",
+                                  (str(int(time.time())),))
+            if complete:
+                self.conn.execute("INSERT OR REPLACE INTO settings_kv VALUES ('last_full_sync', ?)",
                                   (str(int(time.time())),))
         return added, removed
 
@@ -763,6 +773,14 @@ class Library(object):
         if limit:
             q += " LIMIT %d OFFSET %d" % (int(limit), max(0, int(offset)))
         return [_row(r) for r in self.conn.execute(q, params).fetchall()]
+
+    def movie_keys(self, genre=None, year_from=None, year_to=None, min_rating=None, country=None,
+                   order="title"):
+        """Jen klíče filmů ve stejném pořadí jako ``movies()`` – bez načítání metadat."""
+        where, params = self._movie_where(genre, year_from, year_to, min_rating, country)
+        q = ("SELECT m.key FROM meta m JOIN videos v ON v.meta_key = m.key AND v.hidden = 0 WHERE "
+             + where + " GROUP BY m.key " + self._order(order))
+        return [row[0] for row in self.conn.execute(q, params)]
 
     def count_movies(self, genre=None, year_from=None, year_to=None, min_rating=None, country=None):
         """Počet filmů, které by vrátilo ``movies()`` se stejnými filtry."""

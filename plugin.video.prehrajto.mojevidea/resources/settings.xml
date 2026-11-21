@@ -69,6 +69,14 @@
                         <popup>false</popup>
                     </control>
                 </setting>
+                <setting id="quick_sync" type="boolean" label="30571" help="" parent="auto_sync">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="auto_sync">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
             </group>
         </category>
         <category id="metadata" label="30020" help="">
