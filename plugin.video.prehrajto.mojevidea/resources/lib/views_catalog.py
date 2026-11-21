@@ -11,11 +11,13 @@ import xbmcplugin
 from kodiutils import keyboard, log, notify, text_viewer
 from search_results import normalize
 import ui
-from ui import (_, add_action, add_dir, _add_item, add_movie, _add_movies, _add_next_page, add_show,
+from ui import (_, add_action, add_dir, _add_item, add_movie, _add_movies, _add_next_page,
+                _add_order_choice, add_show,
                 add_video, _apply_playback, _art, _display_title, _display_year, end, EPISODE_CACHE_RETRY,
                 EPISODE_CACHE_TTL, _episode_detail_action, _episode_metadata_key, _fail_directory,
                 FILM_ORIGINS, _first_page, _list_item, _list_page_size, _meta_context, _meta_info,
-                MOVIE_FILTER_OPTIONS, MOVIE_SORTS, open_library, _paginate, _playback_state, _plot,
+                MOVIE_FILTER_OPTIONS, MOVIE_SORTS, open_library, ORDER_LABELS, _paginate, _playback_state,
+                _plot,
                 _run_action, _set_info, url_for, _version_label, _version_score, _watch_action)
 
 views_discover = ui.LazyModule("views_discover")
@@ -170,6 +172,7 @@ def movies(params):
             except ValueError:
                 page = 1
             items = lib.movies(order=order, limit=size, offset=(page - 1) * size, **filters)
+            _add_order_choice("movies", params, (page, pages))
             _add_movies(lib, items)
             _add_next_page("movies", params, (page, pages))
             end("movies", MOVIE_SORTS, cache=False)
@@ -188,6 +191,7 @@ def movies(params):
             if not matches:
                 notify(_(30121))
             matches, paging = _paginate(matches, params)
+            _add_order_choice("movies", params, paging)
             found = {movie["key"]: movie for movie in lib.movies(keys=[key for key, _v, _c in matches])}
             for key, videos, variants in matches:
                 if key in found:
@@ -218,9 +222,26 @@ def movies(params):
                 add_movie(movie, lib, matching=(videos, variants))
         else:
             items, paging = _paginate(items, params)
+            _add_order_choice("movies", params, paging)
             _add_movies(lib, items)
         _add_next_page("movies", params, paging)
     end("movies", MOVIE_SORTS, cache=False)
+
+
+def list_order(params):
+    """Výběr řazení celého stránkovaného výpisu (filmy, seriály)."""
+    params = dict(params)
+    target = params.pop("target", "movies")
+    if target not in ("movies", "shows"):
+        return
+    current = params.get("order") or "title"
+    keys = [key for key, _label in ORDER_LABELS]
+    choice = ui.select((_(30574) % "").rstrip(": "), [_(label) for _key, label in ORDER_LABELS],
+                       keys.index(current) if current in keys else 0)
+    if choice < 0 or keys[choice] == current:
+        return
+    params.pop("page", None)
+    xbmc.executebuiltin("Container.Update(%s,replace)" % url_for(target, **dict(params, order=keys[choice])))
 
 
 def movie_genres(params):
@@ -298,6 +319,7 @@ def shows(params):
                           order=params.get("order", "title"))
         counts = lib.unread_episode_counts()
     items, paging = _paginate(items, params)
+    _add_order_choice("shows", params, paging)
     for m in items:
         add_show(m, new_count=counts.get(m["key"], 0))
     _add_next_page("shows", params, paging)

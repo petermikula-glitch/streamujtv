@@ -1466,3 +1466,31 @@ msgstr "Další stránka (%d/%d)"
 msgctxt "#30571"
 msgid "Quick automatic sync (new videos only, full sync once a day)"
 msgstr "Rychlá automatická synchronizace (jen nová videa, úplná jednou denně)"
+
+msgctxt "#30572"
+msgid "Clear cache"
+msgstr "Vymazat mezipaměť"
+
+msgctxt "#30573"
+msgid "Cache cleared"
+msgstr "Mezipaměť byla vymazána"
+
+msgctxt "#30574"
+msgid "Sort the whole catalogue: %s"
+msgstr "Řazení celého katalogu: %s"
+
+msgctxt "#30575"
+msgid "by title"
+msgstr "podle názvu"
+
+msgctxt "#30576"
+msgid "recently added first"
+msgstr "od naposledy přidaných"
+
+msgctxt "#30577"
+msgid "by rating"
+msgstr "podle hodnocení"
+
+msgctxt "#30578"
+msgid "by year"
+msgstr "podle roku"

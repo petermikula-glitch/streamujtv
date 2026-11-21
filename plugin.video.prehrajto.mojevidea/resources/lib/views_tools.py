@@ -62,6 +62,7 @@ def tools(params):
     add_action(_(30204), "refresh_all", "DefaultAddonInfoProvider.png")
     add_action(_(30237), "history_clear", "DefaultIconError.png")
     add_action(_(30234), "diagnostics", "DefaultIconInfo.png")
+    add_action(_(30572), "cache_clear", "DefaultAddonProgram.png")
     add_action(_(30345), "backup_catalog", "DefaultAddonLibrary.png")
     add_action(_(30346), "restore_catalog", "DefaultAddonLibrary.png")
     add_action(_(30207), "clear_library", "DefaultIconError.png")
@@ -251,6 +252,12 @@ def account_status(params):
     else:
         set_setting("premium_until", "")
         ok(_(30225))
+
+
+def cache_clear(params):
+    with open_library() as lib:
+        lib.clear_caches()
+    notify(_(30573))
 
 
 def stats(params):

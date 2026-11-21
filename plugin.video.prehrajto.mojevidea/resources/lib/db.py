@@ -411,6 +411,14 @@ class Library(object):
         with self.conn:
             self.conn.execute("DELETE FROM cache WHERE key >= ? AND key < ?", (prefix, prefix + "\uffff"))
 
+    def clear_caches(self):
+        """Vše, co lze znovu načíst ze sítě: odpovědi TMDB, online hledání, ověřená dostupnost,
+        údaje o epizodách a zapamatované přehrávací odkazy. Katalog a historie zůstávají."""
+        with self.conn:
+            self.conn.execute("DELETE FROM cache")
+            self.conn.execute("DELETE FROM settings_kv WHERE k LIKE 'link:%' OR k LIKE 'tmdb:season:%' "
+                              "OR k LIKE 'search:availability:%'")
+
     def get_kv(self, k, default=None):
         row = self.conn.execute("SELECT v FROM settings_kv WHERE k=?", (k,)).fetchone()
         return row[0] if row else default

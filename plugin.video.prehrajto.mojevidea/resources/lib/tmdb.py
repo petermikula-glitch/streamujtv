@@ -200,6 +200,15 @@ class Tmdb(object):
             s += min(10, (r.get("vote_count") or 0) // 100)
             return s
         best = max(results[:10], key=score)
+        if year:
+            # Hledání vrátí vždy „něco". Když nesedí název a rok se liší o víc než rok,
+            # je lepší titul nechat nerozpoznaný než mu přiřadit cizí metadata.
+            names = (best.get("title") or best.get("name") or "",
+                     best.get("original_title") or best.get("original_name") or "")
+            date = best.get("release_date") or best.get("first_air_date") or ""
+            if (not any(normalize(name) == target for name in names)
+                    and (not date[:4].isdigit() or abs(int(date[:4]) - int(year)) > 1)):
+                return None
         return self.details(best["id"], want_series)
 
     def season_episodes(self, tmdb_id, season):

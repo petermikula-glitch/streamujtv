@@ -1466,3 +1466,31 @@ msgstr ""
 msgctxt "#30571"
 msgid "Quick automatic sync (new videos only, full sync once a day)"
 msgstr ""
+
+msgctxt "#30572"
+msgid "Clear cache"
+msgstr ""
+
+msgctxt "#30573"
+msgid "Cache cleared"
+msgstr ""
+
+msgctxt "#30574"
+msgid "Sort the whole catalogue: %s"
+msgstr ""
+
+msgctxt "#30575"
+msgid "by title"
+msgstr ""
+
+msgctxt "#30576"
+msgid "recently added first"
+msgstr ""
+
+msgctxt "#30577"
+msgid "by rating"
+msgstr ""
+
+msgctxt "#30578"
+msgid "by year"
+msgstr ""

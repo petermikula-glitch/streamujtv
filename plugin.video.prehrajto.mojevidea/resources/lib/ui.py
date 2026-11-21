@@ -590,6 +590,22 @@ def _add_next_page(action, params, paging):
     _add_item(url_for(action, **dict(params, page=page + 1)), li, True)
 
 
+ORDER_LABELS = (("title", 30575), ("added", 30576), ("rating", 30577), ("year", 30578))
+
+
+def _add_order_choice(action, params, paging):
+    """Řazení v Kodi působí jen na zobrazenou stránku; tahle položka přepne pořadí celého
+    stránkovaného výpisu. Zobrazuje se nahoře na první stránce."""
+    if not paging or paging[1] < 2 or paging[0] != 1:
+        return
+    current = dict(ORDER_LABELS).get(params.get("order") or "title", 30575)
+    li = _list_item(_(30574) % _(current))
+    li.setArt({"icon": "DefaultIconInfo.png", "thumb": "DefaultIconInfo.png", "fanart": FANART})
+    li.setProperty("SpecialSort", "top")
+    choice = dict((k, v) for k, v in params.items() if k not in ("page", "target"))
+    _add_item(url_for("list_order", target=action, **choice), li, False)
+
+
 def _first_page(params):
     return (params.get("page") or "1") == "1"
 
