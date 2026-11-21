@@ -21,7 +21,9 @@ import html
 import http.client
 import http.cookiejar
 import json
+import os
 import re
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -364,6 +366,7 @@ class PrehrajtoClient(object):
         self.opener = opener or urllib.request.build_opener(processor)
         self.noredirect = noredirect_opener or urllib.request.build_opener(processor, _NoRedirect())
         self._logged_in = False
+        self._last_video_page = None
         self.sleep = time.sleep
 
     @property
@@ -379,7 +382,7 @@ class PrehrajtoClient(object):
             except RateLimited as e:
                 if attempt >= retries:
                     raise TemporaryError("Přehraj.to dočasně omezuje dotazy (HTTP 429), zkus to za chvíli")
-                wait = min(30, e.retry_after or 5 * (attempt + 1))
+                wait = min(30, e.retry_after) if e.retry_after > 0 else 5 * (attempt + 1)
                 self.log("prehrajto: HTTP 429, čekám %s s" % wait)
                 self.sleep(wait)
 
@@ -442,10 +445,21 @@ class PrehrajtoClient(object):
 
     def _save_cookies(self):
         if self.cookie_file and isinstance(self.cookies, http.cookiejar.FileCookieJar):
+            temporary = None
             try:
-                self.cookies.save(ignore_discard=True)
-            except Exception as e:  # noqa: BLE001
-                self.log("prehrajto: cookies nelze uložit: %s" % e)
+                fd, temporary = tempfile.mkstemp(prefix=".prehrajto-cookies-", dir=os.path.dirname(self.cookie_file) or ".")
+                os.close(fd)
+                self.cookies.save(temporary, ignore_discard=True)
+                os.replace(temporary, self.cookie_file)
+                temporary = None
+            except (OSError, ValueError):
+                self.log("prehrajto: cookies nelze uložit")
+            finally:
+                if temporary:
+                    try:
+                        os.unlink(temporary)
+                    except OSError:
+                        pass
 
     # --- přihlášení ---------------------------------------------------------
     def _profile_page(self):
@@ -559,7 +573,8 @@ class PrehrajtoClient(object):
                 skipped_page = True
                 continue
             items = parse_video_list(page)
-            if not items and len(visited) > 1:
+            if ((not items and len(visited) > 1)
+                    or (items and not any(split_ref(item["id"])[0] for item in items))):
                 skipped_page = True
             for item in items:
                 h = item["id"].rsplit(":", 1)[-1]
@@ -631,6 +646,14 @@ class PrehrajtoClient(object):
         return info
 
     # --- přehrání -----------------------------------------------------------
+    def _streams_from_page(self, ref):
+        saved = self._last_video_page
+        if not saved or saved[0] != ref:
+            page, _ = self._get(video_page_url(ref))
+            saved = (ref, parse_page_video_id(page), _source_variants(page), parse_tracks(page))
+            self._last_video_page = saved
+        return saved[1:]
+
     def get_streams(self, ref):
         streams = []
         login_error = None
@@ -645,9 +668,8 @@ class PrehrajtoClient(object):
             else:
                 streams.append({"lang": "", "quality": "ORIG", "url": "orig:" + ref, "subtitles": {}})
         try:
-            page, _ = self._get(video_page_url(ref))
-            subtitles = parse_tracks(page)
-            for quality, url, height in _source_variants(page):
+            _video_id, variants, subtitles = self._streams_from_page(ref)
+            for quality, url, height in variants:
                 streams.append({"lang": "", "quality": quality, "url": url,
                                 "resolution": "%sp" % height, "subtitles": {}})
         except VideoUnavailableError:
@@ -668,7 +690,7 @@ class PrehrajtoClient(object):
         vid, slug, h = split_ref(ref)
         if not vid and self.has_credentials:
             try:
-                vid = parse_page_video_id(self._get(video_page_url(ref))[0])
+                vid, _sources, _tracks = self._streams_from_page(ref)
             except PrehrajtoError:
                 vid = ""
         api_error = None
@@ -702,8 +724,7 @@ class PrehrajtoClient(object):
             if link:
                 return link
             # bez premia originál nejde – nejlepší překódovaná verze
-            page, _ = self._get(video_page_url(ref))
-            sources = _source_variants(page)
+            _video_id, sources, _tracks = self._streams_from_page(ref)
             if sources:
                 _, source, self.fallback_height = sources[0]
                 return source

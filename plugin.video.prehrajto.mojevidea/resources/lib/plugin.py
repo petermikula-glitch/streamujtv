@@ -46,7 +46,22 @@ EPISODE_CACHE_RETRY = 15 * 60
 FILM_ORIGINS = {
     "CZ": (30487, {"cz", "cze", "cesko", "ceska republika", "czechia", "czech republic"}),
     "SK": (30488, {"sk", "svk", "slovensko", "slovenska republika", "slovakia", "slovak republic"}),
-    "CS": (30489, {"cs", "csk", "ceskoslovensko", "czechoslovakia", "cssr", "csfr"}),
+    "CS": (30489, {"cs", "csk", "xc", "ceskoslovensko", "czechoslovakia", "cssr", "csfr"}),
+}
+
+FILM_ORIGINS["CZSK"] = (30489, set().union(*(aliases for _label, aliases in FILM_ORIGINS.values())))
+SEARCH_COUNTRIES = {
+    "CZSK": {"ceskoslovenske", "ceske a slovenske", "ceskoslovenska", "cesko a slovensko"},
+    "CZ": {"ceske", "ceska", "czech"},
+    "SK": {"slovenske", "slovenska", "slovak"},
+    "US": {"usa", "amerika", "spojene staty", "spojene staty americke", "united states",
+           "united states of america", "americke"},
+    "GB": {"velka britanie", "velke britanie", "spojene kralovstvi", "united kingdom", "uk", "britske"},
+    "FR": {"francie", "france", "francouzske"},
+    "DE": {"nemecko", "nemecka", "germany", "nemecke"},
+    "PL": {"polsko", "poland", "polske"},
+    "IT": {"italie", "italy", "italske"},
+    "JP": {"japonsko", "japan", "japonske"},
 }
 
 
@@ -147,10 +162,16 @@ def _apply_version_playback(li, video, context, watched=False):
     return 1 if candidate else None
 
 
+def _account_scope():
+    username = setting("username").strip().casefold()
+    return sha256(username.encode("utf-8")).hexdigest() if username else "guest"
+
+
 def make_client():
+    scope = _account_scope()
+    cookie_file = profile_path("cookies-" + scope + ".lwp") if scope != "guest" else None
     return provider.make_client(setting("username"), setting("password"),
-                                location=setting("location") or "1",
-                                cookie_file=profile_path("cookies.lwp"), log=log)
+                                location=setting("location") or "1", cookie_file=cookie_file, log=log)
 
 
 def make_tmdb():
@@ -465,15 +486,13 @@ def news_menu(params):
     add_dir(_(30491), "recent", "DefaultRecentlyAddedEpisodes.png")
     if make_tmdb().enabled:
         add_dir(_(30492), "tmdb_titles", "DefaultRecentlyAddedMovies.png", kind="movie", category="recent")
-        for origin, label in (("CZ", 30493), ("SK", 30494)):
-            add_dir(_(label), "tmdb_titles", "DefaultRecentlyAddedMovies.png", kind="movie",
-                    category="recent", origin=origin)
+        add_dir(_(30522), "tmdb_titles", "DefaultRecentlyAddedMovies.png", kind="movie",
+                category="recent", origin="CZSK")
     end(cache=False)
 
 
-def _add_origin_shortcuts(action, online=False, **params):
-    for origin in (("CZ", "SK") if online else FILM_ORIGINS):
-        add_dir(_(FILM_ORIGINS[origin][0]), action, "DefaultCountry.png", origin=origin, **params)
+def _add_origin_shortcuts(action, **params):
+    add_dir(_(30489), action, "DefaultCountry.png", origin="CZSK", **params)
 
 
 def tmdb_catalog(params):
@@ -482,7 +501,8 @@ def tmdb_catalog(params):
         notify(_(30355), time_ms=8000)
         add_action(_(30356), "settings")
     else:
-        _add_origin_shortcuts("tmdb_titles", online=True, kind="movie", category="discover")
+        _add_origin_shortcuts("tmdb_titles", kind="movie", category="discover")
+        add_dir(_(30111), "tmdb_filters", "DefaultCountry.png", kind="movie", filter_by="origin")
         add_dir(_(30390), "tmdb_titles", "DefaultMovies.png", kind="movie", category="popular")
         add_dir(_(30100), "tmdb_categories", "DefaultMovies.png", kind="movie")
         add_dir(_(30101), "tmdb_categories", "DefaultTVShows.png", kind="tv")
@@ -492,7 +512,7 @@ def tmdb_catalog(params):
 def tmdb_categories(params):
     kind = params.get("kind", "movie")
     if kind == "movie":
-        _add_origin_shortcuts("tmdb_titles", online=True, kind=kind, category="discover")
+        _add_origin_shortcuts("tmdb_titles", kind=kind, category="discover")
         add_dir(_(30492), "tmdb_titles", kind=kind, category="recent")
     add_dir(_(30351), "tmdb_titles", kind=kind, category="popular")
     add_dir(_(30352), "tmdb_titles", kind=kind, category="top_rated")
@@ -519,6 +539,19 @@ def tmdb_facets(params):
     end(cache=False)
 
 
+def _tmdb_filter_options(client, kind, field):
+    if field == "genre":
+        return [(genre["id"], genre["name"]) for genre in client.genres(kind)]
+    if field == "origin":
+        names = {country["iso_3166_1"]: country.get("native_name") or country["english_name"]
+                 for country in client.countries()}
+        options = [(origin, _(FILM_ORIGINS[origin][0])) for origin in ("CZSK", "CZ", "SK")]
+        options.extend(sorted(((code, name) for code, name in names.items() if code not in ("CZ", "SK")),
+                              key=lambda entry: normalize(entry[1])))
+        return options
+    return [(year, str(year)) for year in range(date.today().year, 1873, -1)]
+
+
 def tmdb_filters(params):
     selection = _tmdb_selection(params)
     kind = selection["kind"]
@@ -527,25 +560,42 @@ def tmdb_filters(params):
         end(cache=False)
         return
     try:
-        if field == "genre":
-            options = [(genre["id"], genre["name"]) for genre in make_tmdb().genres(kind)]
-        elif field == "origin":
-            country_names = {country["iso_3166_1"]: country.get("native_name") or country["english_name"]
-                             for country in make_tmdb().countries()}
-            options = [(origin, _(FILM_ORIGINS[origin][0])) for origin in ("CZ", "SK")]
-            options.extend(sorted(((code, name) for code, name in country_names.items() if code not in ("CZ", "SK")),
-                                  key=lambda entry: normalize(entry[1])))
-        else:
-            options = [(year, str(year)) for year in range(date.today().year, 1873, -1)]
-        if selection[field]:
-            add_dir(_(30428), "tmdb_titles", **dict(selection, **{field: ""}))
-        for value, label in options:
-            add_dir(label, "tmdb_titles", **dict(selection, **{field: value}))
+        options = _tmdb_filter_options(make_tmdb(), kind, field)
     except TmdbError as e:
         notify(str(e), time_ms=8000)
         xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
         return
+    if selection[field]:
+        options.insert(0, ("", _(30428)))
+    for value, label in options:
+        add_dir(label, "tmdb_titles", **dict(selection, **{field: value}))
     end()
+
+
+def tmdb_refine(params):
+    selection = _tmdb_selection(params)
+    fields = [("genre", 30109), ("year", 30357)]
+    if selection["kind"] == "movie":
+        fields.insert(0, ("origin", 30111))
+    choice = select(_(30495), [_(label) for _field, label in fields] + [_(30496)])
+    if choice < 0:
+        return
+    if choice == len(fields):
+        selection.update(genre="", year="", origin="")
+    else:
+        field, heading = fields[choice]
+        try:
+            options = [("", _(30428))] + _tmdb_filter_options(make_tmdb(), selection["kind"], field)
+        except TmdbError as error:
+            notify(str(error), time_ms=8000)
+            return
+        current = next((i for i, (value, _label) in enumerate(options)
+                        if str(value) == selection[field]), 0)
+        picked = select(_(heading), [label for _value, label in options], preselect=current)
+        if picked < 0:
+            return
+        selection[field] = options[picked][0]
+    xbmc.executebuiltin("Container.Update(%s,replace)" % url_for("tmdb_titles", **selection))
 
 
 def _result_pages():
@@ -581,24 +631,44 @@ def tmdb_titles(params):
         page = int(params.get("page", 1))
         if kind not in ("movie", "tv") or category not in allowed or not 1 <= page <= 500:
             raise ValueError(_(30358))
-        if origin and (kind != "movie" or len(origin) != 2 or not origin.isascii() or not origin.isalpha()):
+        if origin and (kind != "movie" or
+                       (origin != "CZSK" and (len(origin) != 2 or not origin.isascii() or not origin.isalpha()))):
             raise ValueError(_(30358))
         filters = {"genre": selection["genre"], "year": selection["year"]}
         if origin:
             filters["origin"] = origin.upper()
         client = make_tmdb()
-        titles, next_page, partial = _tmdb_page_batch(lambda current: client.browse(kind, category, current, **filters), page)
+        if not client.enabled:
+            notify(_(30355))
+            add_action(_(30356), "settings")
+            end(cache=False)
+            return
+
+        def load(current):
+            if origin != "CZSK":
+                return client.browse(kind, category, current, **filters)
+            # Dotazy s jednou zemí používají dokumentovaný parametr. Koprodukce se sloučí níže.
+            cz, cz_pages = client.browse(kind, category, current, **dict(filters, origin="CZ"))
+            sk, sk_pages = client.browse(kind, category, current, **dict(filters, origin="SK"))
+            sort = "release_date" if category == "recent" else "popularity"
+            titles = sorted(cz + sk, key=lambda item: item.get(sort) or ("" if sort == "release_date" else 0),
+                            reverse=True)
+            return titles, max(cz_pages, sk_pages)
+
+        titles, next_page, partial = _tmdb_page_batch(load, page)
     except (ValueError, TmdbError) as e:
         notify(str(e), time_ms=8000)
         xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
         return
 
+    refine = None
     if category in ("discover", "recent"):
-        add_dir(_(30495), "tmdb_facets", "DefaultGenre.png", **selection)
+        add_action(_(30495), "tmdb_refine", "DefaultGenre.png", **selection)
+        refine = _run_action(30495, "tmdb_refine", **selection)
     with open_library() as lib:
         library_items = lib.movies() if kind == "movie" else lib.shows()
         for item in titles:
-            add_tmdb_title(item, kind, lib, library_items)
+            add_tmdb_title(item, kind, lib, library_items, refine=refine)
     if partial:
         notify(_(30497))
     if next_page:
@@ -608,7 +678,7 @@ def tmdb_titles(params):
     end("movies" if kind == "movie" else "tvshows", cache=False)
 
 
-def add_tmdb_title(item, kind, lib, library_items, status=None):
+def add_tmdb_title(item, kind, lib, library_items, status=None, refine=None):
     title = item.get("title") or item.get("name")
     if not title or not item.get("id"):
         return
@@ -643,6 +713,8 @@ def add_tmdb_title(item, kind, lib, library_items, status=None):
                (_(30375), "RunPlugin(%s)" % url_for("watchlist_change", **args))]
     if original != title:
         context.append((_(30359), "Container.Update(%s)" % url_for("provider_search", q=original)))
+    if refine:
+        context.append(refine)
     target = (url_for("tmdb_movie_versions", tmdb_id=item["id"], title=title, original=original,
                       year=released_year) if kind == "movie" else detail_url)
     folder = True
@@ -1278,10 +1350,16 @@ def movie_decades(params):
 
 def movie_countries(params):
     with open_library() as lib:
-        countries = lib.countries("movie")
+        countries = lib.countries()
+    _add_origin_shortcuts("movies", order="title")
+    if make_tmdb().enabled:
+        add_dir(_(30526), "tmdb_filters", "DefaultCountry.png", kind="movie", filter_by="origin")
     for c, count in countries:
         add_dir("%s (%d)" % (c, count), "movies", "DefaultCountry.png", country=c, order="title")
-    end()
+    if not countries:
+        notify(_(30527))
+        add_action(_(30203), "enrich", "DefaultAddonInfo.png")
+    end(cache=False)
 
 
 def movie_ratings(params):
@@ -1841,6 +1919,7 @@ def hidden(params):
 
 def search_menu(params):
     add_dir("[B]%s[/B]" % _(30117), "search", "DefaultAddonsSearch.png")
+    add_dir(_(30111), "movie_countries", "DefaultCountry.png")
     with open_library() as lib:
         history = lib.search_history()
     for q in history:
@@ -1858,14 +1937,14 @@ def _search_cards(query, include_online, filters=None):
             literal_movies, literal_shows = lib.search(query)
             movies = list({item["key"]: item for item in literal_movies + movies}.values())
             shows = list({item["key"]: item for item in literal_shows + shows}.values())
+        grouped = lib.videos_grouped((meta["key"] for meta in (shows if position else movies)),
+                                     season=position[0] if position else None)
         candidates = []
         for meta in ([] if position else movies) + shows:
             kind = "movie" if meta["kind"] == "movie" else "tv"
-            videos = []
-            if kind == "movie" or position:
-                videos = lib.videos_for_meta(meta["key"], season=position[0] if position else None)
-                if position:
-                    videos = [v for v in videos if v["episode"] == position[1]]
+            videos = grouped.get(meta["key"], [])
+            if position:
+                videos = [v for v in videos if v["episode"] == position[1]]
             candidates.append(search_results.new_card(
                 kind, _display_title(meta), _display_year(meta), position,
                 (meta.get("orig_title"), meta.get("search_title")), meta, videos))
@@ -1887,18 +1966,20 @@ def _online_search(query, title, year, position, filters):
     with open_library() as lib:
         cached = lib.get_kv(cache_key)
     now = time.time()
+    account = _account_scope()
     if cached:
         try:
             payload = json.loads(cached)
             ttl = 20 if payload.get("errors") else 600
-            if payload["query"] == query and payload.get("filters") == filters and now - payload["created"] < ttl:
+            if (payload.get("account") == account and payload["query"] == query
+                    and payload.get("filters") == filters and now - payload["created"] < ttl):
                 return payload
         except (TypeError, KeyError, ValueError):
             pass
 
     client = make_client()
     tmdb = make_tmdb()
-    payload = {"created": now, "query": query, "filters": filters, "errors": []}
+    payload = {"created": now, "query": query, "filters": filters, "account": account, "errors": []}
     provider_query = "%s S%02dE%02d" % (title, *position) if position else query
     with ThreadPoolExecutor(max_workers=2) as pool:
         provider_task = pool.submit(_provider_page_batch, client, provider_query)
@@ -1986,17 +2067,103 @@ def _search_label(card):
     return title
 
 
+def _country_query(query, lib):
+    name = normalize(query)
+    if name in ("ceskoslovenske filmy", "ceske a slovenske filmy", "ceskoslovensko"):
+        return "CZSK", FILM_ORIGINS["CZSK"][1]
+    words = name.split()
+    if words and words[-1] in ("filmy", "film"):
+        name = " ".join(words[:-1])
+    explicit = name.startswith(("filmy z ", "zeme ", "stat "))
+    if explicit:
+        name = name.split(" ", 2)[2] if name.startswith("filmy z ") else name.split(" ", 1)[1]
+    for code, aliases in SEARCH_COUNTRIES.items():
+        known = aliases | FILM_ORIGINS.get(code, (0, set()))[1]
+        if name in known or (explicit and name == code.lower()) or query.strip() == code:
+            return code, known | {code.lower()}
+    if len(name) <= 2 and not explicit and query != query.upper():
+        return "", set()
+    country = next((value for value, _count in lib.countries() if normalize(value) == name), "")
+    return "", {name} if country else set()
+
+
+def _add_people(people):
+    for person in people:
+        add_dir(person["name"], "person_titles", "DefaultActor.png", person_id=person["id"])
+
+
+def search_people(params):
+    query = params.get("q", "").strip()
+    client = make_tmdb()
+    if not client.enabled:
+        notify(_(30355))
+        add_action(_(30356), "settings")
+        end(cache=False)
+        return
+    try:
+        people, next_page, partial = _tmdb_page_batch(lambda page: client.search_people(query, page),
+                                                       max(1, int(params.get("page", 1))))
+    except (TmdbError, ValueError) as error:
+        notify(str(error))
+        end(cache=False)
+        return
+    _add_people(people)
+    if next_page:
+        add_dir(_(30341), "search_people", q=query, page=next_page)
+    if partial:
+        notify(_(30497))
+    elif not people:
+        notify(_(30524))
+    end(cache=False)
+
+
+def person_titles(params):
+    client = make_tmdb()
+    if not client.enabled:
+        add_action(_(30356), "settings")
+        end(cache=False)
+        return
+    try:
+        credits = client.acting_credits(int(params["person_id"]))
+    except (TmdbError, ValueError) as error:
+        notify(str(error))
+        end(cache=False)
+        return
+    with open_library() as lib:
+        lists = {"movie": lib.movies(), "tv": lib.shows()}
+        for item in credits:
+            kind = item["media_type"]
+            add_tmdb_title(item, kind, lib, lists[kind])
+    if not credits:
+        notify(_(30121))
+    end("videos", cache=False)
+
+
 def search(params):
     query = params.get("q", "").strip()
-    if not query:
-        query = keyboard(_(30118))
-        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
-        if query and query.strip():
-            xbmc.executebuiltin("Container.Update(%s)" % url_for("search", q=query.strip()))
-        return
+    from_keyboard = not query
+    if from_keyboard:
+        query = (keyboard(_(30118)) or "").strip()
+        if not query:
+            xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+            return
     include_online = params.get("online") == "1"
     with open_library() as lib:
         lib.add_search(query)
+        origin, countries = _country_query(query, lib)
+        if countries:
+            if origin:
+                add_dir(_(30525), "tmdb_titles", "DefaultCountry.png",
+                        kind="movie", category="discover", origin=origin)
+            found = False
+            for movie in lib.movies():
+                if any(normalize(country) in countries for country in movie["countries"]):
+                    add_movie(movie, lib)
+                    found = True
+            if not found:
+                notify(_(30498))
+            end("movies", MOVIE_SORTS, cache=from_keyboard)
+            return
     filters = _online_filters(params)
     cards, errors = _search_cards(query, include_online, filters)
     if include_online:
@@ -2018,8 +2185,20 @@ def search(params):
         if card["local"]:
             context.extend(_meta_context(card["local"]))
         _search_entry(card, name, action, args, video, context)
+    people = []
     if not cards:
-        notify(_(30121 if include_online else 30389))
+        title, year, position = search_results.split_query(query)
+        client = make_tmdb()
+        if not year and not position and client.enabled:
+            try:
+                people, _pages = client.search_people(title)
+            except TmdbError:
+                errors.append("TMDB")
+        if people:
+            _add_people(people)
+        else:
+            notify(_(30121 if include_online else 30389))
+    add_dir(_(30523), "search_people", "DefaultActor.png", q=query)
     if errors:
         notify(_(30469) % ", ".join(errors))
     if not include_online:
@@ -2027,7 +2206,7 @@ def search(params):
     else:
         add_dir(_(30340), "provider_search", "DefaultAddonsSearch.png", q=query, **filters)
         add_dir(_(30372), "tmdb_search", "DefaultAddonsSearch.png", q=search_results.split_query(query)[0])
-    end("videos", cache=False)
+    end("videos", cache=from_keyboard)
 
 
 def search_title(params):
@@ -2086,11 +2265,17 @@ def provider_search(params):
         end(cache=False)
         return
     query = params.get("q", "").strip()
-    if not query:
+    from_keyboard = not query
+    if from_keyboard:
         query = (keyboard(_(30340)) or "").strip()
-        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
-        if query:
-            xbmc.executebuiltin("Container.Update(%s)" % url_for("provider_search", q=query))
+        if not query:
+            xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+            return
+        params = dict(params, q=query)
+    with open_library() as lib:
+        _origin, countries = _country_query(query, lib)
+    if countries:
+        search({"q": query})
         return
     filters = _online_filters(params)
     try:
@@ -2156,7 +2341,7 @@ def provider_search(params):
         add_dir(_(30341), "provider_search", q=query, page=next_page, cursor=cursor, **filters)
     if not videos and not cursor:
         notify(_(30370))
-    end("videos", cache=False)
+    end("videos", cache=from_keyboard)
 
 
 def _provider_version(video, parsed):
@@ -2342,6 +2527,8 @@ def run_sync(background=False):
     finally:
         progress.close()
     log_info("sync: %s" % stats)
+    if stats.get("superseded"):
+        return stats
     msg = _(30212) % (stats["total"], stats["new"], stats["removed"])
     if stats["incomplete"] and not stats["cancelled"]:
         notify(_(30343) % stats["total"], time_ms=8000)
@@ -3017,7 +3204,8 @@ def _link_cache_get(vid):
     with open_library() as lib:
         data = _parse_link_cache(lib.get_kv("link:" + vid))
     if (isinstance(data.get("url"), str) and isinstance(data.get("ts"), (int, float))
-            and time.time() - data["ts"] < provider.LINK_TTL
+            and data.get("account") == _account_scope()
+            and 0 <= time.time() - data["ts"] < provider.LINK_TTL
             and data.get("quality_preference", 0) == setting_int("pref_quality", 0)):
         return data
     return None
@@ -3028,7 +3216,7 @@ def _link_cache_put(vid, final, subtitles, fallback_height):
     payload = {
         "url": final, "subtitles": subtitles, "fallback_height": fallback_height,
         "cache_id": cache_id, "ts": int(time.time()),
-        "quality_preference": setting_int("pref_quality", 0),
+        "quality_preference": setting_int("pref_quality", 0), "account": _account_scope(),
     }
     with open_library() as lib:
         lib.set_kv("link:" + vid, json.dumps(payload))
@@ -3242,10 +3430,11 @@ ROUTES = {
     "movie_ratings": movie_ratings, "versions": versions, "shows_menu": shows_menu, "shows": shows,
     "show": show, "season": season, "recent": recent, "all_videos": all_videos, "unmatched": unmatched, "hidden": hidden,
     "search_menu": search_menu, "search": search, "search_delete": search_delete, "search_title": search_title,
+    "search_people": search_people, "person_titles": person_titles,
     "provider_search": provider_search, "provider_save": provider_save, "online_filters": online_filters,
     "tmdb_catalog": tmdb_catalog, "tmdb_categories": tmdb_categories,
     "tmdb_filters": tmdb_filters, "tmdb_titles": tmdb_titles, "tmdb_title": tmdb_title,
-    "tmdb_facets": tmdb_facets, "news_menu": news_menu, "movie_parts": movie_parts,
+    "tmdb_facets": tmdb_facets, "tmdb_refine": tmdb_refine, "news_menu": news_menu, "movie_parts": movie_parts,
     "my_videos_menu": my_videos_menu, "tmdb_search": tmdb_search,
     "tmdb_movie_versions": tmdb_movie_versions,
     "watchlist": watchlist, "watchlist_change": watchlist_change,

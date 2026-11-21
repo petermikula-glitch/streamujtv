@@ -22,7 +22,7 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
     ``progress(stage, pages, count)`` může vrátit True = zrušit.
     """
     log = log or (lambda m: None)
-    started = int(time.time())
+    started = time.time_ns()
     stats = {"total": 0, "new": 0, "removed": 0, "favorites": 0, "playlists": 0, "cancelled": False}
 
     def prog(stage):
@@ -34,13 +34,14 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
         return inner
 
     videos = client.my_videos(progress=prog("my_videos"))
-    for v in videos:
-        if lib.upsert_video(v["id"], v["title"] or v["id"], "account", _parsed(v["title"] or v["id"]),
-                            duration=v.get("duration", 0), thumb=v.get("thumb", ""), size=v.get("size", ""),
-                            quality=v.get("quality", ""), track_episode=True):
-            stats["new"] += 1
     stats["total"] = len(videos)
     stats["incomplete"] = not getattr(client, "listing_complete", True)
+    complete = not stats["cancelled"] and not stats["incomplete"]
+    result = lib.apply_account_snapshot(videos, started, complete, remove_missing)
+    if result is None:
+        stats["superseded"] = True
+        return stats
+    stats["new"], stats["removed"] = result
 
     if include_favorites and not stats["cancelled"]:
         try:
@@ -81,12 +82,8 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
                 lib.add_to_collection(cid, video["meta_key"])
             stats["playlists"] += 1
 
-    # mazat jen po úplném a neprázdném načtení – chyba stránky nesmí vymazat katalog
-    if remove_missing and not stats["cancelled"] and not stats["incomplete"] and videos:
-        stats["removed"] = lib.remove_missing("account", started)
-    lib.cleanup_meta()
-    if not stats["cancelled"] and not stats["incomplete"]:
-        lib.set_kv("last_sync", int(time.time()))
+    if include_favorites or include_playlists:
+        lib.cleanup_meta()
     return stats
 
 

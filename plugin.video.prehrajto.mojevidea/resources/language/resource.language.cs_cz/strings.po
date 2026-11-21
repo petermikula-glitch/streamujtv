@@ -1290,3 +1290,27 @@ msgstr "Vybrat jinou verzi"
 msgctxt "#30521"
 msgid "Resume at %s?"
 msgstr "Pokračovat od %s?"
+
+msgctxt "#30522"
+msgid "Recent Czech and Slovak releases (TMDB)"
+msgstr "Československé novinky (TMDB)"
+
+msgctxt "#30523"
+msgid "Search for actors in TMDB"
+msgstr "Hledat herce v TMDB"
+
+msgctxt "#30524"
+msgid "No actors found"
+msgstr "Nenašli se žádní herci"
+
+msgctxt "#30525"
+msgid "Browse films from this country in TMDB"
+msgstr "Procházet filmy z této země v TMDB"
+
+msgctxt "#30526"
+msgid "Browse by country in TMDB"
+msgstr "Podle země v TMDB"
+
+msgctxt "#30527"
+msgid "Country filters use movie metadata. Fetch the missing details to see more countries."
+msgstr "Seznam zemí vychází z metadat filmů. Zobrazí se po doplnění chybějících údajů."

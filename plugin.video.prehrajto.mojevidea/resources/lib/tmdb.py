@@ -84,6 +84,21 @@ class Tmdb(object):
         return ([item for item in data.get("results") or [] if item.get("media_type") in ("movie", "tv")],
                 min(data.get("total_pages") or 0, 500))
 
+    def search_people(self, query, page=1):
+        data = self._get("/search/person", query=query, page=page, include_adult="false")
+        people = [item for item in data.get("results") or [] if item.get("id") and item.get("name")]
+        return people, min(data.get("total_pages") or 0, 500)
+
+    def acting_credits(self, person_id):
+        data = self._get("/person/%d/combined_credits" % person_id)
+        entries = {}
+        for item in data.get("cast") or []:
+            key = item.get("media_type"), item.get("id")
+            if key[0] in ("movie", "tv") and key[1] and not item.get("adult"):
+                entries.setdefault(key, item)
+        return sorted(entries.values(), key=lambda item: item.get("release_date") or item.get("first_air_date") or "",
+                      reverse=True)
+
     def search(self, query, want_series=False):
         """Seznam kandidátů pro ruční výběr: [{id, title, year, orig_title}]."""
         data = self._get("/search/" + ("tv" if want_series else "movie"), query=query,

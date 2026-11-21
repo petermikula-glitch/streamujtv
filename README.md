@@ -51,6 +51,8 @@ V doplňku Přehraj.to otevřete **Hledat** a zadejte dotaz. Pod výsledky z vla
 vyberte **Zahrnout online výsledky**. Pod společným přehledem jsou odkazy na úplné
 výsledky jednotlivých služeb.
 Video můžete přehrát rovnou nebo ho přes kontextovou nabídku přidat do vlastního katalogu.
+Hledání jména herce zobrazí odpovídající tituly z vašeho katalogu. S nastaveným klíčem
+TMDB můžete otevřít i **Hledat herce v TMDB** a procházet jeho filmografii.
 
 V **Nástroje → Zálohovat katalog** uložíte katalog, kolekce, ruční úpravy a historii
 do souboru JSON. **Obnovit katalog** po potvrzení nahradí aktuální data zálohou
@@ -93,9 +95,11 @@ Po zapnutí **Sdílet historii sledování s knihovnou Kodi** doplněk propojí
 pozice a zhlédnutí u rozpoznaných exportů. Záznamy z Kodi se načtou při otevření
 Rozkoukaných nebo ručně v průvodci.
 
-**České filmy** a **Slovenské filmy** jsou v **Moje filmy** i v **Objevovat**.
-Vlastní katalog čte zemi výroby z metadat ČSFD nebo TMDB a nabízí také
-**Československé filmy**. V **Objevovat** lze kombinovat zemi, žánr a rok.
+Společná položka **Československé filmy** je v **Moje filmy** i v **Objevovat**.
+Ve vlastním katalogu zahrnuje českou, slovenskou i historickou československou produkci
+podle metadat ČSFD nebo TMDB. V nabídce **Hledat** lze zadat například `Francie` nebo
+`československé filmy`. V **Objevovat → Podle země** využijete katalog TMDB.
+Volba **Upřesnit výběr** v jeho výsledcích otevře dialog pro kombinaci země, žánru a roku.
 **Novinky** nabízejí nově přidaná videa z účtu a filmy vydané v posledních 90 dnech
 podle TMDB. Velikost výpisu lze upravit v **Nastavení → Hledat**.
 Výchozí výpis spojuje dvě stránky služby, pokud jsou dostupné.

@@ -78,8 +78,9 @@ def _catalogue_files(lib, names, base_url):
     movies = shows = 0
     with lib.conn:
         lib.conn.execute("BEGIN")
+        grouped = lib.videos_grouped()
         for meta in lib.movies():
-            videos = lib.videos_for_meta(meta["key"])
+            videos = grouped.get(meta["key"], [])
             if not videos:
                 continue
             name = _directory_name(meta, names, used)
@@ -91,7 +92,7 @@ def _catalogue_files(lib, names, base_url):
             name = _directory_name(meta, names, used)
             path = "Serialy/" + name
             files[path + "/tvshow.nfo"] = _nfo("tvshow", meta)
-            for video in lib.videos_for_meta(meta["key"]):
+            for video in grouped.get(meta["key"], []):
                 season, episode = video["season"], video["episode"]
                 if not episode:
                     continue
