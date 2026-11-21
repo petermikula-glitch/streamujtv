@@ -32,7 +32,7 @@ z **ČSFD** (záložně z TMDB).
 
 1. Stáhněte ZIP (nebo ho sestavte příkazem `python3 tools/build_zip.py`, vznikne v `dist/`).
 2. V Kodi: *Nastavení → Systém → Doplňky → povolit Neznámé zdroje*.
-3. *Doplňky → Instalovat ze ZIP souboru* → vyberte `plugin.video.streamujtv-1.0.0.zip`.
+3. *Doplňky → Instalovat ze ZIP souboru* → vyberte `plugin.video.streamujtv-1.0.1.zip`.
 4. Otevřete nastavení doplňku a vyplňte **uživatelské jméno a heslo** k streamuj.tv.
 5. Spusťte *Nástroje → Synchronizovat s účtem streamuj.tv*.
 

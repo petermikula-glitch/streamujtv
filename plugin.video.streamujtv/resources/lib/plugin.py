@@ -284,6 +284,7 @@ def root(params):
     add_dir(_(30100), "movies_menu", "DefaultMovies.png")
     add_dir(_(30101), "shows_menu", "DefaultTVShows.png")
     add_dir(_(30104), "recent", "DefaultRecentlyAddedMovies.png")
+    add_dir(_(30134), "all_videos", "DefaultVideo.png")
     add_dir(_(30102), "search_menu", "DefaultAddonsSearch.png")
     add_dir(_(30103), "collections", "DefaultSets.png")
     add_dir(_(30105), "unmatched", "DefaultVideoDeleted.png")
@@ -430,8 +431,20 @@ def season(params):
 
 
 def recent(params):
+    _video_list(lambda lib: lib.recent_videos(limit=100),
+                [xbmcplugin.SORT_METHOD_DATEADDED, xbmcplugin.SORT_METHOD_LABEL])
+
+
+def all_videos(params):
+    """Všechna videa z účtu v jednom seznamu (filmy i díly), řaditelná."""
+    _video_list(lambda lib: lib.all_videos(),
+                [xbmcplugin.SORT_METHOD_LABEL_IGNORE_THE, xbmcplugin.SORT_METHOD_DATEADDED,
+                 xbmcplugin.SORT_METHOD_VIDEO_YEAR, xbmcplugin.SORT_METHOD_VIDEO_RATING])
+
+
+def _video_list(load, sorts):
     with open_library() as lib:
-        videos = lib.recent_videos(limit=100)
+        videos = load(lib)
         metas = dict((m["key"], m) for m in (lib.get_meta(k) for k in set(v["meta_key"] for v in videos)) if m)
     for v in videos:
         meta = metas.get(v["meta_key"]) or {}
@@ -443,7 +456,7 @@ def recent(params):
         if setting_bool("show_rating"):
             label += _rating_label(meta)
         add_video(v, meta, label=label, mediatype="episode" if v["kind"] == "episode" else "movie")
-    end("videos", [xbmcplugin.SORT_METHOD_DATEADDED, xbmcplugin.SORT_METHOD_LABEL])
+    end("videos", sorts)
 
 
 def unmatched(params):
@@ -1012,7 +1025,7 @@ ROUTES = {
     "root": root, "movies_menu": movies_menu, "movies": movies, "movie_genres": movie_genres,
     "movie_decades": movie_decades, "movie_countries": movie_countries,
     "movie_ratings": movie_ratings, "versions": versions, "shows_menu": shows_menu, "shows": shows,
-    "show": show, "season": season, "recent": recent, "unmatched": unmatched, "hidden": hidden,
+    "show": show, "season": season, "recent": recent, "all_videos": all_videos, "unmatched": unmatched, "hidden": hidden,
     "search_menu": search_menu, "search": search, "search_delete": search_delete,
     "collections": collections, "collection": collection, "collection_new": collection_new,
     "collection_rename": collection_rename, "collection_delete": collection_delete,

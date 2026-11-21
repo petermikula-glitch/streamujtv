@@ -283,6 +283,10 @@ msgctxt "#30133"
 msgid "%d videos"
 msgstr "Počet videí: %d"
 
+msgctxt "#30134"
+msgid "All videos"
+msgstr "Všechna videa"
+
 msgctxt "#30135"
 msgid "%d %% and more"
 msgstr "%d %% a více"

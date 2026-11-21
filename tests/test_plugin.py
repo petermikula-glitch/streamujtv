@@ -43,7 +43,7 @@ def seed(p):
 def test_root_menu(plugin):
     items = run(plugin)
     labels = [i[0] for i in items]
-    assert labels[:3] == ["Filmy", "Seriály", "Nově přidané"]
+    assert labels[:4] == ["Filmy", "Seriály", "Nově přidané", "Všechna videa"]
     assert "Nástroje" in labels
 
 
@@ -121,3 +121,9 @@ def test_search_keyboard_redirects(plugin):
     del xbmc.BUILTINS[:]
     run(plugin, "action=search")
     assert any("Container.Update" in b and "q=matrix" in b for b in xbmc.BUILTINS)
+
+
+def test_all_videos(plugin):
+    seed(plugin)
+    items = run(plugin, "action=all_videos")
+    assert len(items) == 3 and all("action=play" in i[1] for i in items)

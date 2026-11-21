@@ -388,6 +388,10 @@ class Library(object):
             "SELECT * FROM videos WHERE hidden=0 ORDER BY added_at DESC, raw_title LIMIT ?",
             (limit,)).fetchall()]
 
+    def all_videos(self):
+        return [_row(r) for r in self.conn.execute(
+            "SELECT * FROM videos WHERE hidden=0 ORDER BY raw_title COLLATE NOCASE").fetchall()]
+
     def hidden_videos(self):
         return [_row(r) for r in self.conn.execute(
             "SELECT * FROM videos WHERE hidden=1 ORDER BY raw_title COLLATE NOCASE").fetchall()]

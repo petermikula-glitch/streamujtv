@@ -77,6 +77,7 @@ STRINGS = {
     30132: ("The catalogue is empty. Run account synchronization in Tools or import links.",
             "Katalog je prázdný. Spusť synchronizaci s účtem v Nástrojích nebo importuj odkazy."),
     30133: ("%d videos", "Počet videí: %d"),
+    30134: ("All videos", "Všechna videa"),
     30135: ("%d %% and more", "%d %% a více"),
     # --- nástroje ---
     30200: ("Synchronize with streamuj.tv account", "Synchronizovat s účtem streamuj.tv"),
