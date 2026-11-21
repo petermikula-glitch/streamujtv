@@ -782,3 +782,11 @@ msgstr ""
 msgctxt "#30392"
 msgid "My library"
 msgstr ""
+
+msgctxt "#30393"
+msgid "Saved movies"
+msgstr ""
+
+msgctxt "#30394"
+msgid "Sort and filter movies"
+msgstr ""

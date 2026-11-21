@@ -782,3 +782,11 @@ msgstr "Detail titulu"
 msgctxt "#30392"
 msgid "My library"
 msgstr "Moje knihovna"
+
+msgctxt "#30393"
+msgid "Saved movies"
+msgstr "Moje filmy"
+
+msgctxt "#30394"
+msgid "Sort and filter movies"
+msgstr "Řazení a filtry filmů"

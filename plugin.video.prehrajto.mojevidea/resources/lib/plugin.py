@@ -311,10 +311,16 @@ MOVIE_SORTS = [xbmcplugin.SORT_METHOD_UNSORTED, xbmcplugin.SORT_METHOD_LABEL_IGN
 # Obrazovky
 # ---------------------------------------------------------------------------
 
+def add_saved_movies(label):
+    filters = [(_(30394), "Container.Update(%s)" % url_for("movies_menu"))]
+    add_dir(label, "movies", "DefaultMovies.png", context=filters, order="added")
+
+
 def root(params):
     with open_library() as lib:
         empty = lib.count_videos() == 0
     add_dir(_(30360), "in_progress", "DefaultInProgressShows.png")
+    add_saved_movies(_(30393))
     if make_tmdb().enabled:
         add_dir(_(30390), "tmdb_titles", "DefaultMovies.png", kind="movie", category="popular")
     add_dir(_(30361), "my_videos_menu", "DefaultVideo.png")
@@ -328,7 +334,7 @@ def root(params):
 
 
 def my_videos_menu(params):
-    add_dir(_(30100), "movies_menu", "DefaultMovies.png")
+    add_saved_movies(_(30100))
     add_dir(_(30101), "shows_menu", "DefaultTVShows.png")
     add_dir(_(30104), "recent", "DefaultRecentlyAddedMovies.png")
     add_dir(_(30134), "all_videos", "DefaultVideo.png")
@@ -656,7 +662,7 @@ def movies(params):
                            order=order)
     for m in items:
         add_movie(m)
-    end("movies", MOVIE_SORTS)
+    end("movies", MOVIE_SORTS, cache=False)
 
 
 def movie_genres(params):
