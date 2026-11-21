@@ -1154,3 +1154,83 @@ msgstr ""
 msgctxt "#30486"
 msgid "Browse episodes on Přehraj.to"
 msgstr ""
+
+msgctxt "#30487"
+msgid "Czech films"
+msgstr ""
+
+msgctxt "#30488"
+msgid "Slovak films"
+msgstr ""
+
+msgctxt "#30489"
+msgid "Czechoslovak films"
+msgstr ""
+
+msgctxt "#30490"
+msgid "New releases and additions"
+msgstr ""
+
+msgctxt "#30491"
+msgid "Recently added to my catalogue"
+msgstr ""
+
+msgctxt "#30492"
+msgid "Recently released movies (TMDB)"
+msgstr ""
+
+msgctxt "#30493"
+msgid "Recent Czech releases (TMDB)"
+msgstr ""
+
+msgctxt "#30494"
+msgid "Recent Slovak releases (TMDB)"
+msgstr ""
+
+msgctxt "#30495"
+msgid "Refine selection"
+msgstr ""
+
+msgctxt "#30496"
+msgid "Clear all filters"
+msgstr ""
+
+msgctxt "#30497"
+msgid "Some results could not be loaded. Open the next page to retry."
+msgstr ""
+
+msgctxt "#30498"
+msgid "No movies from this country in the catalogue. Country is taken from movie metadata."
+msgstr ""
+
+msgctxt "#30499"
+msgid "Pages from each service per listing"
+msgstr ""
+
+msgctxt "#30500"
+msgid "1 page"
+msgstr ""
+
+msgctxt "#30501"
+msgid "2 pages"
+msgstr ""
+
+msgctxt "#30502"
+msgid "3 pages"
+msgstr ""
+
+msgctxt "#30503"
+msgid "Other instalments"
+msgstr ""
+
+msgctxt "#30504"
+msgid "No verified movie collection was found."
+msgstr ""
+
+msgctxt "#30505"
+msgid "Offer the next movie after playback ends"
+msgstr ""
+
+msgctxt "#30506"
+msgid "Play the next movie?"
+msgstr ""

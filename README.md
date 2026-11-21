@@ -93,6 +93,17 @@ Po zapnutí **Sdílet historii sledování s knihovnou Kodi** doplněk propojí
 pozice a zhlédnutí u rozpoznaných exportů. Záznamy z Kodi se načtou při otevření
 Rozkoukaných nebo ručně v průvodci.
 
+**České filmy** a **Slovenské filmy** jsou v **Moje filmy** i v **Objevovat**.
+Vlastní katalog čte zemi výroby z metadat ČSFD nebo TMDB a nabízí také
+**Československé filmy**. V **Objevovat** lze kombinovat zemi, žánr a rok.
+**Novinky** nabízejí nově přidaná videa z účtu a filmy vydané v posledních 90 dnech
+podle TMDB. Velikost výpisu lze upravit v **Nastavení → Hledat**.
+Výchozí výpis spojuje dvě stránky služby, pokud jsou dostupné.
+
+**Další části** v detailu filmu vycházejí z filmových kolekcí TMDB. Pokud je
+navazující film dostupný ve vlastním katalogu, doplněk jej může nabídnout po
+dokoukání. Zapíná se to v **Nastavení → Přehrávání**.
+
 ## Instalace
 
 Kodi neumí instalovat přímo z gitu, proto je tu **Kodi repozitář**. Nainstaluje se jednou

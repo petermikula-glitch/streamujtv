@@ -134,10 +134,31 @@
                     <default>false</default>
                     <control type="toggle"/>
                 </setting>
+                <setting id="offer_next_movie" type="boolean" label="30505" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="subtitles" type="boolean" label="30034" help="">
                     <level>0</level>
                     <default>true</default>
                     <control type="toggle"/>
+                </setting>
+            </group>
+        </category>
+        <category id="search" label="30407" help="">
+            <group id="1" label="30407">
+                <setting id="search_result_pages" type="integer" label="30499" help="">
+                    <level>0</level>
+                    <default>2</default>
+                    <constraints>
+                        <options>
+                            <option label="30500">1</option>
+                            <option label="30501">2</option>
+                            <option label="30502">3</option>
+                        </options>
+                    </constraints>
+                    <control type="spinner" format="string"/>
                 </setting>
             </group>
         </category>

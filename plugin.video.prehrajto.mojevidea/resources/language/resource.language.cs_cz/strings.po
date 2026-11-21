@@ -1154,3 +1154,83 @@ msgstr "Sdílet historii sledování s knihovnou Kodi"
 msgctxt "#30486"
 msgid "Browse episodes on Přehraj.to"
 msgstr "Procházet díly na Přehraj.to"
+
+msgctxt "#30487"
+msgid "Czech films"
+msgstr "České filmy"
+
+msgctxt "#30488"
+msgid "Slovak films"
+msgstr "Slovenské filmy"
+
+msgctxt "#30489"
+msgid "Czechoslovak films"
+msgstr "Československé filmy"
+
+msgctxt "#30490"
+msgid "New releases and additions"
+msgstr "Novinky"
+
+msgctxt "#30491"
+msgid "Recently added to my catalogue"
+msgstr "Nově přidané do mého katalogu"
+
+msgctxt "#30492"
+msgid "Recently released movies (TMDB)"
+msgstr "Nedávno vydané filmy (TMDB)"
+
+msgctxt "#30493"
+msgid "Recent Czech releases (TMDB)"
+msgstr "České novinky (TMDB)"
+
+msgctxt "#30494"
+msgid "Recent Slovak releases (TMDB)"
+msgstr "Slovenské novinky (TMDB)"
+
+msgctxt "#30495"
+msgid "Refine selection"
+msgstr "Upřesnit výběr"
+
+msgctxt "#30496"
+msgid "Clear all filters"
+msgstr "Zrušit všechny filtry"
+
+msgctxt "#30497"
+msgid "Some results could not be loaded. Open the next page to retry."
+msgstr "Část výsledků se nepodařilo načíst. Na další stránce to můžeš zkusit znovu."
+
+msgctxt "#30498"
+msgid "No movies from this country in the catalogue. Country is taken from movie metadata."
+msgstr "V katalogu nejsou filmy s touto zemí původu v metadatech."
+
+msgctxt "#30499"
+msgid "Pages from each service per listing"
+msgstr "Stránky ze služby v jednom výpisu"
+
+msgctxt "#30500"
+msgid "1 page"
+msgstr "1 stránka"
+
+msgctxt "#30501"
+msgid "2 pages"
+msgstr "2 stránky"
+
+msgctxt "#30502"
+msgid "3 pages"
+msgstr "3 stránky"
+
+msgctxt "#30503"
+msgid "Other instalments"
+msgstr "Další části"
+
+msgctxt "#30504"
+msgid "No verified movie collection was found."
+msgstr "Nepodařilo se najít filmovou sérii v TMDB."
+
+msgctxt "#30505"
+msgid "Offer the next movie after playback ends"
+msgstr "Nabídnout další část po skončení filmu"
+
+msgctxt "#30506"
+msgid "Play the next movie?"
+msgstr "Přehrát další část?"

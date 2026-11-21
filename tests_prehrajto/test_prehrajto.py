@@ -321,7 +321,10 @@ def test_version_label_shows_size(plugin):
 
 
 def test_web_search_paginates_and_lists_playable_videos(plugin, monkeypatch):
+    import xbmcaddon
     import xbmcplugin
+
+    xbmcaddon.SETTINGS["search_result_pages"] = "1"
 
     query = "/hledej/Pel%C3%AD%C5%A1ky%20CZ"
     next_page = "?videoListing-page=2"
@@ -1200,3 +1203,113 @@ def test_kodi_wizard_checks_sources_and_only_shares_verified_exports(plugin, mon
         lib.record_play(REF, 1200, 6200)
     plugin.publish_kodi_history({REF})
     assert native["resume"]["position"] == 900.0
+
+
+def test_local_czech_slovak_categories_follow_production_metadata(plugin):
+    import nameparser
+    import xbmcplugin
+
+    films = [
+        (REF, "Pelisky.1999.CZ", ["Czech Republic"]),
+        ("2:film:bbbbbbbbbbbbbbbb", "Slovensky.2009.SK", ["Slovensko"]),
+        ("3:film:cccccccccccccccc", "Koprodukce.2024.EN", ["CZ", "Slovakia"]),
+        ("4:film:dddddddddddddddd", "Dabing.2000.CZ", ["USA"]),
+        ("5:film:eeeeeeeeeeeeeeee", "Stary.1984.CZ", ["Československo"]),
+    ]
+    with plugin.open_library() as lib:
+        for vid, title, countries in films:
+            lib.upsert_video(vid, title, "account", nameparser.parse(title))
+            lib.update_meta(lib.get_video(vid)["meta_key"], {"countries": countries})
+    plugin.movies({"browse": "1"})
+    assert {"České filmy", "Slovenské filmy", "Československé filmy"}.issubset(
+        item.label for _, item, _ in xbmcplugin.ITEMS)
+    for origin, indexes in (("CZ", {0, 2}), ("SK", {1, 2}), ("CS", {4})):
+        xbmcplugin.ITEMS.clear()
+        plugin.movies({"origin": origin})
+        assert {url for url, _, _ in xbmcplugin.ITEMS} == {
+            plugin.url_for("play", vid=films[i][0]) for i in indexes}
+
+
+def test_tmdb_news_combines_origin_genre_year_and_pages(plugin, monkeypatch):
+    from datetime import date, timedelta
+
+    import xbmcplugin
+    from tmdb import Tmdb
+
+    client = Tmdb("test")
+    calls = []
+
+    def fetch(path, **params):
+        calls.append((path, params))
+        page = params["page"]
+        return {"total_pages": 3, "results": [{"id": 20 * page + i, "title": "Film %d" % i} for i in range(20)]}
+
+    monkeypatch.setattr(client, "_get", fetch)
+    monkeypatch.setattr(plugin, "make_tmdb", lambda: client)
+    plugin.news_menu({})
+    assert "Slovenské novinky (TMDB)" in {item.label for _, item, _ in xbmcplugin.ITEMS}
+    xbmcplugin.ITEMS.clear()
+    plugin.tmdb_titles({"category": "recent", "kind": "movie", "origin": "SK", "genre": "35", "year": "2026"})
+    assert len(xbmcplugin.ITEMS) == 42  # 40 titulů, filtry a další stránka
+    assert "page=3" in xbmcplugin.ITEMS[-1][0] and "origin=SK" in xbmcplugin.ITEMS[-1][0]
+    assert [args["page"] for _, args in calls] == [1, 2]
+    for path, args in calls:
+        assert path == "/discover/movie"
+        assert args["with_origin_country"] == "SK" and args["with_genres"] == "35"
+        assert args["primary_release_year"] == "2026"
+        assert args["primary_release_date.gte"] == (date.today() - timedelta(days=90)).isoformat()
+        assert args["primary_release_date.lte"] == date.today().isoformat()
+
+
+def test_provider_batch_removes_duplicates_and_keeps_retry_cursor(plugin, monkeypatch):
+    def page(_client, _query, page, cursor):
+        if page == 3:
+            assert cursor == "third"
+            raise provider.ProviderError("unavailable")
+        return ([{"id": "%d:film:%016x" % (page, number)} for number in
+                 (range(20) if page == 1 else range(19, 39))], "second" if page == 1 else "third")
+
+    monkeypatch.setattr(plugin, "_result_pages", lambda: 3)
+    monkeypatch.setattr(provider, "search_catalog", page)
+    items, next_page, cursor, partial = plugin._provider_page_batch(None, "film")
+    assert len(items) == 39 and (next_page, cursor, partial) == (3, "third", True)
+
+
+def test_next_film_uses_tmdb_collection_order_and_local_availability(plugin, monkeypatch):
+    import nameparser
+    import xbmc
+    import xbmcgui
+    import xbmcplugin
+    from tmdb import Tmdb
+
+    next_vid = "2:next:bbbbbbbbbbbbbbbb"
+    client = Tmdb("test")
+
+    def fetch(path, **kwargs):
+        if path == "/movie/10":
+            return {"id": 10, "title": "Série", "release_date": "2000-01-01", "belongs_to_collection": {"id": 4}}
+        assert path == "/collection/4"
+        return {"parts": [{"id": 12, "title": "Třetí", "release_date": "2008-01-01"},
+                          {"id": 10, "title": "Série", "release_date": "2000-01-01"},
+                          {"id": 11, "title": "Druhá", "release_date": "2005-01-01"}]}
+
+    monkeypatch.setattr(client, "_get", fetch)
+    monkeypatch.setattr(plugin, "make_tmdb", lambda: client)
+    with plugin.open_library() as lib:
+        for vid, title, tmdb_id in ((REF, "Serie.2000.CZ", 10), (next_vid, "Druha.2005.CZ", 11)):
+            lib.upsert_video(vid, title, "account", nameparser.parse(title))
+            lib.update_meta(lib.get_video(vid)["meta_key"], {"tmdb_id": tmdb_id})
+        lib.record_play(next_vid, 90, 3600)
+
+    plugin.tmdb_title({"kind": "movie", "tmdb_id": "10"})
+    assert "Další části" in {item.label for _, item, _ in xbmcplugin.ITEMS}
+    xbmcplugin.ITEMS.clear()
+    plugin.movie_parts({"collection_id": "4", "tmdb_id": "10"})
+    assert len(xbmcplugin.ITEMS) == 2
+    assert xbmcplugin.ITEMS[0][0] == plugin.url_for("play", vid=next_vid)
+    assert xbmcplugin.ITEMS[1][2]  # třetí film vede k online hledání
+    xbmcgui.WINDOW_PROPERTIES.clear()
+    xbmcgui.YESNO_ANSWERS.append(True)
+    xbmc.BUILTINS.clear()
+    plugin.offer_next_movie(REF, type("IdlePlayer", (), {"isPlaying": lambda self: False})())
+    assert xbmc.BUILTINS == ["PlayMedia(%s,resume)" % plugin.url_for("play", vid=next_vid, continue_play=1)]

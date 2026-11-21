@@ -8,6 +8,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import date, timedelta
 
 from nameparser import normalize
 
@@ -55,10 +56,20 @@ class Tmdb(object):
     def genres(self, kind):
         return self._get("/genre/%s/list" % kind).get("genres") or []
 
-    def browse(self, kind, category, page=1, genre="", year=""):
+    def countries(self):
+        return self._get("/configuration/countries")
+
+    def browse(self, kind, category, page=1, genre="", year="", origin=""):
         params = {"page": page}
-        if category == "discover":
+        if category in ("discover", "recent"):
             params.update(sort_by="popularity.desc", include_adult="false")
+            if origin and kind == "movie":
+                params["with_origin_country"] = origin
+            if category == "recent":
+                today = date.today()
+                params.update({"sort_by": "primary_release_date.desc",
+                               "primary_release_date.gte": (today - timedelta(days=90)).isoformat(),
+                               "primary_release_date.lte": today.isoformat()})
             if genre:
                 params["with_genres"] = genre
             if year:
@@ -131,6 +142,11 @@ class Tmdb(object):
             }
         return episodes
 
+    def collection_movies(self, collection_id):
+        parts = self._get("/collection/%d" % collection_id).get("parts") or []
+        return sorted((part for part in parts if part.get("id") and part.get("title")),
+                      key=lambda part: (part.get("release_date") or "9999-99-99", part["id"]))
+
     def details(self, tmdb_id, want_series=False):
         kind = "tv" if want_series else "movie"
         d = self._get("/%s/%s" % (kind, tmdb_id), append_to_response="credits")
@@ -144,6 +160,7 @@ class Tmdb(object):
             runtime = d["episode_run_time"][0]
         return {
             "tmdb_id": d.get("id", tmdb_id),
+            "collection_id": (d.get("belongs_to_collection") or {}).get("id") or 0,
             "title": d.get("title") or d.get("name") or "",
             "orig_title": d.get("original_title") or d.get("original_name") or "",
             "year": int(date[:4]) if date[:4].isdigit() else 0,

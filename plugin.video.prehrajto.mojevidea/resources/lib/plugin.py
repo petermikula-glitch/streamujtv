@@ -43,6 +43,11 @@ MOVIE_FILTER_OPTIONS = {
 }
 EPISODE_CACHE_TTL = 7 * 86400
 EPISODE_CACHE_RETRY = 15 * 60
+FILM_ORIGINS = {
+    "CZ": (30487, {"cz", "cze", "cesko", "ceska republika", "czechia", "czech republic"}),
+    "SK": (30488, {"sk", "svk", "slovensko", "slovenska republika", "slovakia", "slovak republic"}),
+    "CS": (30489, {"cs", "csk", "ceskoslovensko", "czechoslovakia", "cssr", "csfr"}),
+}
 
 
 def url_for(action, **params):
@@ -327,6 +332,8 @@ def add_movie(meta, lib, collection_id=None, repair=False, matching=None):
     watched = not _playback_state()["watched"].isdisjoint(vids)
     context.insert(0, (_(30395), "Container.Update(%s)" % url_for("versions", key=meta["key"])))
     context.insert(2, _watch_action(watched, key=meta["key"]))
+    if setting("tmdb_key").strip() and (meta.get("tmdb_id") or year):
+        context.insert(3, (_(30503), "Container.Update(%s)" % url_for("movie_parts", key=meta["key"])))
     li.setProperty("IsPlayable", "true")
     offer_transfer = None
     if preferred:
@@ -438,6 +445,7 @@ def root(params):
     search_history = [(_(30408), "Container.Update(%s)" % url_for("search_menu"))]
     add_dir(_(30407), "search", "DefaultAddonsSearch.png", context=search_history)
     add_dir(_(30421), "tmdb_catalog", "DefaultMovies.png")
+    add_dir(_(30490), "news_menu", "DefaultRecentlyAddedMovies.png")
     add_dir(_(30420), "my_videos_menu", "DefaultVideo.png")
     add_dir(_(30103), "collections", "DefaultSets.png")
     add_dir(_(30106), "tools", "DefaultAddonProgram.png")
@@ -453,12 +461,28 @@ def my_videos_menu(params):
     end()
 
 
+def news_menu(params):
+    add_dir(_(30491), "recent", "DefaultRecentlyAddedEpisodes.png")
+    if make_tmdb().enabled:
+        add_dir(_(30492), "tmdb_titles", "DefaultRecentlyAddedMovies.png", kind="movie", category="recent")
+        for origin, label in (("CZ", 30493), ("SK", 30494)):
+            add_dir(_(label), "tmdb_titles", "DefaultRecentlyAddedMovies.png", kind="movie",
+                    category="recent", origin=origin)
+    end(cache=False)
+
+
+def _add_origin_shortcuts(action, online=False, **params):
+    for origin in (("CZ", "SK") if online else FILM_ORIGINS):
+        add_dir(_(FILM_ORIGINS[origin][0]), action, "DefaultCountry.png", origin=origin, **params)
+
+
 def tmdb_catalog(params):
     add_dir(_(30374), "watchlist", "DefaultFavourites.png")
     if not make_tmdb().enabled:
         notify(_(30355), time_ms=8000)
         add_action(_(30356), "settings")
     else:
+        _add_origin_shortcuts("tmdb_titles", online=True, kind="movie", category="discover")
         add_dir(_(30390), "tmdb_titles", "DefaultMovies.png", kind="movie", category="popular")
         add_dir(_(30100), "tmdb_categories", "DefaultMovies.png", kind="movie")
         add_dir(_(30101), "tmdb_categories", "DefaultTVShows.png", kind="tv")
@@ -467,24 +491,56 @@ def tmdb_catalog(params):
 
 def tmdb_categories(params):
     kind = params.get("kind", "movie")
+    if kind == "movie":
+        _add_origin_shortcuts("tmdb_titles", online=True, kind=kind, category="discover")
+        add_dir(_(30492), "tmdb_titles", kind=kind, category="recent")
     add_dir(_(30351), "tmdb_titles", kind=kind, category="popular")
     add_dir(_(30352), "tmdb_titles", kind=kind, category="top_rated")
     add_dir(_(30353 if kind == "movie" else 30354), "tmdb_titles", kind=kind,
             category="upcoming" if kind == "movie" else "on_the_air")
-    add_dir(_(30109), "tmdb_filters", kind=kind, filter_by="genre")
-    add_dir(_(30357), "tmdb_filters", kind=kind, filter_by="year")
+    add_dir(_(30495), "tmdb_facets", kind=kind)
     end()
 
 
+def _tmdb_selection(params):
+    return {"kind": params.get("kind", "movie"),
+            "category": "recent" if params.get("category") == "recent" else "discover",
+            "genre": params.get("genre", ""), "year": params.get("year", ""),
+            "origin": params.get("origin", "")}
+
+
+def tmdb_facets(params):
+    selection = _tmdb_selection(params)
+    for field, label in (("genre", 30109), ("year", 30357), ("origin", 30111)):
+        if field != "origin" or selection["kind"] == "movie":
+            add_dir(_(label), "tmdb_filters", filter_by=field, **selection)
+    if any(selection[field] for field in ("genre", "year", "origin")):
+        add_dir(_(30496), "tmdb_titles", kind=selection["kind"], category=selection["category"])
+    end(cache=False)
+
+
 def tmdb_filters(params):
-    kind = params.get("kind", "movie")
+    selection = _tmdb_selection(params)
+    kind = selection["kind"]
+    field = params.get("filter_by")
+    if field not in ("genre", "year", "origin") or (field == "origin" and kind != "movie"):
+        end(cache=False)
+        return
     try:
-        if params.get("filter_by") == "genre":
-            for genre in make_tmdb().genres(kind):
-                add_dir(genre["name"], "tmdb_titles", kind=kind, category="discover", genre=genre["id"])
+        if field == "genre":
+            options = [(genre["id"], genre["name"]) for genre in make_tmdb().genres(kind)]
+        elif field == "origin":
+            country_names = {country["iso_3166_1"]: country.get("native_name") or country["english_name"]
+                             for country in make_tmdb().countries()}
+            options = [(origin, _(FILM_ORIGINS[origin][0])) for origin in ("CZ", "SK")]
+            options.extend(sorted(((code, name) for code, name in country_names.items() if code not in ("CZ", "SK")),
+                                  key=lambda entry: normalize(entry[1])))
         else:
-            for year in range(date.today().year, 1873, -1):
-                add_dir(str(year), "tmdb_titles", kind=kind, category="discover", year=year)
+            options = [(year, str(year)) for year in range(date.today().year, 1873, -1)]
+        if selection[field]:
+            add_dir(_(30428), "tmdb_titles", **dict(selection, **{field: ""}))
+        for value, label in options:
+            add_dir(label, "tmdb_titles", **dict(selection, **{field: value}))
     except TmdbError as e:
         notify(str(e), time_ms=8000)
         xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
@@ -492,29 +548,61 @@ def tmdb_filters(params):
     end()
 
 
+def _result_pages():
+    return min(3, max(1, setting_int("search_result_pages", 2)))
+
+
+def _tmdb_page_batch(load, page=1):
+    items = {}
+    for offset in range(_result_pages()):
+        try:
+            titles, total_pages = load(page)
+        except TmdbError:
+            if not offset:
+                raise
+            return list(items.values()), page, True
+        for item in titles:
+            if item.get("id"):
+                items.setdefault((item.get("media_type"), item["id"]), item)
+        if page >= total_pages:
+            return list(items.values()), None, False
+        page += 1
+    return list(items.values()), page, False
+
+
 def tmdb_titles(params):
-    kind = params.get("kind", "movie")
+    selection = _tmdb_selection(params)
+    kind = selection["kind"]
     category = params.get("category", "popular")
-    genre = params.get("genre", "")
-    year = params.get("year", "")
-    allowed = ("popular", "top_rated", "discover", "upcoming" if kind == "movie" else "on_the_air")
+    origin = selection["origin"]
+    allowed = ("popular", "top_rated", "discover", "upcoming", "recent") if kind == "movie" else (
+        "popular", "top_rated", "discover", "on_the_air")
     try:
         page = int(params.get("page", 1))
         if kind not in ("movie", "tv") or category not in allowed or not 1 <= page <= 500:
             raise ValueError(_(30358))
-        titles, total_pages = make_tmdb().browse(kind, category, page, genre=genre, year=year)
+        if origin and (kind != "movie" or len(origin) != 2 or not origin.isascii() or not origin.isalpha()):
+            raise ValueError(_(30358))
+        filters = {"genre": selection["genre"], "year": selection["year"]}
+        if origin:
+            filters["origin"] = origin.upper()
+        client = make_tmdb()
+        titles, next_page, partial = _tmdb_page_batch(lambda current: client.browse(kind, category, current, **filters), page)
     except (ValueError, TmdbError) as e:
         notify(str(e), time_ms=8000)
         xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
         return
 
+    if category in ("discover", "recent"):
+        add_dir(_(30495), "tmdb_facets", "DefaultGenre.png", **selection)
     with open_library() as lib:
         library_items = lib.movies() if kind == "movie" else lib.shows()
         for item in titles:
             add_tmdb_title(item, kind, lib, library_items)
-    if page < total_pages:
-        add_dir(_(30341), "tmdb_titles", kind=kind, category=category, page=page + 1,
-                genre=genre, year=year)
+    if partial:
+        notify(_(30497))
+    if next_page:
+        add_dir(_(30341), "tmdb_titles", page=next_page, **dict(selection, category=category))
     if not titles:
         notify(_(30121))
     end("movies" if kind == "movie" else "tvshows", cache=False)
@@ -618,7 +706,7 @@ def tmdb_movie_versions(params):
             local_ids.add(provider.video_key(video["id"]))
     videos, cursor = [], None
     try:
-        videos, cursor = provider.search_catalog(make_client(), query, page, params.get("cursor", ""))
+        videos, next_page, cursor, partial = _provider_page_batch(make_client(), query, page, params.get("cursor", ""))
     except provider.LoginError:
         notify(_(30368), time_ms=8000)
         add_action(_(30356), "settings")
@@ -704,6 +792,8 @@ def tmdb_title(params):
         preferred = min(videos, key=_version_score)
         add_option(_(30363), "play", folder=False, vid=preferred["id"])
         add_option(_(30395), "versions", key=match["key"])
+    if not want_series and detail.get("collection_id"):
+        add_option(_(30503), "movie_parts", collection_id=detail["collection_id"], tmdb_id=tmdb_id)
     title = detail["title"] or detail["orig_title"]
     if title:
         if want_series:
@@ -716,6 +806,87 @@ def tmdb_title(params):
     add_action(_(30376 if saved else 30375), "watchlist_change", kind=kind, tmdb_id=tmdb_id,
                remove=int(saved), title=title, year=detail["year"], poster=detail["poster"])
     end("tvshows" if want_series else "movies", cache=False)
+
+
+def _movie_tmdb_id(client, meta):
+    if meta.get("tmdb_id"):
+        return meta["tmdb_id"]
+    title = _display_title(meta)
+    year = _display_year(meta)
+    if not title or not year:
+        return None
+    names = search_results.aliases(title, meta.get("orig_title"), meta.get("search_title"))
+    matches = {item["id"] for item in client.search(title)
+               if item["year"] == year and not names.isdisjoint(
+                   search_results.aliases(item["title"], item.get("orig_title")))}
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
+def movie_parts(params):
+    client = make_tmdb()
+    if not client.enabled:
+        add_action(_(30356), "settings")
+        end(cache=False)
+        return
+    try:
+        tmdb_id = int(params.get("tmdb_id", 0))
+        collection_id = int(params.get("collection_id", 0))
+        if "key" in params:
+            with open_library() as lib:
+                meta = lib.get_meta(params["key"])
+            tmdb_id = _movie_tmdb_id(client, meta) if meta and meta["kind"] == "movie" else None
+            collection_id = client.details(tmdb_id).get("collection_id", 0) if tmdb_id else 0
+        parts = client.collection_movies(collection_id) if collection_id > 0 else []
+    except (ValueError, TmdbError) as error:
+        notify(str(error))
+        end(cache=False)
+        return
+    entries = [part for part in parts if part["id"] != tmdb_id]
+    with open_library() as lib:
+        movies = lib.movies()
+        for part in entries:
+            add_tmdb_title(part, "movie", lib, movies)
+    if not entries:
+        notify(_(30504))
+    end("movies", cache=False)
+
+
+def offer_next_movie(vid, player):
+    if player.isPlaying() or xbmcgui.Window(10000).getProperty(PLAYING_PROPERTY):
+        return
+    client = make_tmdb()
+    if not client.enabled:
+        return
+    with open_library() as lib:
+        current = lib.find_video(vid)
+        meta = lib.get_meta(current["meta_key"]) if current and current["kind"] == "movie" else None
+    if not meta:
+        return
+    tmdb_id = _movie_tmdb_id(client, meta)
+    collection_id = client.details(tmdb_id).get("collection_id", 0) if tmdb_id else 0
+    if not collection_id:
+        return
+    parts = client.collection_movies(collection_id)
+    next_part = next((part for previous, part in zip(parts, parts[1:]) if previous["id"] == tmdb_id), None)
+    if not next_part:
+        return
+    try:
+        release = date.fromisoformat(next_part.get("release_date") or "")
+    except ValueError:
+        return
+    if release > date.today():
+        return
+    detail = {"tmdb_id": next_part["id"], "title": next_part["title"],
+              "orig_title": next_part.get("original_title") or "", "year": release.year}
+    with open_library() as lib:
+        match = _library_match(lib.movies(), detail)
+        if not match:
+            return
+        resume = lib.resume_points()
+        following = min(lib.videos_for_meta(match["key"]),
+                        key=lambda video: (video["id"] not in resume, _version_score(video)), default=None)
+    if following:
+        _offer_playback(player, _(30506), next_part["title"], following["id"], following["id"] in resume)
 
 
 def watchlist(params):
@@ -794,7 +965,7 @@ def tmdb_search(params):
         page = int(params.get("page", 1))
         if not query or not 1 <= page <= 500:
             raise ValueError(_(30358))
-        titles, total_pages = client.search_titles(query, page)
+        titles, next_page, partial = _tmdb_page_batch(lambda current: client.search_titles(query, current), page)
     except (TmdbError, ValueError) as e:
         notify(str(e), time_ms=8000)
         xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
@@ -805,14 +976,17 @@ def tmdb_search(params):
             kind = item["media_type"]
             if kind in library_items:
                 add_tmdb_title(item, kind, lib, library_items[kind])
-    if page < total_pages:
-        add_dir(_(30341), "tmdb_search", q=query, page=page + 1)
+    if partial:
+        notify(_(30497))
+    if next_page:
+        add_dir(_(30341), "tmdb_search", q=query, page=next_page)
     elif not titles:
         notify(_(30121))
     end("videos", cache=False)
 
 
 def movies_menu(params):
+    _add_origin_shortcuts("movies", order="title")
     with open_library() as lib:
         _add_movie_filter_shortcuts(lib, params.get("order", "added"))
     add_dir(_(30107), "movies", "DefaultMovies.png", order="title")
@@ -899,6 +1073,7 @@ def movies(params):
         criteria = _movie_filter_params(saved or params)
         if params.get("browse") == "1":
             _add_movie_filter_shortcuts(lib, order)
+            _add_origin_shortcuts("movies", order="title")
         if params.get("filtered") == "1" and not saved and any(criteria.values()):
             add_action(_(30439), "movie_filter_save", "DefaultFavourites.png", **criteria)
         items = lib.movies(genre=params.get("genre"), country=params.get("country"),
@@ -906,6 +1081,12 @@ def movies(params):
                            year_to=int(params["year_to"]) if params.get("year_to") else None,
                            min_rating=int(params["min_rating"]) if params.get("min_rating") else None,
                            order=order)
+        origin = FILM_ORIGINS.get(params.get("origin"))
+        if origin:
+            items = [movie for movie in items if any(normalize(country) in origin[1]
+                                                     for country in movie["countries"])]
+            if not items:
+                notify(_(30498))
         if any(criteria.values()):
             grouped = lib.movie_filter_versions()
             watched = lib.watched()
@@ -1271,15 +1452,19 @@ def offer_next_episode(vid, player):
         completed = {_episode_position(video) for video in videos if video["id"] in watched}
         following = _next_episode(videos, _episode_position(current), completed, resume)
         meta = lib.get_meta(current["meta_key"]) or {}
-    if not following or player.isPlaying() or xbmcgui.Window(10000).getProperty(PLAYING_PROPERTY):
+    if following:
+        episode = "%s %dx%02d" % (_display_title(meta) or following["title"], *_episode_position(following))
+        _offer_playback(player, _(30418), episode, following["id"], following["id"] in resume)
+
+
+def _offer_playback(player, heading, title, vid, resume):
+    window = xbmcgui.Window(10000)
+    if player.isPlaying() or window.getProperty(PLAYING_PROPERTY):
         return
-    episode = "%s %dx%02d" % (_display_title(meta) or following["title"], *_episode_position(following))
-    if xbmcgui.Dialog().yesno(_(30418), episode, yeslabel=_(30419), autoclose=15000):
-        if not player.isPlaying() and not xbmcgui.Window(10000).getProperty(PLAYING_PROPERTY):
-            next_vid = following["id"]
-            continue_play = next_vid in resume
-            mode = "resume" if continue_play else "noresume"
-            url = url_for("play", vid=next_vid, continue_play=1 if continue_play else None)
+    if xbmcgui.Dialog().yesno(heading, title, yeslabel=_(30419), autoclose=15000):
+        if not player.isPlaying() and not window.getProperty(PLAYING_PROPERTY):
+            mode = "resume" if resume else "noresume"
+            url = url_for("play", vid=vid, continue_play=1 if resume else None)
             xbmc.executebuiltin("PlayMedia(%s,%s)" % (url, mode))
 
 
@@ -1564,15 +1749,21 @@ def _online_search(query, title, position):
     payload = {"created": now, "query": query, "errors": []}
     provider_query = "%s S%02dE%02d" % (title, *position) if position else query
     with ThreadPoolExecutor(max_workers=2) as pool:
-        provider_task = pool.submit(provider.search_catalog, client, provider_query, 1, "")
-        tmdb_task = pool.submit(tmdb.search_titles, title, 1) if tmdb.enabled else None
+        provider_task = pool.submit(_provider_page_batch, client, provider_query)
+        tmdb_task = pool.submit(_tmdb_page_batch, lambda page: tmdb.search_titles(title, page)) if tmdb.enabled else None
         try:
-            payload["provider"] = provider_task.result()[0]
+            videos, _page, _cursor, partial = provider_task.result()
+            payload["provider"] = videos
+            if partial:
+                payload["errors"].append("Přehraj.to")
         except (provider.ProviderError, provider.RateLimited):
             payload["errors"].append("Přehraj.to")
         if tmdb_task:
             try:
-                payload["tmdb"] = tmdb_task.result()[0]
+                titles, _next, partial = tmdb_task.result()
+                payload["tmdb"] = titles
+                if partial:
+                    payload["errors"].append("TMDB")
             except TmdbError:
                 payload["errors"].append("TMDB")
     with open_library() as lib:
@@ -1706,6 +1897,26 @@ def search_title(params):
     end("videos", cache=False)
 
 
+def _provider_page_batch(client, query, page=1, cursor=""):
+    videos = {}
+    seen_cursors = {cursor}
+    for offset in range(_result_pages()):
+        try:
+            entries, next_cursor = provider.search_catalog(client, query, page, cursor)
+        except (provider.ProviderError, provider.RateLimited):
+            if not offset:
+                raise
+            return list(videos.values()), page, cursor, True
+        for video in entries:
+            videos.setdefault(provider.video_key(video["id"]), video)
+        if not next_cursor or next_cursor in seen_cursors:
+            return list(videos.values()), page, "", False
+        seen_cursors.add(next_cursor)
+        page += 1
+        cursor = next_cursor
+    return list(videos.values()), page, cursor, False
+
+
 def provider_search(params):
     if not hasattr(provider, "search_catalog"):
         end(cache=False)
@@ -1719,7 +1930,7 @@ def provider_search(params):
         return
     try:
         page = int(params.get("page", 1))
-        videos, cursor = provider.search_catalog(make_client(), query, page, params.get("cursor", ""))
+        videos, next_page, cursor, partial = _provider_page_batch(make_client(), query, page, params.get("cursor", ""))
     except provider.LoginError:
         notify(_(30368), time_ms=8000)
         add_action(_(30356), "settings")
@@ -1760,8 +1971,10 @@ def provider_search(params):
         notify(_(30370))
         end("videos", cache=False)
         return
+    if partial:
+        notify(_(30497))
     if cursor:
-        add_dir(_(30341), "provider_search", q=query, page=page + 1, cursor=cursor)
+        add_dir(_(30341), "provider_search", q=query, page=next_page, cursor=cursor)
     if not videos and not cursor:
         notify(_(30370))
     end("videos", cache=False)
@@ -2788,6 +3001,7 @@ ROUTES = {
     "provider_search": provider_search, "provider_save": provider_save,
     "tmdb_catalog": tmdb_catalog, "tmdb_categories": tmdb_categories,
     "tmdb_filters": tmdb_filters, "tmdb_titles": tmdb_titles, "tmdb_title": tmdb_title,
+    "tmdb_facets": tmdb_facets, "news_menu": news_menu, "movie_parts": movie_parts,
     "my_videos_menu": my_videos_menu, "tmdb_search": tmdb_search,
     "tmdb_movie_versions": tmdb_movie_versions,
     "watchlist": watchlist, "watchlist_change": watchlist_change,

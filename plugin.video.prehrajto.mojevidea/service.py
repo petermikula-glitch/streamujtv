@@ -114,7 +114,7 @@ class PlaybackTracker(xbmc.Player):
     def onPlayBackEnded(self):
         vid = self.vid
         self.finish(ended=True)
-        if vid and kodiutils.setting_bool("offer_next_episode"):
+        if vid and any(kodiutils.setting_bool(key) for key in ("offer_next_episode", "offer_next_movie")):
             self.next_offer = vid
 
     def offer_next_if_due(self):
@@ -123,7 +123,10 @@ class PlaybackTracker(xbmc.Player):
             return
         import plugin
         try:
-            plugin.offer_next_episode(vid, self)
+            if kodiutils.setting_bool("offer_next_episode"):
+                plugin.offer_next_episode(vid, self)
+            if kodiutils.setting_bool("offer_next_movie"):
+                plugin.offer_next_movie(vid, self)
         except Exception as e:  # Služba pokračuje i při chybě při čtení katalogu nebo otevření dialogu.
             kodiutils.log_error("nabídku dalšího dílu nelze otevřít: %s" % e)
 
