@@ -6,7 +6,7 @@ import time
 
 from nameparser import movie_key, normalize, show_key
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 BACKUP_VERSION = 1
 OPTIONAL_BACKUP_TABLES = ("watchlist", "watched_marks", "progress_hidden", "saved_movie_filters",
                           "episode_additions", "episode_visits")
@@ -105,6 +105,13 @@ CREATE TABLE IF NOT EXISTS watchlist (
     poster TEXT NOT NULL,
     added INTEGER NOT NULL,
     PRIMARY KEY(kind, tmdb_id)
+);
+CREATE TABLE IF NOT EXISTS watchlist_availability (
+    kind TEXT NOT NULL,
+    tmdb_id INTEGER NOT NULL,
+    ready INTEGER NOT NULL,
+    fresh INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (kind, tmdb_id)
 );
 CREATE TABLE IF NOT EXISTS saved_movie_filters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -266,6 +273,7 @@ class Library(object):
                 sql = "INSERT INTO %s (%s) VALUES (%s)" % (
                     table, ", ".join(columns), ", ".join("?" for _ in columns))
                 self.conn.executemany(sql, ([row[column] for column in columns] for row in rows))
+            self.conn.execute("DELETE FROM watchlist_availability")
             self.conn.execute("DELETE FROM settings_kv WHERE k LIKE 'link:%' OR k LIKE 'tmdb:season:%' "
                               "OR k IN ('last_sync', 'sync_retry_after')")
 
@@ -745,6 +753,16 @@ class Library(object):
     def watchlist_remove(self, kind, tmdb_id):
         with self.conn:
             self.conn.execute("DELETE FROM watchlist WHERE kind=? AND tmdb_id=?", (kind, tmdb_id))
+            self.conn.execute("DELETE FROM watchlist_availability WHERE kind=? AND tmdb_id=?", (kind, tmdb_id))
+
+    def fresh_watchlist(self):
+        return {(row[0], row[1]) for row in self.conn.execute(
+            "SELECT kind, tmdb_id FROM watchlist_availability WHERE ready=1 AND fresh=1")}
+
+    def acknowledge_watchlist(self, kind, tmdb_id):
+        with self.conn:
+            self.conn.execute("UPDATE watchlist_availability SET fresh=0 WHERE kind=? AND tmdb_id=?",
+                              (kind, tmdb_id))
 
     # --- kolekce ------------------------------------------------------------
     def collections(self):

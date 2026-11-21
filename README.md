@@ -104,6 +104,14 @@ Výchozí výpis spojuje dvě stránky služby, pokud jsou dostupné.
 navazující film dostupný ve vlastním katalogu, doplněk jej může nabídnout po
 dokoukání. Zapíná se to v **Nastavení → Přehrávání**.
 
+Ve výsledcích Přehraj.to lze otevřít **Filtrovat výsledky Přehraj.to**
+a zkombinovat český nebo slovenský dabing, kvalitu od 1080p a skrytí upoutávek.
+Když doplněk nenajde odpovídající video a zná původní název z TMDB, zkusí i ten.
+**Chci vidět** označí filmy a seriály, které se objevily po synchronizaci, jako
+**Nově dostupné**. V **Dalších částech** se zobrazuje stav každého filmu a
+zkratka na první nezhlédnutý díl. Při chybě přehrávání doplněk nabídne jiné
+verze stejného filmu nebo epizody ve vlastním katalogu.
+
 ## Instalace
 
 Kodi neumí instalovat přímo z gitu, proto je tu **Kodi repozitář**. Nainstaluje se jednou

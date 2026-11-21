@@ -10,6 +10,30 @@ YEAR_SUFFIX = re.compile(r"[\s._-]+\(?((?:18|19|20)\d{2})\)?\s*$")
 EXTRAS = {"trailer", "teaser", "ukazka", "upoutavka"}
 
 
+def is_preview(filename, titles=()):
+    words = set(normalize(filename).split())
+    known = set(normalize(" ".join(title for title in titles if title)).split())
+    return bool(EXTRAS & (words - known))
+
+
+def original_title(items, title, year=0, episodic=False):
+    normalized = normalize(title)
+    matched = {}
+    for item in items:
+        kind = item.get("media_type")
+        if kind not in ("movie", "tv") or (episodic and kind != "tv"):
+            continue
+        localized = item.get("title") or item.get("name") or ""
+        original = item.get("original_title") or item.get("original_name") or ""
+        date = item.get("release_date") or item.get("first_air_date") or ""
+        if normalize(localized) == normalized and (not year or date[:4] == str(year)):
+            matched[kind, item["id"]] = original
+    if len(matched) != 1:
+        return ""
+    original = next(iter(matched.values()))
+    return original if normalize(original) != normalized else ""
+
+
 def split_query(query):
     title = query.strip()
     episode = EPISODE_SUFFIX.search(title)
@@ -114,8 +138,7 @@ def combine(cards, tmdb_items, provider_items, position, video_key):
             continue
         title = parsed["title"] or video["title"]
         candidate = new_card(kind, title, parsed["year"], position)
-        preview = set(normalize(video["title"]).split()) - set(normalize(title).split())
-        is_extra = bool(EXTRAS.intersection(preview))
+        is_extra = is_preview(video["title"], (title,))
         matches = [card for card in cards if _same_title(card, candidate)] if not is_extra else []
         if len(matches) == 1:
             card = matches[0]

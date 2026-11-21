@@ -1234,3 +1234,59 @@ msgstr "Nabídnout další část po skončení filmu"
 msgctxt "#30506"
 msgid "Play the next movie?"
 msgstr "Přehrát další část?"
+
+msgctxt "#30507"
+msgid "Filter Přehraj.to results"
+msgstr "Filtrovat výsledky Přehraj.to"
+
+msgctxt "#30508"
+msgid "Czech audio"
+msgstr "Český dabing"
+
+msgctxt "#30509"
+msgid "Slovak audio"
+msgstr "Slovenský dabing"
+
+msgctxt "#30510"
+msgid "1080p and higher"
+msgstr "1080p a vyšší"
+
+msgctxt "#30511"
+msgid "Hide trailers and teasers"
+msgstr "Skrýt upoutávky"
+
+msgctxt "#30512"
+msgid "Language not specified"
+msgstr "Jazyk neuveden"
+
+msgctxt "#30513"
+msgid "Newly available"
+msgstr "Nově dostupný"
+
+msgctxt "#30514"
+msgid "Mark availability notice as read"
+msgstr "Označit jako přečtené"
+
+msgctxt "#30515"
+msgid "Newly available watchlist titles: %d"
+msgstr "Nově dostupné tituly z Chci vidět (%d)"
+
+msgctxt "#30516"
+msgid "In progress"
+msgstr "Rozkoukáno"
+
+msgctxt "#30517"
+msgid "In catalogue"
+msgstr "V katalogu"
+
+msgctxt "#30518"
+msgid "First unwatched instalment · %s"
+msgstr "První nezhlédnutá část · %s"
+
+msgctxt "#30519"
+msgid "Choose another version"
+msgstr "Vybrat jinou verzi"
+
+msgctxt "#30521"
+msgid "Resume at %s?"
+msgstr "Pokračovat od %s?"

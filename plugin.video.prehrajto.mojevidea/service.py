@@ -51,6 +51,7 @@ class PlaybackTracker(xbmc.Player):
     def __init__(self):
         xbmc.Player.__init__(self)
         self.vid = None
+        self.replacement = False
         self.next_offer = None
         self.kodi_updates = set()
         self.position = 0.0
@@ -69,6 +70,7 @@ class PlaybackTracker(xbmc.Player):
         if sha256(path.encode("utf-8")).hexdigest() != pending["path_hash"]:
             return
         self.vid = pending["vid"]
+        self.replacement = pending.get("replacement", False)
         self.position = 0.0
         self.total = 0.0
         self.update()
@@ -132,11 +134,15 @@ class PlaybackTracker(xbmc.Player):
 
     def onPlayBackError(self):
         pending = take_pending_playback()
+        vid, replacement = self.vid, self.replacement
         self.finish()
-        if pending:
+        if pending or vid:
             import plugin
             try:
-                plugin.retry_failed_playback(pending)
+                if pending:
+                    plugin.retry_failed_playback(pending)
+                else:
+                    plugin.playback_failed(vid, kodiutils._(30405), replacement)
             except Exception as e:  # Kodi musí službu nechat běžet i po chybě mezipaměti
                 kodiutils.log_error("opakování přehrávání selhalo: %s" % e)
                 kodiutils.notify(kodiutils._(30405), time_ms=8000)

@@ -1234,3 +1234,59 @@ msgstr ""
 msgctxt "#30506"
 msgid "Play the next movie?"
 msgstr ""
+
+msgctxt "#30507"
+msgid "Filter Přehraj.to results"
+msgstr ""
+
+msgctxt "#30508"
+msgid "Czech audio"
+msgstr ""
+
+msgctxt "#30509"
+msgid "Slovak audio"
+msgstr ""
+
+msgctxt "#30510"
+msgid "1080p and higher"
+msgstr ""
+
+msgctxt "#30511"
+msgid "Hide trailers and teasers"
+msgstr ""
+
+msgctxt "#30512"
+msgid "Language not specified"
+msgstr ""
+
+msgctxt "#30513"
+msgid "Newly available"
+msgstr ""
+
+msgctxt "#30514"
+msgid "Mark availability notice as read"
+msgstr ""
+
+msgctxt "#30515"
+msgid "Newly available watchlist titles: %d"
+msgstr ""
+
+msgctxt "#30516"
+msgid "In progress"
+msgstr ""
+
+msgctxt "#30517"
+msgid "In catalogue"
+msgstr ""
+
+msgctxt "#30518"
+msgid "First unwatched instalment · %s"
+msgstr ""
+
+msgctxt "#30519"
+msgid "Choose another version"
+msgstr ""
+
+msgctxt "#30521"
+msgid "Resume at %s?"
+msgstr ""

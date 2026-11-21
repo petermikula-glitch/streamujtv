@@ -336,7 +336,8 @@ def test_web_search_paginates_and_lists_playable_videos(plugin, monkeypatch):
 
     plugin.run(["plugin://plugin.video.prehrajto.mojevidea/", "1",
                 "?action=provider_search&q=Pel%C3%AD%C5%A1ky+CZ"])
-    video, _, more = xbmcplugin.ITEMS
+    filter_row, video, _, more = xbmcplugin.ITEMS
+    assert "action=online_filters" in filter_row[0]
     assert not video[2] and "action=play" in video[0]
     assert video[1].props["IsPlayable"] == "true"
     assert "provider_save" in video[1].context[0][1]
@@ -1123,10 +1124,10 @@ def test_online_search_merges_verified_matches_and_shows_versions(plugin, monkey
     with plugin.open_library() as lib:
         lib.upsert_video(REF, "Pelisky.1999.CZ", "account", nameparser.parse("Pelisky.1999.CZ"))
     plugin.search({"q": "Pelíšky 1999", "online": "1"})
-    assert len(xbmcplugin.ITEMS) == 4  # dva tituly a odkazy na úplné výsledky jednotlivých zdrojů
-    local_label = xbmcplugin.ITEMS[0][1]
+    assert len(xbmcplugin.ITEMS) == 5  # filtry, dva tituly a odkazy na úplné výsledky
+    local_label = xbmcplugin.ITEMS[1][1]
     assert "Můj katalog, Přehraj.to, TMDB" in local_label.label
-    assert "(2026)" in xbmcplugin.ITEMS[1][1].label
+    assert "(2026)" in xbmcplugin.ITEMS[2][1].label
     detail = local_label.context[0][1][len("Container.Update("):-1]
     xbmcplugin.ITEMS.clear()
     plugin.search_title(dict(parse_qsl(urlsplit(detail).query)))
@@ -1300,16 +1301,129 @@ def test_next_film_uses_tmdb_collection_order_and_local_availability(plugin, mon
             lib.upsert_video(vid, title, "account", nameparser.parse(title))
             lib.update_meta(lib.get_video(vid)["meta_key"], {"tmdb_id": tmdb_id})
         lib.record_play(next_vid, 90, 3600)
+        lib.set_watched([REF], True)
 
     plugin.tmdb_title({"kind": "movie", "tmdb_id": "10"})
     assert "Další části" in {item.label for _, item, _ in xbmcplugin.ITEMS}
     xbmcplugin.ITEMS.clear()
     plugin.movie_parts({"collection_id": "4", "tmdb_id": "10"})
-    assert len(xbmcplugin.ITEMS) == 2
-    assert xbmcplugin.ITEMS[0][0] == plugin.url_for("play", vid=next_vid)
-    assert xbmcplugin.ITEMS[1][2]  # třetí film vede k online hledání
+    assert len(xbmcplugin.ITEMS) == 4
+    assert xbmcplugin.ITEMS[0][0] == plugin.url_for("play", vid=next_vid, continue_play=1)
+    assert "První nezhlédnutá část" in xbmcplugin.ITEMS[0][1].label
+    assert "Zhlédnuté" in xbmcplugin.ITEMS[1][1].label
+    assert "Rozkoukáno" in xbmcplugin.ITEMS[2][1].label
+    assert xbmcplugin.ITEMS[3][2]  # třetí film vede k online hledání
     xbmcgui.WINDOW_PROPERTIES.clear()
     xbmcgui.YESNO_ANSWERS.append(True)
     xbmc.BUILTINS.clear()
     plugin.offer_next_movie(REF, type("IdlePlayer", (), {"isPlaying": lambda self: False})())
     assert xbmc.BUILTINS == ["PlayMedia(%s,resume)" % plugin.url_for("play", vid=next_vid, continue_play=1)]
+
+
+def test_provider_filters_try_verified_original_title(plugin, monkeypatch):
+    import xbmcplugin
+
+    calls = []
+    items = {
+        "Místní název 2020": [
+            {"id": REF, "title": "Mistni.nazev.2020.CZ.720p", "duration": 5600, "thumb": ""},
+            {"id": "2:film:eeeeeeeeeeeeeeee", "title": "Mistni.nazev.2020.CZ.1080p.Trailer",
+             "duration": 90, "thumb": ""},
+        ],
+        "Original Name": [
+            {"id": "3:film:bbbbbbbbbbbbbbbb", "title": "Original.Name.2020.CZ.1080p", "duration": 5600, "thumb": ""},
+            {"id": "4:film:cccccccccccccccc", "title": "Original.Name.2020.SK.1080p", "duration": 5600, "thumb": ""},
+        ],
+    }
+
+    class TmdbSearch:
+        enabled = True
+
+        def search_titles(self, title, _page):
+            return [{"media_type": "movie", "id": 10, "title": title, "original_title": "Original Name",
+                     "release_date": "2020-01-01"}], 1
+
+    def fetch(_client, query, _page, _cursor):
+        calls.append(query)
+        return items[query], ""
+
+    monkeypatch.setattr(plugin, "make_tmdb", TmdbSearch)
+    monkeypatch.setattr(provider, "search_catalog", fetch)
+    plugin.provider_search({"q": "Místní název 2020", "audio": "CZ", "quality": "FHD", "hide_previews": "1"})
+    assert len(xbmcplugin.ITEMS) == 2
+    assert "Český dabing" in xbmcplugin.ITEMS[0][1].label
+    assert xbmcplugin.ITEMS[1][0] == plugin.url_for("play", vid="3:film:bbbbbbbbbbbbbbbb")
+    assert calls == ["Místní název 2020", "Original Name"]
+
+    xbmcplugin.ITEMS.clear()
+    plugin.add_provider_result({"id": REF, "title": "Original Name", "duration": 5600, "thumb": ""})
+    assert "Jazyk neuveden" in xbmcplugin.ITEMS[0][1].label
+
+
+def test_watchlist_notifies_only_after_complete_sync_and_remembers_acknowledgement(plugin, monkeypatch):
+    import xbmcgui
+    import xbmcplugin
+
+    with plugin.open_library() as lib:
+        lib.watchlist_add("movie", 10, "Pelíšky", 1999, "")
+
+    class Client:
+        listing_complete = False
+
+        def my_videos(self, progress):
+            return [{"id": REF, "title": "Pelisky.1999.CZ"}]
+
+    client = Client()
+    monkeypatch.setattr(plugin, "make_client", lambda: client)
+    plugin.run_sync(background=True)
+    with plugin.open_library() as lib:
+        assert not lib.fresh_watchlist()
+    client.listing_complete = True
+    plugin.run_sync(background=True)
+    assert "Nově dostupné tituly z Chci vidět (1)" in xbmcgui.NOTIFICATIONS
+    plugin.watchlist({})
+    assert xbmcplugin.ITEMS[1][0] == plugin.url_for("play", vid=REF)
+    assert "Nově dostupný" in xbmcplugin.ITEMS[1][1].label
+    plugin.watchlist_acknowledge({"kind": "movie", "tmdb_id": 10})
+    plugin.run_sync(background=True)
+    assert xbmcgui.NOTIFICATIONS.count("Nově dostupné tituly z Chci vidět (1)") == 1
+    with plugin.open_library() as lib:
+        assert not lib.fresh_watchlist()
+
+
+def test_failed_playback_offers_only_another_version_of_same_episode(plugin, monkeypatch):
+    from urllib.parse import parse_qsl, urlsplit
+
+    import nameparser
+    import xbmc
+    import xbmcplugin
+
+    next_video = "2:film:bbbbbbbbbbbbbbbb"
+    other_episode = "3:film:cccccccccccccccc"
+    with plugin.open_library() as lib:
+        for vid, title, duration in ((REF, "Archa.S01E02.CZ", 2400),
+                                     (next_video, "Archa.S01E02.SK", 1800),
+                                     (other_episode, "Archa.S01E03.CZ", 2400)):
+            lib.upsert_video(vid, title, "account", nameparser.parse(title), duration=duration)
+        lib.record_play(REF, 300, 2400)
+    watched_options = []
+
+    def choose(_heading, options):
+        watched_options.extend(options)
+        return 0
+
+    prompts = []
+    monkeypatch.setattr(plugin, "select", choose)
+    monkeypatch.setattr(plugin, "yesno", lambda prompt, **_kwargs: prompts.append(prompt) or True)
+    xbmc.BUILTINS.clear()
+    plugin.playback_failed(REF, "Video je nedostupné")
+    assert len(watched_options) == 1 and "S01E02.SK" in watched_options[0]
+    assert "0:40:00" in prompts[0] and "0:30:00" in prompts[0]
+    command = xbmc.BUILTINS[-1]
+    params = dict(parse_qsl(urlsplit(command[len("PlayMedia("):-len(",noresume)")]).query))
+    assert params["vid"] == next_video and params["replacement"] == "1"
+    plugin._link_cache_put(next_video, "https://cdn/alt.mp4", {}, None)
+    plugin.play(params)
+    assert xbmcplugin.RESOLVED[-1][1].tag.data["resumepoint"] == (300.0, 1800.0)
+    plugin.playback_failed(next_video, "Přehrávání se nezdařilo", replacement=True)
+    assert len(xbmc.BUILTINS) == 1
