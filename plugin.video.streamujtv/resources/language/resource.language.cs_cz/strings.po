@@ -1,0 +1,552 @@
+# Kodi Media Center language file
+# Addon Name: Streamuj.tv
+# Addon id: plugin.video.streamujtv
+# Addon Provider: petermikula-glitch
+msgid ""
+msgstr ""
+"Project-Id-Version: plugin.video.streamujtv\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: cs_CZ\n"
+"Plural-Forms: nplurals=3; plural=(n==1) ? 0 : (n>=2 && n<=4) ? 1 : 2;\n"
+
+msgctxt "#30000"
+msgid "Account"
+msgstr "Účet"
+
+msgctxt "#30001"
+msgid "Username"
+msgstr "Uživatelské jméno"
+
+msgctxt "#30002"
+msgid "Password"
+msgstr "Heslo"
+
+msgctxt "#30003"
+msgid "Server location"
+msgstr "Lokalita serveru"
+
+msgctxt "#30004"
+msgid "Location 1"
+msgstr "Lokalita 1"
+
+msgctxt "#30005"
+msgid "Location 2"
+msgstr "Lokalita 2"
+
+msgctxt "#30006"
+msgid "Premium valid until (filled by account check)"
+msgstr "Premium platné do (vyplní ověření účtu)"
+
+msgctxt "#30007"
+msgid "Account and login"
+msgstr "Účet a přihlášení"
+
+msgctxt "#30010"
+msgid "Synchronization"
+msgstr "Synchronizace"
+
+msgctxt "#30011"
+msgid "Also load favourite videos"
+msgstr "Načítat i oblíbená videa"
+
+msgctxt "#30012"
+msgid "Import playlists as collections"
+msgstr "Načítat playlisty jako kolekce"
+
+msgctxt "#30013"
+msgid "Remove videos deleted from the account"
+msgstr "Odstraňovat z katalogu videa smazaná z účtu"
+
+msgctxt "#30014"
+msgid "Automatic synchronization in the background"
+msgstr "Automatická synchronizace na pozadí"
+
+msgctxt "#30015"
+msgid "Synchronization interval (hours)"
+msgstr "Interval synchronizace (hodiny)"
+
+msgctxt "#30016"
+msgid "Fetch ratings and plots after synchronization"
+msgstr "Po synchronizaci doplnit hodnocení a popisy"
+
+msgctxt "#30020"
+msgid "Metadata"
+msgstr "Metadata"
+
+msgctxt "#30021"
+msgid "Use ČSFD"
+msgstr "Používat ČSFD"
+
+msgctxt "#30022"
+msgid "TMDB API key (optional fallback source)"
+msgstr "TMDB API klíč (volitelný záložní zdroj)"
+
+msgctxt "#30023"
+msgid "Show rating in titles"
+msgstr "Zobrazovat hodnocení v názvech"
+
+msgctxt "#30024"
+msgid "Ratings and descriptions"
+msgstr "Hodnocení a popisy"
+
+msgctxt "#30030"
+msgid "Playback"
+msgstr "Přehrávání"
+
+msgctxt "#30031"
+msgid "Preferred language"
+msgstr "Preferovaný jazyk"
+
+msgctxt "#30032"
+msgid "Preferred quality"
+msgstr "Preferovaná kvalita"
+
+msgctxt "#30033"
+msgid "Always offer stream selection"
+msgstr "Vždy nabídnout výběr streamu"
+
+msgctxt "#30034"
+msgid "Load subtitles"
+msgstr "Načítat titulky"
+
+msgctxt "#30035"
+msgid "Best available"
+msgstr "Nejlepší dostupná"
+
+msgctxt "#30036"
+msgid "Any"
+msgstr "Libovolný"
+
+msgctxt "#30037"
+msgid "Czech"
+msgstr "Čeština"
+
+msgctxt "#30038"
+msgid "Slovak"
+msgstr "Slovenština"
+
+msgctxt "#30039"
+msgid "English"
+msgstr "Angličtina"
+
+msgctxt "#30040"
+msgid "Kodi library"
+msgstr "Knihovna Kodi"
+
+msgctxt "#30041"
+msgid "Export folder"
+msgstr "Složka pro export"
+
+msgctxt "#30042"
+msgid "Stream"
+msgstr "Stream"
+
+msgctxt "#30043"
+msgid "2160p (UHD)"
+msgstr "2160p (UHD)"
+
+msgctxt "#30044"
+msgid "1080p (Full HD)"
+msgstr "1080p (Full HD)"
+
+msgctxt "#30045"
+msgid "720p (HD)"
+msgstr "720p (HD)"
+
+msgctxt "#30046"
+msgid "480p (SD)"
+msgstr "480p (SD)"
+
+msgctxt "#30100"
+msgid "Movies"
+msgstr "Filmy"
+
+msgctxt "#30101"
+msgid "TV shows"
+msgstr "Seriály"
+
+msgctxt "#30102"
+msgid "Search"
+msgstr "Hledat"
+
+msgctxt "#30103"
+msgid "Collections"
+msgstr "Kolekce"
+
+msgctxt "#30104"
+msgid "Recently added"
+msgstr "Nově přidané"
+
+msgctxt "#30105"
+msgid "Unrecognized titles"
+msgstr "Nerozpoznané tituly"
+
+msgctxt "#30106"
+msgid "Tools"
+msgstr "Nástroje"
+
+msgctxt "#30107"
+msgid "All movies"
+msgstr "Všechny filmy"
+
+msgctxt "#30108"
+msgid "Top rated"
+msgstr "Nejlépe hodnocené"
+
+msgctxt "#30109"
+msgid "By genre"
+msgstr "Podle žánru"
+
+msgctxt "#30110"
+msgid "By decade"
+msgstr "Podle desetiletí"
+
+msgctxt "#30111"
+msgid "By country"
+msgstr "Podle země"
+
+msgctxt "#30112"
+msgid "By rating"
+msgstr "Podle hodnocení"
+
+msgctxt "#30113"
+msgid "All TV shows"
+msgstr "Všechny seriály"
+
+msgctxt "#30114"
+msgid "Season %d"
+msgstr "%d. série"
+
+msgctxt "#30115"
+msgid "Other videos"
+msgstr "Ostatní videa"
+
+msgctxt "#30117"
+msgid "New search"
+msgstr "Nové hledání"
+
+msgctxt "#30118"
+msgid "Search the catalogue (title, actor, director, genre)"
+msgstr "Hledat v katalogu (název, herec, režisér, žánr)"
+
+msgctxt "#30121"
+msgid "Nothing found"
+msgstr "Nic nenalezeno"
+
+msgctxt "#30122"
+msgid "Remove from history"
+msgstr "Odstranit z historie"
+
+msgctxt "#30123"
+msgid "New collection"
+msgstr "Nová kolekce"
+
+msgctxt "#30124"
+msgid "Collection name"
+msgstr "Název kolekce"
+
+msgctxt "#30125"
+msgid "Rename collection"
+msgstr "Přejmenovat kolekci"
+
+msgctxt "#30126"
+msgid "Delete collection"
+msgstr "Smazat kolekci"
+
+msgctxt "#30127"
+msgid "Delete collection \"%s\"?"
+msgstr "Smazat kolekci „%s“?"
+
+msgctxt "#30128"
+msgid "Add to collection"
+msgstr "Přidat do kolekce"
+
+msgctxt "#30129"
+msgid "Remove from collection"
+msgstr "Odebrat z kolekce"
+
+msgctxt "#30130"
+msgid "Added to collection %s"
+msgstr "Přidáno do kolekce %s"
+
+msgctxt "#30131"
+msgid "Hidden videos"
+msgstr "Skrytá videa"
+
+msgctxt "#30132"
+msgid "The catalogue is empty. Run account synchronization in Tools or import links."
+msgstr "Katalog je prázdný. Spusť synchronizaci s účtem v Nástrojích nebo importuj odkazy."
+
+msgctxt "#30133"
+msgid "%d videos"
+msgstr "Počet videí: %d"
+
+msgctxt "#30135"
+msgid "%d %% and more"
+msgstr "%d %% a více"
+
+msgctxt "#30200"
+msgid "Synchronize with streamuj.tv account"
+msgstr "Synchronizovat s účtem streamuj.tv"
+
+msgctxt "#30201"
+msgid "Import links from file"
+msgstr "Importovat odkazy ze souboru"
+
+msgctxt "#30202"
+msgid "Add link"
+msgstr "Přidat odkaz"
+
+msgctxt "#30203"
+msgid "Fetch missing ratings and plots"
+msgstr "Doplnit chybějící hodnocení a popisy"
+
+msgctxt "#30204"
+msgid "Refresh all metadata"
+msgstr "Obnovit všechna metadata"
+
+msgctxt "#30205"
+msgid "Account status"
+msgstr "Stav účtu"
+
+msgctxt "#30206"
+msgid "Export to Kodi library"
+msgstr "Exportovat do knihovny Kodi"
+
+msgctxt "#30207"
+msgid "Clear catalogue"
+msgstr "Vymazat katalog"
+
+msgctxt "#30208"
+msgid "Settings"
+msgstr "Nastavení"
+
+msgctxt "#30209"
+msgid "Catalogue statistics"
+msgstr "Statistika katalogu"
+
+msgctxt "#30210"
+msgid "Synchronizing…"
+msgstr "Synchronizuji…"
+
+msgctxt "#30211"
+msgid "Page %d, found %d videos"
+msgstr "Stránka %d, nalezeno %d videí"
+
+msgctxt "#30212"
+msgid "Done: %d videos, %d new, %d removed"
+msgstr "Hotovo: %d videí, %d nových, %d odstraněno"
+
+msgctxt "#30213"
+msgid "Fetching ratings and plots"
+msgstr "Stahuji hodnocení a popisy"
+
+msgctxt "#30214"
+msgid "%d / %d: %s"
+msgstr "%d / %d: %s"
+
+msgctxt "#30215"
+msgid "Metadata: %d found (ČSFD %d, TMDB %d), %d not found, %d errors"
+msgstr "Metadata: %d nalezeno (ČSFD %d, TMDB %d), %d nenalezeno, %d chyb"
+
+msgctxt "#30216"
+msgid "ČSFD is currently blocking automated requests (anti-bot protection). The add-on does not circumvent it. Fill in a TMDB API key in settings to get ratings from TMDB, or enter ratings manually (context menu → Assign ČSFD / TMDB)."
+msgstr "ČSFD momentálně blokuje automatické dotazy (ochrana proti botům). Doplněk ji neobchází. Pro hodnocení z TMDB vyplň v nastavení TMDB API klíč, případně zadej hodnocení ručně (kontextové menu → Přiřadit ČSFD / TMDB)."
+
+msgctxt "#30217"
+msgid "Paste a streamuj.tv video link or ID (optionally: Title | link)"
+msgstr "Vlož odkaz na video streamuj.tv nebo jeho ID (případně: Název | odkaz)"
+
+msgctxt "#30218"
+msgid "Invalid link"
+msgstr "Neplatný odkaz"
+
+msgctxt "#30219"
+msgid "Imported: %d new, %d already in the catalogue"
+msgstr "Importováno: %d nových, %d už v katalogu"
+
+msgctxt "#30220"
+msgid "Choose a text file with links"
+msgstr "Vyber textový soubor s odkazy"
+
+msgctxt "#30221"
+msgid "No streamuj.tv links found in the file"
+msgstr "V souboru nejsou žádné odkazy na streamuj.tv"
+
+msgctxt "#30222"
+msgid "Fill in your streamuj.tv username and password in the add-on settings first."
+msgstr "Nejdřív vyplň jméno a heslo k streamuj.tv v nastavení doplňku."
+
+msgctxt "#30223"
+msgid "Premium is active until %s"
+msgstr "Premium je aktivní do %s"
+
+msgctxt "#30224"
+msgid "The account has no active premium."
+msgstr "Účet nemá aktivní premium."
+
+msgctxt "#30225"
+msgid "Wrong username or password."
+msgstr "Špatné jméno nebo heslo."
+
+msgctxt "#30226"
+msgid "Really clear the whole catalogue? Videos on streamuj.tv stay untouched."
+msgstr "Opravdu vymazat celý katalog? Videa na streamuj.tv zůstanou beze změny."
+
+msgctxt "#30227"
+msgid "Exported %d movies and %d TV shows to %s"
+msgstr "Exportováno %d filmů a %d seriálů do %s"
+
+msgctxt "#30228"
+msgid "Set the export folder in the add-on settings first."
+msgstr "Nejdřív nastav složku pro export v nastavení doplňku."
+
+msgctxt "#30229"
+msgid "Download metadata again for all titles? It may take a while."
+msgstr "Znovu stáhnout metadata pro všechny tituly? Může to chvíli trvat."
+
+msgctxt "#30230"
+msgid "Videos: %d\nMovies: %d\nTV shows: %d\nWith rating: %d\nUnrecognized: %d"
+msgstr "Videí: %d\nFilmů: %d\nSeriálů: %d\nS hodnocením: %d\nNerozpoznaných: %d"
+
+msgctxt "#30231"
+msgid "Last synchronization: %s"
+msgstr "Poslední synchronizace: %s"
+
+msgctxt "#30232"
+msgid "never"
+msgstr "nikdy"
+
+msgctxt "#30233"
+msgid "Update the Kodi video library now?"
+msgstr "Aktualizovat teď knihovnu videí v Kodi?"
+
+msgctxt "#30300"
+msgid "Assign ČSFD / TMDB…"
+msgstr "Přiřadit ČSFD / TMDB…"
+
+msgctxt "#30301"
+msgid "Refresh metadata"
+msgstr "Obnovit metadata"
+
+msgctxt "#30302"
+msgid "Edit title and classification…"
+msgstr "Upravit název a zařazení…"
+
+msgctxt "#30303"
+msgid "Hide"
+msgstr "Skrýt"
+
+msgctxt "#30304"
+msgid "Unhide"
+msgstr "Zobrazit"
+
+msgctxt "#30305"
+msgid "Remove from catalogue"
+msgstr "Odebrat z katalogu"
+
+msgctxt "#30306"
+msgid "Search ČSFD"
+msgstr "Hledat na ČSFD"
+
+msgctxt "#30307"
+msgid "Enter ČSFD link or ID"
+msgstr "Zadat odkaz nebo ID z ČSFD"
+
+msgctxt "#30308"
+msgid "Search TMDB"
+msgstr "Hledat na TMDB"
+
+msgctxt "#30309"
+msgid "Enter rating manually"
+msgstr "Zadat hodnocení ručně"
+
+msgctxt "#30310"
+msgid "Search for"
+msgstr "Hledaný výraz"
+
+msgctxt "#30311"
+msgid "Rating (0–100 %)"
+msgstr "Hodnocení (0–100 %)"
+
+msgctxt "#30312"
+msgid "Type"
+msgstr "Typ"
+
+msgctxt "#30313"
+msgid "Movie"
+msgstr "Film"
+
+msgctxt "#30314"
+msgid "TV show episode"
+msgstr "Díl seriálu"
+
+msgctxt "#30315"
+msgid "Title"
+msgstr "Název"
+
+msgctxt "#30316"
+msgid "Year"
+msgstr "Rok"
+
+msgctxt "#30317"
+msgid "Season"
+msgstr "Série"
+
+msgctxt "#30318"
+msgid "Episode"
+msgstr "Díl"
+
+msgctxt "#30319"
+msgid "TV show title"
+msgstr "Název seriálu"
+
+msgctxt "#30320"
+msgid "Saved"
+msgstr "Uloženo"
+
+msgctxt "#30321"
+msgid "Choose stream"
+msgstr "Vyber stream"
+
+msgctxt "#30322"
+msgid "The video has no available streams"
+msgstr "Video nemá žádné dostupné streamy"
+
+msgctxt "#30323"
+msgid "Playback error: %s"
+msgstr "Chyba přehrávání: %s"
+
+msgctxt "#30325"
+msgid "Video details"
+msgstr "Podrobnosti o videu"
+
+msgctxt "#30326"
+msgid "Remove \"%s\" from the catalogue? The video on streamuj.tv stays."
+msgstr "Odebrat „%s“ z katalogu? Video na streamuj.tv zůstane."
+
+msgctxt "#30327"
+msgid "TMDB API key is not set in the add-on settings."
+msgstr "V nastavení doplňku není vyplněný TMDB API klíč."
+
+msgctxt "#30328"
+msgid "Error: %s"
+msgstr "Chyba: %s"
+
+msgctxt "#30329"
+msgid "Rating"
+msgstr "Hodnocení"
+
+msgctxt "#30330"
+msgid "File"
+msgstr "Soubor"
+
+msgctxt "#30331"
+msgid "Language"
+msgstr "Jazyk"
+
+msgctxt "#30332"
+msgid "Quality"
+msgstr "Kvalita"
