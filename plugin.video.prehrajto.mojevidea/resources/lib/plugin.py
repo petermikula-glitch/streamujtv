@@ -315,6 +315,8 @@ def root(params):
     with open_library() as lib:
         empty = lib.count_videos() == 0
     add_dir(_(30360), "in_progress", "DefaultInProgressShows.png")
+    if make_tmdb().enabled:
+        add_dir(_(30390), "tmdb_titles", "DefaultMovies.png", kind="movie", category="popular")
     add_dir(_(30361), "my_videos_menu", "DefaultVideo.png")
     add_dir(_(30362), "tmdb_catalog", "DefaultMovies.png")
     add_dir(_(30102), "search_menu", "DefaultAddonsSearch.png")
@@ -414,11 +416,93 @@ def add_tmdb_title(item, kind):
     backdrop = item.get("backdrop_path")
     _art(li, poster=IMG + "w500" + poster if poster else "",
          fanart=IMG + "w1280" + backdrop if backdrop else "")
+    detail_url = url_for("tmdb_title", kind=kind, tmdb_id=item["id"])
+    args = {"kind": kind, "tmdb_id": item["id"], "title": title, "original": original,
+            "year": released_year, "poster": IMG + "w500" + poster if poster else ""}
+    context = [(_(30391), "Container.Update(%s)" % detail_url),
+               (_(30375), "RunPlugin(%s)" % url_for("watchlist_change", **args))]
     if original != title:
-        li.addContextMenuItems([(_(30359), "Container.Update(%s)" %
-                                 url_for("provider_search", q=original))])
-    xbmcplugin.addDirectoryItem(HANDLE, url_for("tmdb_title", kind=kind, tmdb_id=item["id"]),
-                                li, True)
+        context.append((_(30359), "Container.Update(%s)" % url_for("provider_search", q=original)))
+    li.addContextMenuItems(context)
+    target = (url_for("tmdb_movie_versions", tmdb_id=item["id"], title=title, original=original,
+                      year=released_year) if kind == "movie" else detail_url)
+    xbmcplugin.addDirectoryItem(HANDLE, target, li, True)
+
+
+def _movie_result_key(video, parsed, title, original, year):
+    # Handles punctuation and bilingual names in either order. Use the raw
+    # filename to detect trailers even when parse() strips everything after the year.
+    localized, original = normalize(title), normalize(original)
+    aliases = {name.strip() for name in (localized, original, localized + " " + original,
+                                         original + " " + localized) if name.strip()}
+    name = normalize(parsed["title"])
+    extras = {"trailer", "teaser", "ukazka", "upoutavka"}
+    raw_words = set(normalize(video["title"]).split())
+    title_words = set(localized.split()) | set(original.split())
+    preview = bool(extras & (raw_words - title_words))
+    exact = name in aliases and parsed["kind"] == "movie"
+    year_matches = not year or parsed["year"] in (0, year)
+    rank = 0 if exact and year_matches else 1
+    version = _provider_version(video, parsed)
+    return (preview, rank, _version_score(version))
+
+
+def tmdb_movie_versions(params):
+    title = params.get("title", "").strip()
+    original = params.get("original", "").strip()
+    query = params.get("q", "").strip() or title
+    if not query:
+        end(cache=False)
+        return
+    try:
+        tmdb_id = int(params.get("tmdb_id") or 0)
+        year = int(params.get("year") or 0)
+        page = int(params.get("page") or 1)
+    except ValueError:
+        end(cache=False)
+        return
+    args = {key: params.get(key) for key in ("tmdb_id", "title", "original", "year")}
+    local_ids = set()
+    if page == 1:
+        with open_library() as lib:
+            match = _library_match(lib.movies(), {"tmdb_id": tmdb_id, "title": title,
+                                                   "orig_title": original, "year": year})
+            local = lib.videos_for_meta(match["key"]) if match else []
+        for video in sorted(local, key=_version_score):
+            label = _version_label(video) or video["raw_title"]
+            add_video(video, match, label="%s · %s" % (_(30392), label), mediatype="movie")
+            local_ids.add(provider.video_key(video["id"]))
+    videos, cursor = [], None
+    try:
+        videos, cursor = provider.search_catalog(make_client(), query, page, params.get("cursor", ""))
+    except provider.LoginError:
+        notify(_(30368), time_ms=8000)
+        add_action(_(30356), "settings")
+    except (ValueError, provider.ProviderError, provider.RateLimited) as e:
+        notify(_(30369) % e, time_ms=8000)
+    else:
+        versions = []
+        for result in videos:
+            parsed = parse(result["title"])
+            versions.append((_movie_result_key(result, parsed, title, original, year),
+                             _provider_version(result, parsed)))
+        for sort_key, video in sorted(versions, key=lambda item: item[0]):
+            preview, rank = sort_key[:2]
+            identity = provider.video_key(video["id"])
+            if identity in local_ids:
+                continue
+            local_ids.add(identity)
+            label = _version_label(video) if not preview and rank == 0 else ""
+            # A descriptive second line plus the original filename help distinguish versions
+            # that happen to have the same language, resolution and file size.
+            add_provider_result(video, label or video["title"])
+        if not videos and not local_ids and not cursor:
+            notify(_(30370))
+    if cursor:
+        add_dir(_(30341), "tmdb_movie_versions", q=query, page=page + 1, cursor=cursor, **args)
+    if page == 1 and original and normalize(original) != normalize(query):
+        add_dir(_(30359), "tmdb_movie_versions", q=original, **args)
+    end("videos", cache=False)
 
 
 def _library_match(items, detail):
@@ -461,6 +545,7 @@ def tmdb_title(params):
     def add_option(label, action, folder=True, **route_params):
         li = xbmcgui.ListItem(label)
         info = _meta_info(detail, "tvshow" if want_series else "movie")
+        info["title"] = label
         info["plot"] = detail["plot"]
         _set_info(li, info, detail["cast"])
         _art(li, poster=detail["poster"], fanart=detail["fanart"])
@@ -477,7 +562,11 @@ def tmdb_title(params):
         add_option(_(30363), "versions", key=match["key"])
     title = detail["title"] or detail["orig_title"]
     if title:
-        add_option(_(30340), "provider_search", q=title)
+        if want_series:
+            add_option(_(30340), "provider_search", q=title)
+        else:
+            add_option(_(30340), "tmdb_movie_versions", title=title, original=detail["orig_title"],
+                       year=detail["year"], tmdb_id=tmdb_id)
     if detail["orig_title"] and detail["orig_title"] != title:
         add_option(_(30359), "provider_search", q=detail["orig_title"])
     add_action(_(30376 if saved else 30375), "watchlist_change", kind=kind, tmdb_id=tmdb_id,
@@ -956,8 +1045,9 @@ def _provider_version(video, parsed):
 
 def add_provider_result(video, label=None):
     li = xbmcgui.ListItem(label or video["title"])
-    _set_info(li, {"title": video["title"], "mediatype": "video", "duration": video["duration"],
-                   "plot": _version_label(video)})
+    description = "\n".join(filter(None, (_version_label(video), video["title"])))
+    _set_info(li, {"title": label or video["title"], "mediatype": "video", "duration": video["duration"],
+                   "plot": description})
     _art(li, thumb=video["thumb"])
     li.setProperty("IsPlayable", "true")
     save_url = url_for("provider_save", vid=video["id"], title=video["title"])
@@ -1637,6 +1727,7 @@ ROUTES = {
     "tmdb_catalog": tmdb_catalog, "tmdb_categories": tmdb_categories,
     "tmdb_filters": tmdb_filters, "tmdb_titles": tmdb_titles, "tmdb_title": tmdb_title,
     "my_videos_menu": my_videos_menu, "tmdb_search": tmdb_search,
+    "tmdb_movie_versions": tmdb_movie_versions,
     "watchlist": watchlist, "watchlist_change": watchlist_change,
     "repair_title": repair_title, "tmdb_repair": tmdb_repair, "season_status": season_status,
     "backup_catalog": backup_catalog, "restore_catalog": restore_catalog,

@@ -770,3 +770,15 @@ msgstr "Angličtina"
 msgctxt "#30389"
 msgid "No match in your library."
 msgstr "Ve vlastní knihovně není shoda."
+
+msgctxt "#30390"
+msgid "Popular movies"
+msgstr "Oblíbené filmy"
+
+msgctxt "#30391"
+msgid "Title details"
+msgstr "Detail titulu"
+
+msgctxt "#30392"
+msgid "My library"
+msgstr "Moje knihovna"
