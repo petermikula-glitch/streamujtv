@@ -586,3 +586,43 @@ msgstr "Jazyk"
 msgctxt "#30332"
 msgid "Quality"
 msgstr "Kvalita"
+
+msgctxt "#30340"
+msgid "Search all of Přehraj.to"
+msgstr "Hledat na celém Přehraj.to"
+
+msgctxt "#30341"
+msgid "Next page"
+msgstr "Další stránka"
+
+msgctxt "#30342"
+msgid "Save to my catalogue"
+msgstr "Přidat do mého katalogu"
+
+msgctxt "#30343"
+msgid "Incomplete sync: %d videos loaded. Existing videos were kept."
+msgstr "Neúplná synchronizace: načteno %d videí. Stávající videa zůstala v katalogu."
+
+msgctxt "#30344"
+msgid "Original unavailable. Playing the %dp version."
+msgstr "Originál není dostupný. Přehrávám verzi %dp."
+
+msgctxt "#30345"
+msgid "Back up catalogue"
+msgstr "Zálohovat katalog"
+
+msgctxt "#30346"
+msgid "Restore catalogue"
+msgstr "Obnovit katalog"
+
+msgctxt "#30347"
+msgid "Replace the current catalogue, collections and playback history with this backup?"
+msgstr "Nahradit aktuální katalog, kolekce a historii přehrávání touto zálohou?"
+
+msgctxt "#30348"
+msgid "Backup saved to %s"
+msgstr "Záloha uložena do %s"
+
+msgctxt "#30349"
+msgid "Catalogue restored"
+msgstr "Katalog obnoven"

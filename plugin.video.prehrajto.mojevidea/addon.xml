@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.prehrajto.mojevidea" name="Přehraj.to – Moje videa" version="1.2.0" provider-name="petermikula-glitch">
+<addon id="plugin.video.prehrajto.mojevidea" name="Přehraj.to – Moje videa" version="1.2.1" provider-name="petermikula-glitch">
     <requires>
         <import addon="xbmc.python" version="3.0.0"/>
     </requires>
@@ -17,7 +17,7 @@
         <platform>all</platform>
         <license>GPL-2.0-or-later</license>
         <source>https://github.com/petermikula-glitch/streamujtv</source>
-        <news>1.2.0 – Rozkoukané a Naposledy přehrané, diagnostika pro ladění, slučování duplicit a dočtení čísla videa u ručních odkazů, paměť odkazů na soubor, velikost a kvalita u verzí, opakování po HTTP 429; 1.0.0 – první verze</news>
+        <news>1.2.1 – Hledání na Přehraj.to, ochrana katalogu při neúplné synchronizaci, záloha a obnova katalogu, oznámení kvality náhradního streamu; 1.2.0 – Rozkoukané a Naposledy přehrané, diagnostika pro ladění, slučování duplicit a dočtení čísla videa u ručních odkazů, paměť odkazů na soubor, velikost a kvalita u verzí, opakování po HTTP 429; 1.0.0 – první verze</news>
         <assets>
             <icon>icon.png</icon>
             <fanart>fanart.jpg</fanart>

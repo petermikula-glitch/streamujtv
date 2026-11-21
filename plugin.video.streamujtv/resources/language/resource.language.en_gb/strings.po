@@ -586,3 +586,27 @@ msgstr ""
 msgctxt "#30332"
 msgid "Quality"
 msgstr ""
+
+msgctxt "#30343"
+msgid "Incomplete sync: %d videos loaded. Existing videos were kept."
+msgstr ""
+
+msgctxt "#30345"
+msgid "Back up catalogue"
+msgstr ""
+
+msgctxt "#30346"
+msgid "Restore catalogue"
+msgstr ""
+
+msgctxt "#30347"
+msgid "Replace the current catalogue, collections and playback history with this backup?"
+msgstr ""
+
+msgctxt "#30348"
+msgid "Backup saved to %s"
+msgstr ""
+
+msgctxt "#30349"
+msgid "Catalogue restored"
+msgstr ""

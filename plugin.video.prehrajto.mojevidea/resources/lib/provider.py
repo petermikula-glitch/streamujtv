@@ -74,3 +74,7 @@ def diagnostics(client):
         except prehrajto.PrehrajtoError as e:
             out["stranka_videa.html"] = "CHYBA: %s" % e
     return out
+
+
+def search_catalog(client, query, page, cursor):
+    return client.search_page(query, page, cursor)

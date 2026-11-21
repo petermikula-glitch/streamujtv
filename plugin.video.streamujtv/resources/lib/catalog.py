@@ -40,6 +40,7 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
                             quality=v.get("quality", "")):
             stats["new"] += 1
     stats["total"] = len(videos)
+    stats["incomplete"] = not getattr(client, "listing_complete", True)
 
     if include_favorites and not stats["cancelled"]:
         try:
@@ -81,10 +82,11 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
             stats["playlists"] += 1
 
     # mazat jen po úplném a neprázdném načtení – chyba stránky nesmí vymazat katalog
-    if remove_missing and not stats["cancelled"] and videos:
+    if remove_missing and not stats["cancelled"] and not stats["incomplete"] and videos:
         stats["removed"] = lib.remove_missing("account", started)
     lib.cleanup_meta()
-    lib.set_kv("last_sync", int(time.time()))
+    if not stats["cancelled"] and not stats["incomplete"]:
+        lib.set_kv("last_sync", int(time.time()))
     return stats
 
 

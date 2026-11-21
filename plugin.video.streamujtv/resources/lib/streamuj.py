@@ -418,10 +418,12 @@ class StreamujClient(object):
 
     def fetch_listing(self, start_url, max_pages=200, progress=None, delay=0.3):
         """Projde výpis včetně stránkování a vrátí všechna videa."""
+        self.listing_complete = False
         to_visit = [start_url]
         visited = set()
         videos = []
         seen = set()
+        empty_page = False
         while to_visit and len(visited) < max_pages:
             url = to_visit.pop(0)
             if url in visited:
@@ -430,21 +432,21 @@ class StreamujClient(object):
             page, final_url = self._request(url)
             if "signup" in final_url or final_url.rstrip("/").endswith("/login"):
                 raise LoginError("Stránka %s vyžaduje přihlášení" % start_url)
-            new = 0
-            for item in parse_video_list(page):
+            items = parse_video_list(page)
+            if not items and len(visited) > 1:
+                empty_page = True
+            for item in items:
                 if item["id"] not in seen:
                     seen.add(item["id"])
                     videos.append(item)
-                    new += 1
             if progress and progress(len(visited), len(videos)):
-                break  # zrušeno uživatelem
-            if new == 0 and len(visited) > 1:
-                continue  # stránka bez nových videí – dál z ní nejdeme
+                return videos  # zrušeno uživatelem
             for nxt in parse_pagination(page, final_url):
                 if nxt not in visited and nxt not in to_visit:
                     to_visit.append(nxt)
-            if delay:
+            if delay and to_visit:
                 time.sleep(delay)
+        self.listing_complete = not to_visit and not empty_page
         return videos
 
     def my_videos(self, progress=None):

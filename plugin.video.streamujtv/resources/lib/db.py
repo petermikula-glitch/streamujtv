@@ -7,6 +7,8 @@ import time
 from nameparser import movie_key, normalize, show_key
 
 SCHEMA_VERSION = 2
+BACKUP_VERSION = 1
+BACKUP_TABLES = ("videos", "meta", "collections", "collection_items", "history", "search_history")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
@@ -183,6 +185,44 @@ class Library(object):
 
     def __exit__(self, *exc):
         self.close()
+
+    def export_backup(self, addon_id):
+        """Konzistentní snímek katalogu, bez nastavení a mezipaměti odkazů."""
+        with self.conn:
+            self.conn.execute("BEGIN")
+            tables = {
+                table: [dict(row) for row in self.conn.execute("SELECT * FROM " + table)]
+                for table in BACKUP_TABLES
+            }
+        return {"version": BACKUP_VERSION, "addon": addon_id, "tables": tables}
+
+    def restore_backup(self, backup, addon_id):
+        if (not isinstance(backup, dict) or backup.get("version") != BACKUP_VERSION
+                or backup.get("addon") != addon_id):
+            raise ValueError("Unsupported backup format")
+        tables = backup.get("tables")
+        if not isinstance(tables, dict) or set(tables) != set(BACKUP_TABLES):
+            raise ValueError("Invalid backup tables")
+        # Uživatel může zálohu upravit. Názvy sloupců bereme výhradně ze schématu.
+        inserts = {}
+        for table in BACKUP_TABLES:
+            columns = [row[1] for row in self.conn.execute("PRAGMA table_info(%s)" % table)]
+            rows = tables[table]
+            if not isinstance(rows, list) or any(
+                    not isinstance(row, dict) or set(row) != set(columns)
+                    or any(value is not None and type(value) not in (str, int, float)
+                           for value in row.values()) for row in rows):
+                raise ValueError("Invalid backup rows")
+            inserts[table] = (columns, rows)
+        with self.conn:
+            for table in reversed(BACKUP_TABLES):
+                self.conn.execute("DELETE FROM " + table)
+            for table, (columns, rows) in inserts.items():
+                sql = "INSERT INTO %s (%s) VALUES (%s)" % (
+                    table, ", ".join(columns), ", ".join("?" for _ in columns))
+                self.conn.executemany(sql, ([row[column] for column in columns] for row in rows))
+            self.conn.execute("DELETE FROM settings_kv WHERE k LIKE 'link:%' "
+                              "OR k IN ('last_sync', 'sync_retry_after')")
 
     # --- key/value ---------------------------------------------------------
     def get_kv(self, k, default=None):

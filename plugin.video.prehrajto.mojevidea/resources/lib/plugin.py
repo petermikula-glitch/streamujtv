@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Router a obrazovky doplňku."""
 import json
+import sqlite3
 import sys
 import time
 import urllib.parse
@@ -569,6 +570,8 @@ def hidden(params):
 # --- hledání ---------------------------------------------------------------
 
 def search_menu(params):
+    if hasattr(provider, "search_catalog"):
+        add_dir(_(30340), "provider_search", "DefaultAddonsSearch.png")
     add_dir("[B]%s[/B]" % _(30117), "search", "DefaultAddonsSearch.png")
     with open_library() as lib:
         history = lib.search_history()
@@ -598,6 +601,50 @@ def search(params):
     if not found_movies and not found_shows:
         notify(_(30121))
     end("movies", MOVIE_SORTS, cache=False)
+
+
+def provider_search(params):
+    if not hasattr(provider, "search_catalog"):
+        end(cache=False)
+        return
+    query = params.get("q", "").strip()
+    if not query:
+        query = (keyboard(_(30340)) or "").strip()
+        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+        if query:
+            xbmc.executebuiltin("Container.Update(%s)" % url_for("provider_search", q=query))
+        return
+    try:
+        page = int(params.get("page", 1))
+        videos, cursor = provider.search_catalog(make_client(), query, page, params.get("cursor", ""))
+    except (ValueError, provider.ProviderError) as e:
+        notify(_(30328) % e, time_ms=8000)
+        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+        return
+    for video in videos:
+        li = xbmcgui.ListItem(video["title"])
+        _set_info(li, {"title": video["title"], "mediatype": "video", "duration": video["duration"]})
+        _art(li, thumb=video["thumb"])
+        li.setProperty("IsPlayable", "true")
+        save_url = url_for("provider_save", vid=video["id"], title=video["title"])
+        li.addContextMenuItems([(_(30342), "RunPlugin(%s)" % save_url)])
+        xbmcplugin.addDirectoryItem(HANDLE, url_for("play", vid=video["id"]), li, False)
+    if cursor:
+        add_dir(_(30341), "provider_search", q=query, page=page + 1, cursor=cursor)
+    if not videos and not cursor:
+        notify(_(30121))
+    end("videos", cache=False)
+
+
+def provider_save(params):
+    if not hasattr(provider, "search_catalog"):
+        return
+    try:
+        vid = params.get("vid", "")
+        if provider.find_video_id(provider.video_page_url(vid)):
+            _import([(vid, params.get("title", ""))])
+    except provider.ProviderError as e:
+        notify(_(30328) % e)
 
 
 def search_delete(params):
@@ -707,6 +754,8 @@ def tools(params):
     add_action(_(30204), "refresh_all", "DefaultAddonInfoProvider.png")
     add_action(_(30237), "history_clear", "DefaultIconError.png")
     add_action(_(30234), "diagnostics", "DefaultIconInfo.png")
+    add_action(_(30345), "backup_catalog", "DefaultAddonLibrary.png")
+    add_action(_(30346), "restore_catalog", "DefaultAddonLibrary.png")
     add_action(_(30207), "clear_library", "DefaultIconError.png")
     add_action(_(30208), "settings", "DefaultAddonProgram.png")
     end(cache=False)
@@ -739,7 +788,9 @@ def run_sync(background=False):
         progress.close()
     log_info("sync: %s" % stats)
     msg = _(30212) % (stats["total"], stats["new"], stats["removed"])
-    if background:
+    if stats["incomplete"] and not stats["cancelled"]:
+        notify(_(30343) % stats["total"], time_ms=8000)
+    elif background:
         if stats["new"] or stats["removed"]:
             notify(msg)
     else:
@@ -888,6 +939,47 @@ def clear_library(params):
         with open_library() as lib:
             lib.clear()
         xbmc.executebuiltin("Container.Refresh")
+
+
+def backup_catalog(params):
+    folder = xbmcgui.Dialog().browse(3, _(30345), "files")
+    if not folder:
+        return
+    name = "%s-catalog-%s.json" % (ADDON_ID, time.strftime("%Y%m%d-%H%M%S"))
+    destination = folder.rstrip("/\\") + "/" + name
+    try:
+        with open_library() as lib:
+            data = json.dumps(lib.export_backup(ADDON_ID), ensure_ascii=False, allow_nan=False)
+        file = xbmcvfs.File(destination, "w")
+        try:
+            if not file.write(data):
+                raise OSError("Kodi could not write the backup")
+        finally:
+            file.close()
+    except (OSError, ValueError, sqlite3.Error) as e:
+        ok(_(30328) % e)
+        return
+    notify(_(30348) % destination, time_ms=8000)
+
+
+def restore_catalog(params):
+    path = xbmcgui.Dialog().browse(1, _(30346), "files", ".json")
+    if not path or not yesno(_(30347)):
+        return
+    try:
+        file = xbmcvfs.File(path)
+        try:
+            data = json.loads(file.read())
+        finally:
+            file.close()
+        with open_library() as lib:
+            lib.restore_backup(data, ADDON_ID)
+    except (OSError, ValueError, OverflowError, sqlite3.Error) as e:
+        ok(_(30328) % e)
+        return
+    _PLAYBACK.clear()
+    notify(_(30349))
+    xbmc.executebuiltin("Container.Refresh")
 
 
 def export_library(params):
@@ -1096,11 +1188,12 @@ def _link_cache_get(vid):
     return None
 
 
-def _link_cache_put(vid, final, subtitles):
+def _link_cache_put(vid, final, subtitles, fallback_height):
     if not provider.LINK_TTL:
         return
     with open_library() as lib:
-        lib.set_kv("link:" + vid, json.dumps({"url": final, "subtitles": subtitles, "ts": int(time.time())}))
+        lib.set_kv("link:" + vid, json.dumps({"url": final, "subtitles": subtitles,
+                                                              "fallback_height": fallback_height, "ts": int(time.time())}))
 
 
 def play(params):
@@ -1108,7 +1201,7 @@ def play(params):
     cached = _link_cache_get(vid)
     if cached:
         log("play %s: adresa z paměti" % vid)
-        _resolved(vid, cached["url"], cached.get("subtitles") or {})
+        _resolved(vid, cached["url"], cached.get("subtitles") or {}, cached.get("fallback_height"))
         return
     client = make_client()
     try:
@@ -1127,11 +1220,15 @@ def play(params):
         notify(_(30323) % e, time_ms=8000)
         xbmcplugin.setResolvedUrl(HANDLE, False, xbmcgui.ListItem())
         return
-    _link_cache_put(vid, final, stream.get("subtitles") or {})
-    _resolved(vid, final, stream.get("subtitles") or {})
+    subtitles = stream.get("subtitles") or {}
+    fallback_height = getattr(client, "fallback_height", None)
+    _link_cache_put(vid, final, subtitles, fallback_height)
+    _resolved(vid, final, subtitles, fallback_height)
 
 
-def _resolved(vid, final, subtitles):
+def _resolved(vid, final, subtitles, fallback_height=None):
+    if fallback_height:
+        notify(_(30344) % fallback_height)
     li = xbmcgui.ListItem(path=final + "|User-Agent=" + urllib.parse.quote(provider.USER_AGENT))
     if final.split("?")[0].lower().endswith(".mp4"):
         li.setMimeType("video/mp4")
@@ -1149,6 +1246,8 @@ ROUTES = {
     "movie_ratings": movie_ratings, "versions": versions, "shows_menu": shows_menu, "shows": shows,
     "show": show, "season": season, "recent": recent, "all_videos": all_videos, "unmatched": unmatched, "hidden": hidden,
     "search_menu": search_menu, "search": search, "search_delete": search_delete,
+    "provider_search": provider_search, "provider_save": provider_save,
+    "backup_catalog": backup_catalog, "restore_catalog": restore_catalog,
     "collections": collections, "collection": collection, "collection_new": collection_new,
     "collection_rename": collection_rename, "collection_delete": collection_delete,
     "collection_add": collection_add, "collection_remove": collection_remove,

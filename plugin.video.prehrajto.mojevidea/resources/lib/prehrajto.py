@@ -492,39 +492,83 @@ class PrehrajtoClient(object):
 
     # --- výpisy -------------------------------------------------------------
     def fetch_listing(self, start_url, max_pages=200, progress=None, delay=0.5):
+        self.listing_complete = False
         start_url = start_url if start_url.startswith("http") else BASE + start_url
-        start_path = urllib.parse.urlsplit(start_url).path.rstrip("/")
+        start_parts = urllib.parse.urlsplit(start_url)
+        start_path = start_parts.path.rstrip("/")
         to_visit = [start_url]
         visited = set()
         videos = []
         seen = set()
+        skipped_page = False
         while to_visit and len(visited) < max_pages:
             url = to_visit.pop(0)
             if url in visited:
                 continue
             visited.add(url)
             page, final = self._get(url)
-            if not urllib.parse.urlsplit(final).path.startswith(start_path):
+            final_parts = urllib.parse.urlsplit(final)
+            final_path = final_parts.path.rstrip("/")
+            if (final_parts.netloc != start_parts.netloc or
+                    (final_path != start_path and not final_path.startswith(start_path + "/"))):
                 if len(visited) == 1:
                     raise LoginError("Stránka %s vyžaduje přihlášení" % start_url)
+                skipped_page = True
                 continue
-            new = 0
-            for item in parse_video_list(page):
+            items = parse_video_list(page)
+            if not items and len(visited) > 1:
+                skipped_page = True
+            for item in items:
                 h = item["id"].rsplit(":", 1)[-1]
                 if h not in seen:
                     seen.add(h)
                     videos.append(item)
-                    new += 1
             if progress and progress(len(visited), len(videos)):
-                break
-            if new == 0 and len(visited) > 1:
-                continue
+                return videos
             for nxt in parse_pagination(page, final):
                 if nxt not in visited and nxt not in to_visit:
                     to_visit.append(nxt)
-            if delay:
-                time.sleep(delay)
+            if delay and to_visit:
+                self.sleep(delay)
+        self.listing_complete = not to_visit and not skipped_page
         return videos
+
+    def search_page(self, query, page=1, cursor=""):
+        """Jedna stránka veřejného vyhledávání Přehraj.to."""
+        query = query.strip()
+        if not query or page < 1:
+            return [], None
+        if self.has_credentials:
+            self.login()
+        path = "/hledej/" + urllib.parse.quote(query, safe="")
+        search_path = urllib.parse.unquote(path).rstrip("/")
+        url = BASE + path
+        if page > 1:
+            target = urllib.parse.urlsplit(cursor)
+            cursor_path = urllib.parse.unquote(target.path).rstrip("/")
+            if (target.scheme != "https" or target.netloc not in ("prehraj.to", "www.prehraj.to")
+                    or cursor_path not in (search_path, search_path + "/%d" % page)):
+                raise PrehrajtoError("Neplatná stránka výsledků")
+            url = cursor
+        body, final = self._get(url)
+        parts = urllib.parse.urlsplit(final)
+        if (parts.scheme != "https" or parts.netloc not in ("prehraj.to", "www.prehraj.to")
+                or not parts.path.startswith("/hledej/")):
+            raise PrehrajtoError("Přehraj.to nevrátilo stránku výsledků")
+        next_page = None
+        next_path = search_path + "/%d" % (page + 1)
+        for candidate in parse_pagination(body, final):
+            target = urllib.parse.urlsplit(candidate)
+            params = urllib.parse.parse_qs(target.query)
+            target_path = urllib.parse.unquote(target.path).rstrip("/")
+            if target.scheme != "https" or target_path not in (search_path, next_path):
+                continue
+            numbered = any(key.lower().endswith("page") and str(page + 1) in values
+                           for key, values in params.items())
+            if target_path == next_path or numbered:
+                next_page = candidate
+                break
+        return parse_video_list(body), next_page
 
     def my_videos(self, progress=None):
         self.login()
@@ -591,16 +635,24 @@ class PrehrajtoClient(object):
         return ""
 
     def resolve(self, url):
+        self.fallback_height = None
         if url.startswith("orig:"):
             ref = url[5:]
-            link = self._original(ref)
+            try:
+                link = self._original(ref)
+            except PrehrajtoError as e:
+                self.log("prehrajto: originál není dostupný: %s" % e)
+                link = ""
             if link:
                 return link
             # bez premia originál nejde – nejlepší překódovaná verze
             page, _ = self._get(video_page_url(ref))
             sources = parse_sources(page)
             if sources:
-                return sources[0][1]
+                source = sources[0][1]
+                self.fallback_height = next(int(res) for raw_url, res in SOURCE_RE.findall(page)
+                              if html.unescape(raw_url) == source)
+                return source
             raise PrehrajtoError("Originální soubor vyžaduje Premium a jiná verze není k dispozici")
         if not url.startswith(("http://", "https://")):
             raise PrehrajtoError("neplatná adresa streamu")

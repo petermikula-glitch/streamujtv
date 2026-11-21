@@ -15,6 +15,7 @@ import xbmcgui  # noqa: E402
 
 import kodiutils  # noqa: E402
 
+INCOMPLETE_RETRY_DELAY = 3600
 STARTUP_DELAY = 60      # s po startu Kodi, než se poprvé zkusí synchronizace
 TICK = 5                # s – jak často se zapisuje pozice přehrávání
 SYNC_CHECK_EVERY = 300  # s
@@ -92,7 +93,9 @@ def sync_due():
     hours = max(1, kodiutils.setting_int("auto_sync_hours", 12))
     with open_library() as lib:
         last = int(lib.get_kv("last_sync", 0) or 0)
-    return time.time() - last >= hours * 3600
+        retry_after = int(lib.get_kv("sync_retry_after", 0) or 0)
+    now = time.time()
+    return now >= retry_after and now - last >= hours * 3600
 
 
 def try_sync(player):
@@ -100,14 +103,16 @@ def try_sync(player):
         if sync_due() and not player.isPlayingVideo():
             import plugin
             kodiutils.log_info("automatická synchronizace")
-            plugin.run_sync(background=True)
+            stats = plugin.run_sync(background=True)
+            if stats["incomplete"] or stats["cancelled"]:
+                with plugin.open_library() as lib:
+                    lib.set_kv("sync_retry_after", int(time.time()) + INCOMPLETE_RETRY_DELAY)
     except Exception as e:  # noqa: BLE001 – služba nesmí spadnout
         kodiutils.log_error("automatická synchronizace selhala: %s" % e)
-        # nezkoušet hned znovu – posun času poslední synchronizace o hodinu
+        # po chybě počkat před dalším pokusem
         try:
             with open_library() as lib:
-                hours = max(1, kodiutils.setting_int("auto_sync_hours", 12))
-                lib.set_kv("last_sync", int(time.time()) - hours * 3600 + 3600)
+                lib.set_kv("sync_retry_after", int(time.time()) + INCOMPLETE_RETRY_DELAY)
         except Exception:  # noqa: BLE001
             pass
 

@@ -45,6 +45,16 @@ rozdíly jsou v sekci [Přehraj.to](#přehrajto--rozdíly).
   složky, aby šel parser doladit podle skutečného webu. Jméno, e-mail, heslo, tokeny a skrytá
   pole formulářů se z nich před uložením odstraní.
 
+### Vyhledávání na Přehraj.to a záloha
+
+V doplňku Přehraj.to otevřete **Vyhledávání → Hledat na celém Přehraj.to**.
+Výsledky odpovídají tomu, co služba vrátí pro daný dotaz a přihlášený účet.
+Video můžete přehrát rovnou nebo ho přes kontextovou nabídku přidat do vlastního katalogu.
+
+V **Nástroje → Zálohovat katalog** uložíte katalog, kolekce, ruční úpravy a historii
+do souboru JSON. **Obnovit katalog** po potvrzení nahradí aktuální data zálohou
+ze stejného doplňku. Záloha neobsahuje přihlášení, cookies ani mezipaměť přehrávacích odkazů.
+
 ## Instalace
 
 Kodi neumí instalovat přímo z gitu, proto je tu **Kodi repozitář**. Nainstaluje se jednou

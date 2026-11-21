@@ -6,11 +6,14 @@
 
     python3 tools/build_zip.py
 """
+import argparse
 import hashlib
 import os
 import re
 import shutil
 import zipfile
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 ADDONS = ["repository.petermikula", "plugin.video.streamujtv", "plugin.video.prehrajto.mojevidea"]
@@ -61,6 +64,7 @@ def main():
         f.write(hashlib.md5(addons_xml.encode("utf-8")).hexdigest())
     print("repo/addons.xml")
     publish_docs()
+    verify_release()
 
 
 def publish_docs():
@@ -88,5 +92,47 @@ def publish_docs():
     print("docs/index.html")
 
 
+def verify_release():
+    """Ověří současné ZIPy, Kodi index a odkazy GitHub Pages."""
+    repo = Path(REPO)
+    docs = Path(ROOT, "docs")
+    manifest = (repo / "addons.xml").read_bytes()
+    checksum = (repo / "addons.xml.md5").read_text(encoding="ascii").strip()
+    if hashlib.md5(manifest).hexdigest() != checksum:
+        raise ValueError("repo/addons.xml.md5 does not match addons.xml")
+    expected_versions = {addon_id: ET.fromstring(read_addon_xml(addon_id)).attrib["version"]
+                         for addon_id in ADDONS}
+    published = ET.fromstring(manifest).findall("addon")
+    versions = {addon.attrib["id"]: addon.attrib["version"] for addon in published}
+    if versions != expected_versions or len(published) != len(ADDONS):
+        raise ValueError("Kodi index does not match source addon IDs and versions")
+    expected = set()
+    for addon_id, version in versions.items():
+        name = "%s-%s.zip" % (addon_id, version)
+        expected.add(name)
+        archive = repo / "zips" / addon_id / name
+        if (docs / name).read_bytes() != archive.read_bytes():
+            raise ValueError("Different archives for %s" % name)
+        with zipfile.ZipFile(archive) as addon_zip:
+            bad_member = addon_zip.testzip()
+            if bad_member:
+                raise ValueError("Corrupt member in %s: %s" % (name, bad_member))
+            addon = ET.fromstring(addon_zip.read(addon_id + "/addon.xml"))
+            if (addon.get("id"), addon.get("version")) != (addon_id, version):
+                raise ValueError("Wrong addon ID or version inside %s" % name)
+    links = re.findall(r'href="([^"]+\.zip)"', (docs / "index.html").read_text(encoding="utf-8"))
+    if set(links) != expected or len(links) != len(expected):
+        raise ValueError("docs/index.html ZIP links do not match the Kodi index")
+    if {path.name for path in docs.glob("*.zip")} != expected:
+        raise ValueError("docs contains missing or extra ZIPs")
+    print("Kodi ZIPs, index and GitHub Pages links verified")
+
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="verify existing release files without rebuilding")
+    args = parser.parse_args()
+    if args.check:
+        verify_release()
+    else:
+        main()

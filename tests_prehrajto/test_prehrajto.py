@@ -318,3 +318,88 @@ def test_play_uses_link_cache(plugin, monkeypatch):
 
 def test_version_label_shows_size(plugin):
     assert plugin._version_label({"lang": "", "quality": "1080p", "size": "4.2 GB"}) == "1080p · 4.2 GB"
+
+
+def test_web_search_paginates_and_lists_playable_videos(plugin, monkeypatch):
+    import xbmcplugin
+
+    query = "/hledej/Pel%C3%AD%C5%A1ky%20CZ"
+    next_page = "?videoListing-page=2"
+    results = fixture("uploads_synthetic.html").replace(
+        "/profil/nahrana-videa?videoListing-page=2", query + next_page)
+    client = Fake({query + next_page: (results, None, "", 200),
+                   query: (results, None, "", 200)})
+    monkeypatch.setattr(plugin, "make_client", lambda: client)
+
+    plugin.run(["plugin://plugin.video.prehrajto.mojevidea/", "1",
+                "?action=provider_search&q=Pel%C3%AD%C5%A1ky+CZ"])
+    video, _, more = xbmcplugin.ITEMS
+    assert not video[2] and "action=play" in video[0]
+    assert video[1].props["IsPlayable"] == "true"
+    assert "provider_save" in video[1].context[0][1]
+    assert more[2] and "page=2" in more[0]
+    plugin.run(["plugin://plugin.video.prehrajto.mojevidea/", "1",
+                "?" + more[0].split("?", 1)[1]])
+    assert client.calls[-1][0] == prehrajto.BASE + query + next_page
+    with pytest.raises(prehrajto.PrehrajtoError):
+        client.search_page("Pelíšky CZ", 2, "https://example.com/hledej/Pel%C3%AD%C5%A1ky%20CZ")
+
+
+def test_incomplete_account_listing_cannot_remove_saved_video(plugin, monkeypatch):
+    import catalog
+
+    old_ref = ":older-video:12345678abcdef00"
+    client = Fake({"/profil/nahrana-videa": (fixture("uploads_synthetic.html"), None, "", 200)})
+    monkeypatch.setattr(client, "my_videos", lambda progress: client.fetch_listing(
+        prehrajto.UPLOADS_PATH, max_pages=1, progress=progress, delay=0))
+    with plugin.open_library() as lib:
+        lib.upsert_video(old_ref, "Starší film", "account", catalog._parsed("Starší film"), now=1)
+        lib.set_kv("last_sync", 1)
+        stats = catalog.sync_account(client, lib)
+        assert stats["incomplete"] and stats["total"] == 2 and stats["removed"] == 0
+        assert lib.get_video(old_ref)
+        assert lib.get_kv("last_sync") == "1"
+
+
+def test_fallback_quality_is_reported_and_cached(plugin, monkeypatch):
+    import xbmcgui
+    import xbmcplugin
+
+    client = Fake({"/pelisky-1999-cz-1080p/4f9a1b2c3d4e5f60":
+                   (fixture("video_synthetic.html").replace("'1080'", "'1072'"), None, "", 200)})
+    monkeypatch.setattr(client, "_original", lambda ref: "")
+    monkeypatch.setattr(plugin, "make_client", lambda: client)
+    for _ in range(2):
+        plugin.play({"vid": REF})
+        assert xbmcplugin.RESOLVED[-1][0]
+        assert "1072p" in xbmcgui.NOTIFICATIONS[-1]
+
+
+def test_catalogue_backup_round_trip_and_rollback(plugin, tmp_path):
+    import sqlite3
+
+    import catalog
+    import xbmcgui
+
+    with plugin.open_library() as lib:
+        lib.upsert_video(REF, "Pelíšky", "account", catalog._parsed("Pelíšky"))
+        lib.create_collection("Moje kolekce")
+        lib.set_kv("link:" + REF, "https://cdn.example/signed-secret")
+        snapshot = lib.export_backup(plugin.ADDON_ID)
+    xbmcgui.BROWSE_ANSWERS.append(str(tmp_path))
+    plugin.backup_catalog({})
+    backup = next(tmp_path.glob("*.json"))
+    assert "signed-secret" not in backup.read_text()
+    assert json.loads(backup.read_text()) == snapshot
+    with plugin.open_library() as lib:
+        lib.clear()
+    xbmcgui.BROWSE_ANSWERS.append(str(backup))
+    xbmcgui.YESNO_ANSWERS.append(True)
+    plugin.restore_catalog({})
+    with plugin.open_library() as lib:
+        assert lib.export_backup(plugin.ADDON_ID) == snapshot
+        assert lib.get_kv("link:" + REF) is None
+        snapshot["tables"]["videos"].append(snapshot["tables"]["videos"][0])
+        with pytest.raises(sqlite3.IntegrityError):
+            lib.restore_backup(snapshot, plugin.ADDON_ID)
+        assert lib.get_video(REF)
