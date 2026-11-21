@@ -18,6 +18,8 @@ Modul nesmí importovat nic z Kodi, aby šel testovat mimo něj.
 """
 import base64
 import html
+import io
+import threading
 import http.client
 import http.cookiejar
 import json
@@ -28,6 +30,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import urllib.response
 
 BASE = "https://prehraj.to"
 API_BASE = "https://prehrajto.cz/api/v2"
@@ -342,6 +345,103 @@ def jwt_expired(token, margin=30):
 # Klient
 # ---------------------------------------------------------------------------
 
+KEEPALIVE_HOSTS = frozenset(("prehraj.to", "www.prehraj.to"))
+KEEPALIVE_MAX_BODY = 8 * 1024 * 1024
+KEEPALIVE_IDLE = 4
+
+
+class KeepAliveHTTPSHandler(urllib.request.HTTPSHandler):
+    """HTTPS s udržovaným spojením pro stránky Přehraj.to.
+
+    urllib jinak pro každý požadavek otevírá nové TCP/TLS spojení. Tělo odpovědi se
+    načte celé (jde o HTML stránky), takže spojení je hned volné pro další požadavek.
+    Jiné hosty, proxy a velké nebo binární odpovědi jdou standardní cestou.
+    """
+
+    connection_class = http.client.HTTPSConnection
+
+    def __init__(self, context=None):
+        urllib.request.HTTPSHandler.__init__(self, context=context)
+        self._idle = {}
+        self._lock = threading.Lock()
+
+    def _take(self, host):
+        with self._lock:
+            idle = self._idle.get(host)
+            return idle.pop() if idle else None
+
+    def _give(self, host, conn):
+        with self._lock:
+            idle = self._idle.setdefault(host, [])
+            if len(idle) < KEEPALIVE_IDLE:
+                idle.append(conn)
+                return
+        conn.close()
+
+    def close(self):
+        with self._lock:
+            conns = [conn for idle in self._idle.values() for conn in idle]
+            self._idle.clear()
+        for conn in conns:
+            conn.close()
+
+    def https_open(self, req):
+        tunnel = getattr(req, "_tunnel_host", None)  # přes HTTPS proxy (CONNECT)
+        target = (tunnel or req.host).lower()
+        if target.endswith(":443"):
+            target = target[:-4]
+        if target not in KEEPALIVE_HOSTS:
+            return urllib.request.HTTPSHandler.https_open(self, req)
+        headers = dict(req.unredirected_hdrs)
+        headers.update((k, v) for k, v in req.headers.items() if k not in headers)
+        headers = dict((name.title(), value) for name, value in headers.items())
+        headers["Connection"] = "keep-alive"
+        tunnel_headers = {}
+        if tunnel and "Proxy-Authorization" in headers:
+            tunnel_headers["Proxy-Authorization"] = headers.pop("Proxy-Authorization")
+        pool_key = (req.host, tunnel)
+        timeout = getattr(req, "timeout", TIMEOUT)
+        for attempt in (0, 1):
+            conn = self._take(pool_key)
+            reused = conn is not None
+            if conn is None:
+                conn = self.connection_class(req.host, timeout=timeout, context=self._context)
+                if tunnel:
+                    conn.set_tunnel(tunnel, headers=tunnel_headers)
+            else:
+                conn.timeout = timeout
+                if conn.sock is not None:
+                    conn.sock.settimeout(timeout)
+            try:
+                conn.request(req.get_method(), req.selector, req.data, headers)
+                resp = conn.getresponse()
+            except (OSError, http.client.HTTPException) as err:
+                conn.close()
+                if reused and attempt == 0:
+                    continue  # server mezitím nečinné spojení zavřel – zkusit nové
+                raise urllib.error.URLError(err)
+            break
+        content_type = (resp.getheader("Content-Type") or "").lower()
+        length = resp.getheader("Content-Length")
+        too_big = length and length.isdigit() and int(length) > KEEPALIVE_MAX_BODY
+        if too_big or content_type.startswith(("video/", "audio/", "application/octet-stream")):
+            resp.url = req.get_full_url()
+            resp.msg = resp.reason
+            return resp  # spojení si nechá odpověď, do zásoby se nevrací
+        try:
+            body = resp.read()
+        except (OSError, http.client.HTTPException) as err:
+            conn.close()
+            raise urllib.error.URLError(err)
+        if resp.will_close:
+            conn.close()
+        else:
+            self._give(pool_key, conn)
+        wrapped = urllib.response.addinfourl(io.BytesIO(body), resp.msg, req.get_full_url(), resp.status)
+        wrapped.msg = resp.reason
+        return wrapped
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -363,8 +463,10 @@ class PrehrajtoClient(object):
         else:
             self.cookies = http.cookiejar.CookieJar()
         processor = urllib.request.HTTPCookieProcessor(self.cookies)
-        self.opener = opener or urllib.request.build_opener(processor)
-        self.noredirect = noredirect_opener or urllib.request.build_opener(processor, _NoRedirect())
+        self.keepalive = KeepAliveHTTPSHandler()
+        self.opener = opener or urllib.request.build_opener(processor, self.keepalive)
+        self.noredirect = noredirect_opener or urllib.request.build_opener(processor, _NoRedirect(),
+                                                                           self.keepalive)
         self._logged_in = False
         self._last_video_page = None
         self.sleep = time.sleep

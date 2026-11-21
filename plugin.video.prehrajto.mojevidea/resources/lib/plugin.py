@@ -22,9 +22,10 @@ import catalog
 import csfd
 import kodi_library
 import library_export
-from nameparser import normalize, parse
+from nameparser import parse
 import provider
 import search_results
+from search_results import normalize
 from db import Library
 import kodiutils
 from kodiutils import (ADDON, ADDON_ID, FANART, ICON, KODI_MAJOR, Progress, keyboard, log,
@@ -70,6 +71,7 @@ COUNTRY_QUERY_ALIASES = {
     if len(alias) > 2
 }
 AVAILABILITY_BATCH = 4
+AVAILABILITY_WORKERS = 2  # Přehraj.to rychle omezuje souběžné dotazy (HTTP 429)
 ACTOR_PAGE_SIZE = 20
 
 
@@ -798,26 +800,37 @@ def _check_title_availability(titles, default_kind):
     failed = False
     if todo:
         client = _search_client()
-        for cache_id, card in islice(todo, AVAILABILITY_BATCH):
+        stop = []
+
+        def check(card):
             item = card["tmdb"]
             original = item.get("original_title") or item.get("original_name") or ""
             expected_kind = "movie" if card["kind"] == "movie" else "episode"
-            found = False
-            try:
-                for title in dict.fromkeys((card["title"], original)):
-                    if not title:
-                        continue
+            for title in dict.fromkeys((card["title"], original)):
+                if not title or stop:
+                    continue
+                try:
                     videos, _cursor = provider.search_catalog(client, title, 1, "")
-                    found = any(search_results.filename_matches(parse(video["title"]), card["names"], card["year"],
-                                                                 kind=expected_kind, require_year=True)
-                                and not search_results.is_preview(video["title"], (card["title"], original))
-                                for video in videos)
-                    if found:
-                        break
-            except (provider.ProviderError, provider.RateLimited):
-                failed = True
-                break
-            checked[cache_id] = [time.time(), found]
+                except (provider.ProviderError, provider.RateLimited):
+                    stop.append(True)  # např. HTTP 429 – další dotazy už neposílat
+                    raise
+                if any(search_results.filename_matches(parse(video["title"]), card["names"], card["year"],
+                                                       kind=expected_kind, require_year=True)
+                       and not search_results.is_preview(video["title"], (card["title"], original))
+                       for video in videos):
+                    return True
+            if stop:
+                raise provider.ProviderError("ověřování přerušeno")
+            return False
+
+        batch = list(islice(todo, AVAILABILITY_BATCH))
+        with ThreadPoolExecutor(max_workers=AVAILABILITY_WORKERS) as pool:
+            tasks = [(cache_id, pool.submit(check, card)) for cache_id, card in batch]
+            for cache_id, task in tasks:
+                try:
+                    checked[cache_id] = [time.time(), task.result()]
+                except (provider.ProviderError, provider.RateLimited):
+                    failed = True
     if checked:
         with open_library() as lib, lib.conn:
             lib.conn.execute("BEGIN IMMEDIATE")

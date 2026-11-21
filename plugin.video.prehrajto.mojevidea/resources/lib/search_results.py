@@ -2,9 +2,17 @@
 """Rozpoznání dotazu a slučování výsledků podle ověřitelných shod."""
 import re
 from difflib import SequenceMatcher
+from functools import lru_cache
 from hashlib import sha256
 
-from nameparser import normalize, parse
+import nameparser
+from nameparser import parse
+
+
+@lru_cache(maxsize=16384)
+def normalize(text):
+    """``nameparser.normalize`` s pamětí – při hledání se stejné názvy porovnávají opakovaně."""
+    return nameparser.normalize(text)
 
 EPISODE_SUFFIX = re.compile(r"(?:[\s._-]+)(?:s(\d{1,2})[ ._-]*e(\d{1,3})|(\d{1,2})x(\d{1,3}))\s*$", re.I)
 YEAR_SUFFIX = re.compile(r"[\s._-]+\(?((?:18|19|20)\d{2})\)?\s*$")

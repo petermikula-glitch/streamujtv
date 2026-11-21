@@ -1837,3 +1837,119 @@ def test_online_search_keeps_recent_queries(plugin, monkeypatch):
     assert calls == ["Pelíšky", "Samotáři"]
     plugin._online_search("Pelíšky", "Pelíšky", 0, None, filters, retry=True)
     assert calls == ["Pelíšky", "Samotáři", "Pelíšky"]
+
+
+class _FakeHTTPSConnection(object):
+    debuglevel = 0
+    created = []
+    fail_next_reuse = False
+
+    def __init__(self, host, timeout=None, context=None):
+        self.host = host
+        self.sock = None
+        self.timeout = timeout
+        self.requests = []
+        self.closed = False
+        self.tunnel = None
+        _FakeHTTPSConnection.created.append(self)
+
+    def set_tunnel(self, host, headers=None):
+        self.tunnel = (host, headers)
+
+    def request(self, method, selector, data, headers):
+        if self.requests and _FakeHTTPSConnection.fail_next_reuse:
+            _FakeHTTPSConnection.fail_next_reuse = False
+            raise ConnectionResetError("server closed idle connection")
+        self.requests.append((method, selector, headers))
+
+    def getresponse(self):
+        import email.message
+        selector = self.requests[-1][1]
+        msg = email.message.Message()
+        msg["Content-Type"] = "video/mp4" if selector.endswith(".mp4") else "text/html; charset=utf-8"
+        msg["Set-Cookie"] = "access_token=abc; Path=/"
+
+        class Resp(object):
+            status = 200
+            reason = "OK"
+            will_close = False
+
+            def __init__(self):
+                self.msg = msg
+
+            def getheader(self, name, default=None):
+                return msg.get(name, default)
+
+            def read(self):
+                return ("<html>%s</html>" % selector).encode("utf-8")
+
+        return Resp()
+
+    def close(self):
+        self.closed = True
+
+
+def test_keepalive_reuses_prehrajto_connection(monkeypatch):
+    monkeypatch.setattr(prehrajto.KeepAliveHTTPSHandler, "connection_class", _FakeHTTPSConnection)
+    _FakeHTTPSConnection.created = []
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("https_proxy", raising=False)
+    client = prehrajto.PrehrajtoClient()
+    for name in ("a", "b", "c"):
+        page, final = client._get("/hledej/" + name)
+        assert page == "<html>/hledej/%s</html>" % name and final == "https://prehraj.to/hledej/" + name
+    assert len(_FakeHTTPSConnection.created) == 1
+    headers = _FakeHTTPSConnection.created[0].requests[0][2]
+    assert headers["Connection"] == "keep-alive"
+    assert client._cookie("access_token") == "abc"  # cookies z odpovědi se dál ukládají
+
+    _FakeHTTPSConnection.fail_next_reuse = True
+    assert client._get("/hledej/d")[0] == "<html>/hledej/d</html>"
+    assert len(_FakeHTTPSConnection.created) == 2 and _FakeHTTPSConnection.created[0].closed
+
+    # binární odpověď se nenačítá do paměti a spojení se do zásoby nevrací
+    resp = client.keepalive.https_open(__import__("urllib.request").request.Request("https://prehraj.to/x.mp4"))
+    assert resp.read().endswith(b"x.mp4</html>")
+    client._get("/hledej/e")
+    assert len(_FakeHTTPSConnection.created) == 3
+
+    # jiný host jde standardní cestou
+    calls = []
+    monkeypatch.setattr(__import__("urllib.request").request.HTTPSHandler, "https_open",
+                        lambda self, req: calls.append(req.host))
+    client.keepalive.https_open(__import__("urllib.request").request.Request("https://image.tmdb.org/a.jpg"))
+    assert calls == ["image.tmdb.org"]
+
+
+def test_availability_checks_run_in_parallel_and_stop_on_rate_limit(plugin, monkeypatch):
+    import threading
+    titles = [{"id": n, "title": "Film %d" % n, "release_date": "1999-01-01", "media_type": "movie"}
+              for n in range(1, 5)]
+    active, peak = [0], [0]
+    lock = threading.Lock()
+
+    def fetch(_client, query, *_):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        time.sleep(0.05)
+        with lock:
+            active[0] -= 1
+        return [{"id": REF, "title": query + ".1999.1080p"}], ""
+
+    monkeypatch.setattr(provider, "search_catalog", fetch)
+    found, more, failed = plugin._check_title_availability(titles, "movie")
+    assert found == {"movie:1", "movie:2", "movie:3", "movie:4"} and not more and not failed
+    assert peak[0] == plugin.AVAILABILITY_WORKERS
+
+    calls = []
+
+    def limited(_client, query, *_):
+        calls.append(query)
+        raise provider.TemporaryError("HTTP 429")
+
+    monkeypatch.setattr(provider, "search_catalog", limited)
+    titles = [dict(item, id=item["id"] + 10, title="Jiný %d" % item["id"]) for item in titles]
+    found, more, failed = plugin._check_title_availability(titles, "movie")
+    assert failed and more and not found
+    assert len(calls) <= plugin.AVAILABILITY_WORKERS  # po 429 se další dotazy neposílají
