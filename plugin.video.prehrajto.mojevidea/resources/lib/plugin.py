@@ -232,8 +232,20 @@ def make_client():
                                 location=setting("location") or "1", cookie_file=cookie_file, log=log)
 
 
-def make_tmdb():
-    return Tmdb(setting("tmdb_key"), log=log)
+class _ResponseCache(object):
+    """Mezipaměť odpovědí v katalogu; každé volání má vlastní spojení (volá se i z vláken)."""
+
+    def get(self, key):
+        with open_library() as lib:
+            return lib.cache_get(key)
+
+    def put(self, key, value, ttl):
+        with open_library() as lib:
+            lib.cache_put(key, value, ttl)
+
+
+def make_tmdb(cached=True):
+    return Tmdb(setting("tmdb_key"), log=log, cache=_ResponseCache() if cached else None)
 
 
 def _search_client():
@@ -536,6 +548,40 @@ MOVIE_SORTS = [xbmcplugin.SORT_METHOD_UNSORTED, xbmcplugin.SORT_METHOD_LABEL_IGN
 # ---------------------------------------------------------------------------
 # Obrazovky
 # ---------------------------------------------------------------------------
+
+def _list_page_size():
+    """Počet položek katalogu na stránku; 0 = vše najednou."""
+    return max(0, setting_int("list_page_size", 250))
+
+
+def _paginate(items, params):
+    """Vrátí (položky aktuální stránky, (stránka, počet stránek) nebo None)."""
+    items = list(items)
+    size = _list_page_size()
+    if not size or len(items) <= size:
+        return items, None
+    pages = (len(items) + size - 1) // size
+    try:
+        page = min(max(1, int(params.get("page") or 1)), pages)
+    except ValueError:
+        page = 1
+    return items[(page - 1) * size:page * size], (page, pages)
+
+
+def _add_next_page(action, params, paging):
+    """Položka „Další stránka“ – vždy na konci seznamu, i po seřazení v Kodi."""
+    if not paging or paging[0] >= paging[1]:
+        return
+    page, pages = paging
+    li = _list_item(_(30570) % (page + 1, pages))
+    li.setArt({"icon": "DefaultFolder.png", "thumb": "DefaultFolder.png", "fanart": FANART})
+    li.setProperty("SpecialSort", "bottom")
+    _add_item(url_for(action, **dict(params, page=page + 1)), li, True)
+
+
+def _first_page(params):
+    return (params.get("page") or "1") == "1"
+
 
 def add_saved_movies(label):
     filters = [(_(30394), "Container.Update(%s)" % url_for("movies_menu"))]
@@ -1566,36 +1612,56 @@ def movies(params):
             end("movies", MOVIE_SORTS, cache=False)
             return
         criteria = _movie_filter_params(saved or params)
-        if params.get("browse") == "1":
+        if params.get("browse") == "1" and _first_page(params):
             _add_movie_filter_shortcuts(lib, order)
             _add_origin_shortcuts("movies", order="title")
-        if params.get("filtered") == "1" and not saved and any(criteria.values()):
+        if (params.get("filtered") == "1" and not saved and any(criteria.values())
+                and _first_page(params)):
             add_action(_(30439), "movie_filter_save", "DefaultFavourites.png", **criteria)
-        items = lib.movies(genre=params.get("genre"), country=params.get("country"),
-                           year_from=int(params["year_from"]) if params.get("year_from") else None,
-                           year_to=int(params["year_to"]) if params.get("year_to") else None,
-                           min_rating=int(params["min_rating"]) if params.get("min_rating") else None,
-                           order=order)
+        filters = {"genre": params.get("genre"), "country": params.get("country"),
+                   "year_from": int(params["year_from"]) if params.get("year_from") else None,
+                   "year_to": int(params["year_to"]) if params.get("year_to") else None,
+                   "min_rating": int(params["min_rating"]) if params.get("min_rating") else None}
         origin = FILM_ORIGINS.get(params.get("origin"))
+        size = _list_page_size()
+        if size and not origin and not any(criteria.values()):
+            # Bez filtrů v Pythonu stačí z databáze načíst jen aktuální stránku.
+            total = lib.count_movies(**filters)
+            pages = max(1, (total + size - 1) // size)
+            try:
+                page = min(max(1, int(params.get("page") or 1)), pages)
+            except ValueError:
+                page = 1
+            items = lib.movies(order=order, limit=size, offset=(page - 1) * size, **filters)
+            _add_movies(lib, items)
+            _add_next_page("movies", params, (page, pages))
+            end("movies", MOVIE_SORTS, cache=False)
+            return
+        items = lib.movies(order=order, **filters)
         if origin:
             items = [movie for movie in items if any(normalize(country) in origin[1]
                                                      for country in movie["countries"])]
             if not items:
                 notify(_(30498))
+        paging = None
         if any(criteria.values()):
             grouped = lib.movie_filter_versions()
             watched = lib.watched()
-            matched = False
+            matches = []
             for movie in items:
                 videos = grouped.get(movie["key"], [])
                 variants = _filter_versions(videos, criteria, watched)
                 if variants:
-                    matched = True
-                    add_movie(movie, lib, matching=(videos, variants))
-            if not matched:
+                    matches.append((movie, videos, variants))
+            if not matches:
                 notify(_(30121))
+            matches, paging = _paginate(matches, params)
+            for movie, videos, variants in matches:
+                add_movie(movie, lib, matching=(videos, variants))
         else:
+            items, paging = _paginate(items, params)
             _add_movies(lib, items)
+        _add_next_page("movies", params, paging)
     end("movies", MOVIE_SORTS, cache=False)
 
 
@@ -1673,8 +1739,10 @@ def shows(params):
                           min_rating=int(params["min_rating"]) if params.get("min_rating") else None,
                           order=params.get("order", "title"))
         counts = lib.unread_episode_counts()
+    items, paging = _paginate(items, params)
     for m in items:
         add_show(m, new_count=counts.get(m["key"], 0))
+    _add_next_page("shows", params, paging)
     end("tvshows", MOVIE_SORTS, cache=False)
 
 
@@ -1901,7 +1969,8 @@ def all_videos(params):
     """Všechna videa z účtu v jednom seznamu (filmy i díly), řaditelná."""
     _video_list(lambda lib: lib.all_videos(),
                 [xbmcplugin.SORT_METHOD_LABEL_IGNORE_THE, xbmcplugin.SORT_METHOD_DATEADDED,
-                 xbmcplugin.SORT_METHOD_VIDEO_YEAR, xbmcplugin.SORT_METHOD_VIDEO_RATING])
+                 xbmcplugin.SORT_METHOD_VIDEO_YEAR, xbmcplugin.SORT_METHOD_VIDEO_RATING],
+                paging=("all_videos", params))
 
 
 def _episode_position(video):
@@ -2152,9 +2221,12 @@ def diagnostics(params):
     ok(_(30236) % base)
 
 
-def _video_list(load, sorts):
+def _video_list(load, sorts, paging=None):
+    page = None
     with open_library() as lib:
         videos = load(lib)
+        if paging:
+            videos, page = _paginate(videos, paging[1])
         metas = lib.get_metas(v["meta_key"] for v in videos)
     for v in videos:
         meta = metas.get(v["meta_key"]) or {}
@@ -2164,6 +2236,8 @@ def _video_list(load, sorts):
             year = _display_year(meta) if meta else v["year"]
             label = (_display_title(meta) or v["title"]) + (" (%d)" % year if year else "")
         add_video(v, meta, label=label, mediatype="episode" if v["kind"] == "episode" else "movie")
+    if paging:
+        _add_next_page(paging[0], paging[1], page)
     end("videos", sorts)
 
 
@@ -2240,23 +2314,32 @@ def _search_cards(query, include_online, filters=None, *, retry=False, reuse=Fal
     return cards, online
 
 
+ONLINE_SEARCH_KEEP = 20
+ONLINE_SEARCH_TTL = 600
+ONLINE_SEARCH_ERROR_TTL = 20
+
+
+def _online_cache_key(account, query):
+    return "search:online:" + sha256(("%s\n%s" % (account, query)).encode("utf-8")).hexdigest()
+
+
 def _online_search(query, title, year, position, filters, *, retry=False, reuse=False):
-    cache_key = "search:online"
-    with open_library() as lib:
-        cached = lib.get_kv(cache_key)
-    now = time.time()
     account = _account_scope()
+    cache_key = _online_cache_key(account, query)
+    with open_library() as lib:
+        cached = lib.cache_get(cache_key)
+    now = time.time()
     if cached and not retry:
         try:
-            payload = json.loads(cached)
-            ttl = 20 if payload.get("errors") else 600
+            payload = cached
+            ttl = ONLINE_SEARCH_ERROR_TTL if payload.get("errors") else ONLINE_SEARCH_TTL
             same_filters = payload.get("filters") == filters
             if (payload.get("account") == account and payload["query"] == query
                     and (same_filters or (reuse and not payload.get("errors"))) and 0 <= now - payload["created"] < ttl):
                 if not same_filters:
                     payload["filters"] = filters
                     with open_library() as lib:
-                        lib.set_kv(cache_key, json.dumps(payload))
+                        lib.cache_put(cache_key, payload, ttl - (now - payload["created"]))
                 return payload
         except (TypeError, KeyError, ValueError, AttributeError):
             pass
@@ -2296,7 +2379,8 @@ def _online_search(query, title, year, position, filters, *, retry=False, reuse=
         if alias_error and "TMDB" not in payload["errors"]:
             payload["errors"].append("TMDB")
     with open_library() as lib:
-        lib.set_kv(cache_key, json.dumps(payload))
+        lib.cache_put(cache_key, payload, ONLINE_SEARCH_ERROR_TTL if payload["errors"] else ONLINE_SEARCH_TTL)
+        lib.cache_trim("search:online:", ONLINE_SEARCH_KEEP)
     return payload
 
 
@@ -2935,7 +3019,7 @@ def sync(params):
 
 def run_enrich(statuses=("new",), keys=None, background=False, quiet=False):
     use_csfd = setting_bool("use_csfd")
-    tmdb = make_tmdb()
+    tmdb = make_tmdb(cached=False)  # doplnění a obnova metadat vždy čtou aktuální data
     with open_library() as lib:
         if keys:
             metas = [m for m in (lib.get_meta(k) for k in keys) if m]

@@ -16,6 +16,21 @@ from search_results import period
 API = "https://api.themoviedb.org/3"
 IMG = "https://image.tmdb.org/t/p/"
 TIMEOUT = 20
+HOUR = 3600
+# Jak dlouho platí uložená odpověď (podle začátku cesty); ostatní dotazy den.
+CACHE_TTL = (("/genre/", 7 * 24 * HOUR), ("/configuration/", 7 * 24 * HOUR), ("/search/", HOUR),
+             ("/discover/", 6 * HOUR), ("/movie/popular", 6 * HOUR), ("/movie/top_rated", 6 * HOUR),
+             ("/movie/now_playing", 6 * HOUR), ("/movie/upcoming", 6 * HOUR), ("/tv/popular", 6 * HOUR),
+             ("/tv/top_rated", 6 * HOUR), ("/tv/on_the_air", 6 * HOUR), ("/tv/airing_today", 6 * HOUR),
+             ("/trending/", 6 * HOUR))
+DEFAULT_TTL = 24 * HOUR
+
+
+def cache_ttl(path):
+    for prefix, ttl in CACHE_TTL:
+        if path.startswith(prefix):
+            return ttl
+    return DEFAULT_TTL
 
 
 class TmdbError(Exception):
@@ -23,11 +38,13 @@ class TmdbError(Exception):
 
 
 class Tmdb(object):
-    def __init__(self, key, language="cs-CZ", log=None, timeout=TIMEOUT):
+    def __init__(self, key, language="cs-CZ", log=None, timeout=TIMEOUT, cache=None):
+        """``cache`` – objekt s ``get(klíč)`` a ``put(klíč, data, ttl)``; chyby se neukládají."""
         self.key = (key or "").strip()
         self.language = language
         self.log = log or (lambda m: None)
         self.timeout = timeout
+        self.cache = cache
 
     @property
     def enabled(self):
@@ -35,6 +52,24 @@ class Tmdb(object):
 
     def _get(self, path, *, timeout=None, **params):
         params["language"] = self.language
+        cache_key = "tmdb:" + path + "?" + urllib.parse.urlencode(sorted((k, str(v)) for k, v in params.items()))
+        if self.cache is not None:
+            try:
+                cached = self.cache.get(cache_key)
+            except Exception:  # noqa: BLE001 – mezipaměť je jen zrychlení
+                cached = None
+            if cached is not None:
+                return cached
+        data = self._fetch(path, timeout, params)
+        if self.cache is not None:
+            try:
+                self.cache.put(cache_key, data, cache_ttl(path))
+            except Exception:  # noqa: BLE001
+                pass
+        return data
+
+    def _fetch(self, path, timeout, params):
+        params = dict(params)
         headers = {"Accept": "application/json", "User-Agent": "Kodi addon"}
         if len(self.key) > 40:  # v4 token
             headers["Authorization"] = "Bearer " + self.key

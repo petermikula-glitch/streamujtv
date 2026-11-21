@@ -1438,3 +1438,27 @@ msgstr "Televizní film"
 msgctxt "#30564"
 msgid "Remove the quality limit and include unspecified audio"
 msgstr "Zkusit bez omezení kvality a zahrnout neznámý jazyk"
+
+msgctxt "#30565"
+msgid "100 items"
+msgstr "100 položek"
+
+msgctxt "#30566"
+msgid "250 items"
+msgstr "250 položek"
+
+msgctxt "#30567"
+msgid "500 items"
+msgstr "500 položek"
+
+msgctxt "#30568"
+msgid "All at once"
+msgstr "Vše najednou"
+
+msgctxt "#30569"
+msgid "Catalogue items per page"
+msgstr "Položek katalogu na stránku"
+
+msgctxt "#30570"
+msgid "Next page (%d/%d)"
+msgstr "Další stránka (%d/%d)"

@@ -6,7 +6,7 @@ import time
 
 from nameparser import movie_key, normalize, parse, show_key
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 BACKUP_VERSION = 1
 OPTIONAL_BACKUP_TABLES = ("watchlist", "watched_marks", "progress_hidden", "saved_movie_filters",
                           "episode_additions", "episode_visits")
@@ -136,6 +136,13 @@ CREATE TABLE IF NOT EXISTS settings_kv (
     k TEXT PRIMARY KEY,
     v TEXT
 );
+CREATE TABLE IF NOT EXISTS cache (
+    key TEXT PRIMARY KEY,          -- např. tmdb:/movie/123?… nebo search:online:<hash>
+    created INTEGER NOT NULL,
+    expires INTEGER NOT NULL,
+    value TEXT NOT NULL            -- JSON
+);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache(expires);
 """
 
 JSON_FIELDS = ("genres", "countries", "directors", "cast")
@@ -206,6 +213,7 @@ class Library(object):
                                   ((normalize(title), vid) for vid, title in self.conn.execute(
                                       "SELECT id, raw_title FROM videos").fetchall()))
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_vkey ON videos(vkey)")
+        self.conn.execute("DELETE FROM settings_kv WHERE k='search:online'")  # dnes tabulka cache
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_season ON videos(meta_key, hidden, season, episode)")
         for (vid,) in self.conn.execute("SELECT id FROM videos WHERE vkey IS NULL OR vkey=''").fetchall():
             self.conn.execute("UPDATE videos SET vkey=? WHERE id=?", (self.video_key(vid), vid))
@@ -296,6 +304,35 @@ class Library(object):
                               "OR k IN ('last_sync', 'account_snapshot', 'sync_retry_after')")
 
     # --- key/value ---------------------------------------------------------
+    # --- mezipaměť odpovědí (TMDB, online hledání) -------------------------
+    def cache_get(self, key, now=None):
+        row = self.conn.execute("SELECT value, expires FROM cache WHERE key=?", (key,)).fetchone()
+        if not row or row["expires"] <= (now or time.time()):
+            return None
+        try:
+            return json.loads(row["value"])
+        except ValueError:
+            return None
+
+    def cache_put(self, key, value, ttl, now=None):
+        now = int(now or time.time())
+        with self.conn:
+            self.conn.execute("INSERT OR REPLACE INTO cache(key, created, expires, value) VALUES (?,?,?,?)",
+                              (key, now, now + int(ttl), json.dumps(value)))
+            self.conn.execute("DELETE FROM cache WHERE expires <= ?", (now,))
+
+    def cache_trim(self, prefix, keep):
+        """Ponechá jen ``keep`` nejnovějších záznamů s daným prefixem."""
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM cache WHERE key >= ? AND key < ? AND key NOT IN "
+                "(SELECT key FROM cache WHERE key >= ? AND key < ? ORDER BY created DESC, key LIMIT ?)",
+                (prefix, prefix + "\uffff", prefix, prefix + "\uffff", int(keep)))
+
+    def cache_clear(self, prefix=""):
+        with self.conn:
+            self.conn.execute("DELETE FROM cache WHERE key >= ? AND key < ?", (prefix, prefix + "\uffff"))
+
     def get_kv(self, k, default=None):
         row = self.conn.execute("SELECT v FROM settings_kv WHERE k=?", (k,)).fetchone()
         return row[0] if row else default
@@ -603,8 +640,8 @@ class Library(object):
         "MIN(v.thumb) AS thumb "
         "FROM meta m JOIN videos v ON v.meta_key = m.key AND v.hidden = 0 ")
 
-    def movies(self, genre=None, year_from=None, year_to=None, min_rating=None, country=None,
-               order="title", limit=None, keys=None):
+    @staticmethod
+    def _movie_where(genre=None, year_from=None, year_to=None, min_rating=None, country=None, keys=None):
         where = ["m.kind = 'movie'"]
         params = []
         if genre:
@@ -623,15 +660,27 @@ class Library(object):
             where.append("m.rating >= ?")
             params.append(min_rating)
         if keys is not None:
-            if not keys:
-                return []
             where.append("m.key IN (%s)" % ",".join("?" for _ in keys))
             params.extend(keys)
-        q = self._MOVIE_SELECT + "WHERE " + " AND ".join(where) + " GROUP BY m.key "
+        return " AND ".join(where), params
+
+    def movies(self, genre=None, year_from=None, year_to=None, min_rating=None, country=None,
+               order="title", limit=None, keys=None, offset=0):
+        if keys is not None and not keys:
+            return []
+        where, params = self._movie_where(genre, year_from, year_to, min_rating, country, keys)
+        q = self._MOVIE_SELECT + "WHERE " + where + " GROUP BY m.key "
         q += self._order(order)
         if limit:
-            q += " LIMIT %d" % int(limit)
+            q += " LIMIT %d OFFSET %d" % (int(limit), max(0, int(offset)))
         return [_row(r) for r in self.conn.execute(q, params).fetchall()]
+
+    def count_movies(self, genre=None, year_from=None, year_to=None, min_rating=None, country=None):
+        """Počet filmů, které by vrátilo ``movies()`` se stejnými filtry."""
+        where, params = self._movie_where(genre, year_from, year_to, min_rating, country)
+        return self.conn.execute(
+            "SELECT COUNT(DISTINCT m.key) FROM meta m JOIN videos v ON v.meta_key = m.key AND v.hidden = 0 "
+            "WHERE " + where, params).fetchone()[0]
 
     def shows(self, genre=None, min_rating=None, order="title", limit=None, keys=None):
         where = ["m.kind = 'show'"]
@@ -658,11 +707,11 @@ class Library(object):
     @staticmethod
     def _order(order):
         return {
-            "title": "ORDER BY COALESCE(NULLIF(m.title,''), m.search_title) COLLATE NOCASE",
-            "rating": "ORDER BY m.rating DESC, m.votes DESC",
-            "year": "ORDER BY COALESCE(NULLIF(m.year,0), m.search_year) DESC",
-            "added": "ORDER BY MAX(v.added_at) DESC",
-        }.get(order, "ORDER BY m.title COLLATE NOCASE")
+            "title": "ORDER BY COALESCE(NULLIF(m.title,''), m.search_title) COLLATE NOCASE, m.key",
+            "rating": "ORDER BY m.rating DESC, m.votes DESC, m.key",
+            "year": "ORDER BY COALESCE(NULLIF(m.year,0), m.search_year) DESC, m.key",
+            "added": "ORDER BY MAX(v.added_at) DESC, m.key",
+        }.get(order, "ORDER BY m.title COLLATE NOCASE, m.key")  # m.key: stálé pořadí mezi stránkami
 
     def videos_for_meta(self, key, season=None):
         q = "SELECT * FROM videos WHERE meta_key=? AND hidden=0"

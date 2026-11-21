@@ -1438,3 +1438,27 @@ msgstr ""
 msgctxt "#30564"
 msgid "Remove the quality limit and include unspecified audio"
 msgstr ""
+
+msgctxt "#30565"
+msgid "100 items"
+msgstr ""
+
+msgctxt "#30566"
+msgid "250 items"
+msgstr ""
+
+msgctxt "#30567"
+msgid "500 items"
+msgstr ""
+
+msgctxt "#30568"
+msgid "All at once"
+msgstr ""
+
+msgctxt "#30569"
+msgid "Catalogue items per page"
+msgstr ""
+
+msgctxt "#30570"
+msgid "Next page (%d/%d)"
+msgstr ""

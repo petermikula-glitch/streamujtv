@@ -165,6 +165,19 @@
                     </constraints>
                     <control type="spinner" format="string"/>
                 </setting>
+                <setting id="list_page_size" type="integer" label="30569" help="">
+                    <level>0</level>
+                    <default>250</default>
+                    <constraints>
+                        <options>
+                            <option label="30565">100</option>
+                            <option label="30566">250</option>
+                            <option label="30567">500</option>
+                            <option label="30568">0</option>
+                        </options>
+                    </constraints>
+                    <control type="spinner" format="string"/>
+                </setting>
             </group>
         </category>
         <category id="library" label="30040" help="">

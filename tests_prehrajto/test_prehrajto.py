@@ -1718,3 +1718,122 @@ def test_failed_playback_offers_only_another_version_of_same_episode(plugin, mon
     assert xbmcplugin.RESOLVED[-1][1].tag.data["resumepoint"] == (300.0, 1800.0)
     plugin.playback_failed(next_video, "Přehrávání se nezdařilo", replacement=True)
     assert len(xbmc.BUILTINS) == 1
+
+
+def _add_movies_to_catalog(plugin, count, versions=1):
+    import nameparser
+    with plugin.open_library() as lib, lib.conn:
+        for i in range(count):
+            for v in range(versions):
+                raw = "Film %02d %d %s 1080p" % (i, 1990 + i, "CZ" if v else "EN")
+                lib.upsert_video("%d:film-%d:%016x" % (i * 10 + v + 1, i, i * 10 + v + 1), raw, "account",
+                                 nameparser.parse(raw))
+
+
+def test_catalogue_listings_are_paginated(plugin):
+    import xbmcaddon
+    import xbmcplugin
+    _add_movies_to_catalog(plugin, 5, versions=2)
+    xbmcaddon.SETTINGS["list_page_size"] = "2"
+
+    plugin.movies({"order": "title", "browse": "1"})
+    movies = [item for item in xbmcplugin.ITEMS if "action=play" in item[0]]
+    assert len(movies) == 2
+    next_page = xbmcplugin.ITEMS[-1]
+    assert next_page[2] is True and next_page[1].props["SpecialSort"] == "bottom"
+    assert "page=2" in next_page[0] and "action=movies" in next_page[0]
+    assert "(2/3)" in next_page[1].label
+
+    del xbmcplugin.ITEMS[:]
+    plugin.movies({"order": "title", "browse": "1", "page": "3"})
+    assert len(xbmcplugin.ITEMS) == 1  # bez zkratek filtrů a bez další stránky
+    assert "action=play" in xbmcplugin.ITEMS[0][0]
+
+    del xbmcplugin.ITEMS[:]
+    plugin.all_videos({"page": "5"})
+    assert len(xbmcplugin.ITEMS) == 2 and all("action=play" in item[0] for item in xbmcplugin.ITEMS)
+
+    xbmcaddon.SETTINGS["list_page_size"] = "0"
+    del xbmcplugin.ITEMS[:]
+    plugin.movies({"order": "title"})
+    assert len(xbmcplugin.ITEMS) == 5
+
+
+def test_url_for_matches_urlencode(plugin):
+    import urllib.parse
+    params = {"key": "movie:pelisky|1999", "q": "Hra o trůny 2x03", "page": 2, "empty": "", "none": None,
+              "vid": REF}
+    expected = plugin.BASE_URL + "?" + urllib.parse.urlencode(
+        dict([(k, v) for k, v in params.items() if v not in (None, "")] + [("action", "search")]))
+    assert plugin.url_for("search", **params) == expected
+
+
+def test_tmdb_responses_are_cached_by_path(monkeypatch):
+    import tmdb
+
+    class Cache(dict):
+        def get(self, key):
+            entry = dict.get(self, key)
+            return entry[0] if entry else None
+
+        def put(self, key, value, ttl):
+            self[key] = (value, ttl)
+
+    cache = Cache()
+    client = tmdb.Tmdb("k" * 32, cache=cache)
+    calls = []
+
+    def fetch(path, timeout, params):
+        calls.append(path)
+        if path.startswith("/movie/9"):
+            raise tmdb.TmdbError("TMDB: HTTP 500")
+        return {"genres": [{"id": 1, "name": "Drama"}], "path": path}
+
+    monkeypatch.setattr(client, "_fetch", fetch)
+    assert client.genres("movie") == client.genres("movie") == [{"id": 1, "name": "Drama"}]
+    assert calls == ["/genre/movie/list"]
+    assert [ttl for _value, ttl in cache.values()] == [7 * 24 * 3600]
+    assert all("api_key" not in key and "kkkk" not in key for key in cache)
+    with pytest.raises(tmdb.TmdbError):
+        client._get("/movie/9")
+    assert len(cache) == 1  # chyby se neukládají
+    assert tmdb.cache_ttl("/search/multi") == 3600
+    assert tmdb.cache_ttl("/discover/movie") == 6 * 3600
+    assert tmdb.cache_ttl("/movie/603") == 24 * 3600
+
+
+def test_library_response_cache_expiry_and_trim(tmp_path):
+    import db
+    with db.Library(str(tmp_path / "c.db")) as lib:
+        lib.cache_put("tmdb:/a", {"x": 1}, 10, now=1000)
+        assert lib.cache_get("tmdb:/a", now=1005) == {"x": 1}
+        assert lib.cache_get("tmdb:/a", now=1011) is None
+        for i in range(5):
+            lib.cache_put("search:online:%d" % i, [i], 600, now=2000 + i)
+        lib.cache_put("tmdb:/b", {"y": 2}, 600, now=2000)
+        lib.cache_trim("search:online:", 2)
+        keys = [row[0] for row in lib.conn.execute("SELECT key FROM cache ORDER BY key")]
+        assert keys == ["search:online:3", "search:online:4", "tmdb:/b"]
+        lib.cache_clear("search:online:")
+        assert [row[0] for row in lib.conn.execute("SELECT key FROM cache")] == ["tmdb:/b"]
+
+
+def test_online_search_keeps_recent_queries(plugin, monkeypatch):
+    calls = []
+
+    def batch(_client, query, page=1, cursor=""):
+        calls.append(query)
+        return [], page, "", False
+
+    class NoTmdb:
+        enabled = False
+        timeout = 0
+
+    monkeypatch.setattr(plugin, "_provider_page_batch", batch)
+    monkeypatch.setattr(plugin, "make_tmdb", lambda cached=True: NoTmdb())
+    filters = plugin._online_filters({})
+    for query in ("Pelíšky", "Samotáři", "Pelíšky", "Samotáři"):
+        plugin._online_search(query, query, 0, None, filters)
+    assert calls == ["Pelíšky", "Samotáři"]
+    plugin._online_search("Pelíšky", "Pelíšky", 0, None, filters, retry=True)
+    assert calls == ["Pelíšky", "Samotáři", "Pelíšky"]
