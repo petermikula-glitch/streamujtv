@@ -71,7 +71,7 @@ tituly, pro které už doplněk našel video ve vlastním katalogu.
 V **Moje seriály** se po synchronizaci objeví počet nových dílů. Při otevření
 seriálu se počet vynuluje a poslední dávka zůstane dostupná v seznamu dílů.
 Pokud má seriál přiřazené TMDB ID a je nastavený API klíč, doplněk načte názvy,
-délky a náhledy epizod. Popis díje je v kontextové nabídce **Detail epizody**.
+délky a náhledy epizod. Popis dílu je v kontextové nabídce **Detail epizody**.
 **Nástroje → Hromadně přiřadit díly** umožní zkontrolovat a opravit čísla vybraných
 dílů před jejich společným přiřazením k seriálu a sérii.
 
@@ -104,6 +104,12 @@ podle metadat ČSFD nebo TMDB. V nabídce **Hledat** lze zadat například `Fran
 Volba **Upřesnit výběr** v jeho výsledcích otevře dialog pro kombinaci země, žánru a roku či desetiletí.
 **Novinky** nabízejí nově přidaná videa z účtu a filmy vydané v posledních 90 dnech
 podle TMDB. Velikost výpisu lze upravit v **Nastavení → Hledat**.
+Velké výpisy vlastního katalogu (**Moje filmy**, **Seriály**, **Všechna videa**) se zobrazují
+po stránkách s položkou **Další stránka** na konci seznamu. Počet položek na stránku (100, 250, 500
+nebo vše najednou) nastavíte v **Nastavení → Hledat → Položek katalogu na stránku**.
+Doplněk si pamatuje posledních 20 online hledání (10 minut) a odpovědi TMDB (žánry a země týden,
+seznamy 6 hodin, detaily den), takže návrat zpět a opakované otevření nečekají na síť.
+Doplnění a obnova metadat čtou z TMDB vždy aktuální data.
 Výchozí výpis spojuje dvě stránky služby, pokud jsou dostupné.
 
 **Další části** v detailu filmu vycházejí z filmových kolekcí TMDB. Pokud je
@@ -193,6 +199,12 @@ Pokud ČSFD automatické dotazy pustí, čtou se z něj strukturovaná data (JSO
 | Obrazovky Kodi | `resources/lib/plugin.py` | |
 | Automatická synchronizace | `service.py` | |
 
+U doplňku Přehraj.to je `resources/lib/plugin.py` jen router: podle akce načte modul s danou
+obrazovkou (`views_catalog`, `views_progress`, `views_discover`, `views_search`, `views_collections`,
+`views_tools`, `views_kodi`, `views_edit`, `playback`), společné prvky jsou v `ui.py`. Síťové knihovny
+se načítají až při prvním použití, takže obrazovky vlastního katalogu startují rychleji.
+Klient Přehraj.to (`prehrajto.py`) udržuje spojení se serverem otevřené mezi požadavky.
+
 Heslo se do logu Kodi nikdy nezapisuje (ani jeho hash).
 
 ## Vývoj
@@ -206,6 +218,7 @@ python3 -m pytest tests                  # testy streamuj.tv + sdíleného kódu
 python3 -m pytest tests_prehrajto        # testy Přehraj.to (spouštět zvlášť)
 STREAMUJ_LIVE=1 python3 -m pytest tests -k live            # živý test API streamuj.tv
 PREHRAJTO_LIVE=1 python3 -m pytest tests_prehrajto -k live  # živý test přihlášení Přehraj.to
+python3 tools/bench_prehrajto.py         # rychlost obrazovek Přehraj.to nad syntetickým katalogem
 python3 tools/sync_shared.py             # po úpravě sdíleného kódu
 # nová verze doplňku: zvyšte version v addon.xml, spusťte build_zip.py a pushněte do main
 python3 tools/strings.py                 # vygeneruje strings.po (cs/en) pro Streamuj.tv
