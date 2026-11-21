@@ -9,7 +9,7 @@ from conftest import fixture
 import prehrajto
 import provider
 
-from helpers import Fake, REF, jwt
+from helpers import Fake, REF, jwt, set_cookie
 
 
 class _FakeHTTPSConnection(object):
@@ -236,3 +236,82 @@ def test_keepalive_reuses_prehrajto_connection(monkeypatch):
                         lambda self, req: calls.append(req.host))
     client.keepalive.https_open(__import__("urllib.request").request.Request("https://image.tmdb.org/a.jpg"))
     assert calls == ["image.tmdb.org"]
+
+
+def test_concurrent_logins_send_one_login_form():
+    import threading
+
+    class Slow(Fake):
+        def _request(self, url, data=None, headers=None, follow=True):
+            if "loginForm" in url and data:
+                time.sleep(0.05)
+            return super()._request(url, data, headers, follow)
+
+    client = Slow({})
+    threads = [threading.Thread(target=client.login) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert sum(1 for url, data, _ in client.calls if "loginForm" in url and data) == 1
+
+
+def test_rejected_password_is_not_hidden_by_stale_token():
+    client = Fake({}, login_ok=False)
+    set_cookie(client.cookies, "access_token", jwt(time.time() - 60))
+    set_cookie(client.cookies, "refresh_token", "old")
+    with pytest.raises(prehrajto.LoginError):
+        client.login()
+    assert not client._cookie("access_token") and not client._logged_in
+    assert client.check_user() == (prehrajto.CHECK_BAD_LOGIN, None)
+
+
+def test_keepalive_never_repeats_a_request_after_timeout(monkeypatch):
+    import socket
+    import urllib.error
+    import urllib.request
+
+    class Conn(_FakeHTTPSConnection):
+        fail = None
+
+        def getresponse(self):
+            if Conn.fail and len(self.requests) > 1:
+                error, Conn.fail = Conn.fail, None
+                raise error
+            return super().getresponse()
+
+    monkeypatch.setattr(prehrajto.KeepAliveHTTPSHandler, "connection_class", Conn)
+    _FakeHTTPSConnection.created = []
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("https_proxy", raising=False)
+    handler = prehrajto.KeepAliveHTTPSHandler()
+    opener = urllib.request.build_opener(handler)
+    opener.open("https://prehraj.to/")
+    Conn.fail = socket.timeout("timed out")
+    with pytest.raises(urllib.error.URLError):
+        opener.open(urllib.request.Request("https://prehraj.to/?frm=login", data=b"email=a"), timeout=1)
+    sent = [request[:2] for conn in _FakeHTTPSConnection.created for request in conn.requests]
+    assert sent == [("GET", "/"), ("POST", "/?frm=login")]  # přihlášení se neposlalo podruhé
+
+    # mrtvé spojení ze zásoby: druhý pokus jde vždy na nové spojení, ne na další ze zásoby
+    _FakeHTTPSConnection.created = []
+    handler = prehrajto.KeepAliveHTTPSHandler()
+    stale = [Conn("prehraj.to"), Conn("prehraj.to")]
+    for conn in stale:
+        conn.requests.append(("GET", "/old", {}))
+        handler._give(("prehraj.to", None), conn)
+    Conn.fail = ConnectionResetError("closed")
+    response = urllib.request.build_opener(handler).open("https://prehraj.to/nove")
+    assert response.read() == b"<html>/nove</html>"
+    assert len(_FakeHTTPSConnection.created) == 3 and _FakeHTTPSConnection.created[2].requests[0][1] == "/nove"
+
+
+def test_original_ignores_redirect_back_to_the_site():
+    page = fixture("video_synthetic.html")
+    for location, expected in (("/pelisky-1999-cz-1080p/4f9a1b2c3d4e5f60", ""),
+                               ("https://prehraj.to/?login", ""),
+                               ("https://cdn.example.net/file.mkv?sig=1", "https://cdn.example.net/file.mkv?sig=1")):
+        client = Fake({"/pelisky-1999-cz-1080p/4f9a1b2c3d4e5f60?do=download": ("", None, location, 302),
+                       "/pelisky-1999-cz-1080p/4f9a1b2c3d4e5f60": (page, None, "", 200)})
+        client.api = lambda path: (_ for _ in ()).throw(prehrajto.PrehrajtoError("API HTTP 403"))
+        assert client._original(REF) == expected

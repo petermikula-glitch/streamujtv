@@ -80,6 +80,7 @@ COUNTRY_QUERY_ALIASES = {
 }
 AVAILABILITY_BATCH = 4
 AVAILABILITY_WORKERS = 2  # Přehraj.to rychle omezuje souběžné dotazy (HTTP 429)
+AVAILABILITY_PAUSE = 60  # s – po chybě ověřování se další dotazy chvíli neposílají
 ACTOR_PAGE_SIZE = 20
 
 
@@ -244,6 +245,9 @@ def make_client():
                                 location=setting("location") or "1", cookie_file=cookie_file, log=log)
 
 
+TMDB_CACHE_KEEP = 400  # strop počtu uložených odpovědí TMDB (malá zařízení)
+
+
 class _ResponseCache(object):
     """Mezipaměť odpovědí v katalogu; každé volání má vlastní spojení (volá se i z vláken)."""
 
@@ -254,6 +258,7 @@ class _ResponseCache(object):
     def put(self, key, value, ttl):
         with open_library() as lib:
             lib.cache_put(key, value, ttl)
+            lib.cache_trim("tmdb:", TMDB_CACHE_KEEP)
 
 
 def make_tmdb(cached=True):

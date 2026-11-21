@@ -25,6 +25,8 @@ import http.cookiejar
 import json
 import os
 import re
+import socket
+import ssl
 import tempfile
 import time
 import urllib.error
@@ -350,6 +352,17 @@ KEEPALIVE_MAX_BODY = 8 * 1024 * 1024
 KEEPALIVE_IDLE = 4
 
 
+def _connection_was_closed(err):
+    """Chyba znamená, že server nečinné spojení zavřel dřív, než požadavek zpracoval.
+
+    Vypršení časového limitu sem nepatří: požadavek mohl dorazit (např. přihlášení)
+    a jeho zopakování by ho provedlo podruhé."""
+    if isinstance(err, socket.timeout):
+        return False
+    return isinstance(err, (ConnectionError, http.client.RemoteDisconnected, http.client.BadStatusLine,
+                            http.client.CannotSendRequest, ssl.SSLEOFError, ssl.SSLZeroReturnError))
+
+
 class KeepAliveHTTPSHandler(urllib.request.HTTPSHandler):
     """HTTPS s udržovaným spojením pro stránky Přehraj.to.
 
@@ -402,7 +415,8 @@ class KeepAliveHTTPSHandler(urllib.request.HTTPSHandler):
         pool_key = (req.host, tunnel)
         timeout = getattr(req, "timeout", TIMEOUT)
         for attempt in (0, 1):
-            conn = self._take(pool_key)
+            # druhý pokus vždy na novém spojení (v zásobě může být další zavřené)
+            conn = self._take(pool_key) if attempt == 0 else None
             reused = conn is not None
             if conn is None:
                 conn = self.connection_class(req.host, timeout=timeout, context=self._context)
@@ -417,7 +431,7 @@ class KeepAliveHTTPSHandler(urllib.request.HTTPSHandler):
                 resp = conn.getresponse()
             except (OSError, http.client.HTTPException) as err:
                 conn.close()
-                if reused and attempt == 0:
+                if reused and attempt == 0 and _connection_was_closed(err):
                     continue  # server mezitím nečinné spojení zavřel – zkusit nové
                 raise urllib.error.URLError(err)
             break
@@ -468,6 +482,7 @@ class PrehrajtoClient(object):
         self.noredirect = noredirect_opener or urllib.request.build_opener(processor, _NoRedirect(),
                                                                            self.keepalive)
         self._logged_in = False
+        self._login_lock = threading.RLock()
         self._last_video_page = None
         self.sleep = time.sleep
         self.request_timeout = TIMEOUT
@@ -578,6 +593,15 @@ class PrehrajtoClient(object):
     def login(self, force=False):
         """Přihlásí se. Uložené cookies se znovu použijí – každé nové přihlášení
         zakládá na serveru další záznam ve „Správě přihlášených zařízení"."""
+        with self._login_lock:  # klienta sdílí více vláken; dvě přihlášení = dva záznamy zařízení
+            return self._login(force)
+
+    def _clear_tokens(self):
+        for cookie in list(self.cookies):
+            if cookie.name in ("access_token", "refresh_token"):
+                self.cookies.clear(cookie.domain, cookie.path, cookie.name)
+
+    def _login(self, force):
         if self._logged_in and not force:
             return True
         if not self.has_credentials:
@@ -588,6 +612,8 @@ class PrehrajtoClient(object):
                 self._save_cookies()
                 return True
         self._get("/")  # založení relace
+        # Staré tokeny už neplatí; kdyby zůstaly, vypadalo by i odmítnuté heslo jako úspěch.
+        self._clear_tokens()
         self._request("/?frm=loginDialog-login-loginForm", data={
             "email": self.username,
             "password": self.password,
@@ -596,6 +622,7 @@ class PrehrajtoClient(object):
             "_do": "loginDialog-login-loginForm-submit",
         }, headers={"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"})
         if not self._cookie("access_token"):
+            self._logged_in = False
             raise LoginError("Přihlášení k Přehraj.to se nezdařilo – zkontroluj e-mail a heslo")
         self._logged_in = True
         self._save_cookies()
@@ -622,9 +649,12 @@ class PrehrajtoClient(object):
         try:
             resp = urllib.request.urlopen(req, timeout=TIMEOUT)
             try:
-                return json.loads(resp.read().decode("utf-8"))
+                data = json.loads(resp.read().decode("utf-8"))
             finally:
                 resp.close()
+            if not isinstance(data, dict) or not isinstance(data.get("data") or {}, dict):
+                raise TemporaryError("API vrátilo neočekávanou odpověď")
+            return data
         except urllib.error.HTTPError as e:
             e.close()
             if e.code == 401:
@@ -809,8 +839,12 @@ class PrehrajtoClient(object):
                     api_error = e
                 self.log("prehrajto: API download selhal: %s" % e)
         _, _, location, status = self._request(video_page_url(ref) + "?do=download", follow=False)
-        if location and "prehraj.to/" not in location.split("?")[0][:30]:
-            return urllib.parse.urljoin(BASE, location)
+        if location:
+            target = urllib.parse.urljoin(BASE, location)
+            # přesměrování zpět na web (stránka videa, přihlášení) není odkaz na soubor
+            host = (urllib.parse.urlsplit(target).hostname or "").lower()
+            if host != "prehraj.to" and not host.endswith(".prehraj.to"):
+                return target
         if api_error:
             raise api_error
         return ""

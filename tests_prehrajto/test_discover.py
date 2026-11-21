@@ -172,3 +172,42 @@ def test_availability_checks_run_in_parallel_and_stop_on_rate_limit(plugin, monk
     found, more, failed = plugin._check_title_availability(titles, "movie")
     assert failed and more and not found
     assert len(calls) <= plugin.AVAILABILITY_WORKERS  # po 429 se další dotazy neposílají
+
+
+def test_tmdb_rejects_and_never_caches_unexpected_shapes(monkeypatch):
+    import tmdb
+
+    stored = {}
+
+    class Cache:
+        def get(self, key):
+            return stored.get(key)
+
+        def put(self, key, value, ttl):
+            stored[key] = value
+
+    client = tmdb.Tmdb("k" * 32, cache=Cache())
+    monkeypatch.setattr(client, "_fetch", lambda path, timeout, params: [])
+    with pytest.raises(tmdb.TmdbError):
+        client.genres("movie")
+    assert not stored
+    assert client.countries() == [] and len(stored) == 1  # číselník zemí je seznam
+    # poškozený záznam v mezipaměti se nepoužije
+    stored["tmdb:/genre/movie/list?language=cs-CZ"] = []
+    monkeypatch.setattr(client, "_fetch", lambda path, timeout, params: {"genres": [{"id": 1, "name": "Drama"}]})
+    assert client.genres("movie") == [{"id": 1, "name": "Drama"}]
+
+
+def test_availability_pauses_after_a_failure(plugin, monkeypatch):
+    calls = []
+
+    def limited(_client, query, *_):
+        calls.append(query)
+        raise provider.TemporaryError("HTTP 429")
+
+    monkeypatch.setattr(provider, "search_catalog", limited)
+    titles = [{"id": 1, "title": "Film", "release_date": "1999-01-01", "media_type": "movie"}]
+    assert plugin._check_title_availability(titles, "movie")[2] is True
+    sent = len(calls)
+    assert plugin._check_title_availability(titles, "movie")[2] is True
+    assert len(calls) == sent  # během pauzy se na Přehraj.to nic neposílá

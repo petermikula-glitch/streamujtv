@@ -26,6 +26,13 @@ CACHE_TTL = (("/genre/", 7 * 24 * HOUR), ("/configuration/", 7 * 24 * HOUR), ("/
 DEFAULT_TTL = 24 * HOUR
 
 
+def _expected_shape(path, data):
+    """Odpovědi TMDB jsou objekty; jen číselníky pod /configuration/ jsou seznamy."""
+    if path.startswith("/configuration/"):
+        return isinstance(data, (list, dict))
+    return isinstance(data, dict)
+
+
 def cache_ttl(path):
     for prefix, ttl in CACHE_TTL:
         if path.startswith(prefix):
@@ -58,9 +65,12 @@ class Tmdb(object):
                 cached = self.cache.get(cache_key)
             except Exception:  # noqa: BLE001 – mezipaměť je jen zrychlení
                 cached = None
-            if cached is not None:
+            if _expected_shape(path, cached):
                 return cached
         data = self._fetch(path, timeout, params)
+        if not _expected_shape(path, data):
+            # např. filtrující proxy vrátí 200 s jiným obsahem – neukládat a nehlásit jako prázdný výsledek
+            raise TmdbError("TMDB vrátilo neočekávanou odpověď")
         if self.cache is not None:
             try:
                 self.cache.put(cache_key, data, cache_ttl(path))

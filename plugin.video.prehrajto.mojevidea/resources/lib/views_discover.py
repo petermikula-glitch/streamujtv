@@ -15,7 +15,7 @@ from nameparser import parse
 from search_results import normalize
 import ui
 from ui import (_, _account_scope, add_action, add_dir, _add_item, _add_movies, add_video, _apply_playback,
-                _apply_version_playback, _art, AVAILABILITY_BATCH, AVAILABILITY_WORKERS,
+                _apply_version_playback, _art, AVAILABILITY_BATCH, AVAILABILITY_PAUSE, AVAILABILITY_WORKERS,
                 COUNTRY_QUERY_ALIASES, _display_title, _display_year, end, _fail_directory, FILM_ORIGINS,
                 _json_object, _list_item, _meta_info, open_library, _playback_state, PLAYING_PROPERTY,
                 _run_action, _search_client, SEARCH_COUNTRIES, _set_info, url_for, _version_label,
@@ -200,7 +200,11 @@ def _check_title_availability(titles, default_kind):
     todo = [(cache_id, card) for cache_id, card in candidates.items() if cache_id not in cached]
     checked = {}
     failed = False
+    pause_key = "availability:paused:" + _account_scope()
     if todo:
+        with open_library() as lib:
+            failed = bool(lib.cache_get(pause_key))  # po chybě (např. HTTP 429) chvíli nezkoušet znovu
+    if todo and not failed:
         client = _search_client()
         stop = []
 
@@ -233,6 +237,9 @@ def _check_title_availability(titles, default_kind):
                     checked[cache_id] = [time.time(), task.result()]
                 except (provider.ProviderError, provider.RateLimited):
                     failed = True
+        if failed:
+            with open_library() as lib:
+                lib.cache_put(pause_key, True, AVAILABILITY_PAUSE)
     if checked:
         with open_library() as lib, lib.conn:
             lib.conn.execute("BEGIN IMMEDIATE")

@@ -246,6 +246,17 @@ def _section_people(page, label):
 
 
 def parse_film(page, url=""):
+    """Rozbor stránky titulu; neobvyklá (ale platná) data stránky hlásí jako CsfdError,
+    aby jedna stránka nepřerušila doplňování celého katalogu."""
+    try:
+        return _parse_film(page, url)
+    except CsfdError:
+        raise
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
+        raise CsfdError("stránku ČSFD nelze zpracovat: %s" % e)
+
+
+def _parse_film(page, url=""):
     """Rozparsuje stránku přehledu filmu/seriálu."""
     ld = _jsonld(page)
     info = {"csfd_id": film_id_from_url(url), "csfd_url": url, "title": "", "orig_title": "",
