@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Logika katalogu nezávislá na Kodi: synchronizace s účtem, import odkazů,
 doplnění metadat z ČSFD/TMDB."""
+import hashlib
+import re
 import time
 
 import csfd
@@ -34,7 +36,8 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
     videos = client.my_videos(progress=prog("my_videos"))
     for v in videos:
         if lib.upsert_video(v["id"], v["title"] or v["id"], "account", _parsed(v["title"] or v["id"]),
-                            duration=v.get("duration", 0), thumb=v.get("thumb", "")):
+                            duration=v.get("duration", 0), thumb=v.get("thumb", ""), size=v.get("size", ""),
+                            quality=v.get("quality", "")):
             stats["new"] += 1
     stats["total"] = len(videos)
 
@@ -47,7 +50,8 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
         for v in favs:
             if lib.upsert_video(v["id"], v["title"] or v["id"], "favorites",
                                 _parsed(v["title"] or v["id"]), duration=v.get("duration", 0),
-                                thumb=v.get("thumb", "")):
+                                thumb=v.get("thumb", ""), size=v.get("size", ""),
+                            quality=v.get("quality", "")):
                 stats["new"] += 1
         stats["favorites"] = len(favs)
 
@@ -69,7 +73,8 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
             for v in items:
                 if lib.upsert_video(v["id"], v["title"] or v["id"], "playlist",
                                     _parsed(v["title"] or v["id"]), duration=v.get("duration", 0),
-                                    thumb=v.get("thumb", "")):
+                                    thumb=v.get("thumb", ""), size=v.get("size", ""),
+                            quality=v.get("quality", "")):
                     stats["new"] += 1
                 video = lib.get_video(v["id"])
                 lib.add_to_collection(cid, video["meta_key"])
@@ -125,15 +130,19 @@ def import_links(client, lib, links, progress=None, log=None):
             break
         description = ""
         thumb = provider.thumb_url(vid)
-        if not title:
+        # stránka videa doplní název, případně úplné ID (Přehraj.to: číslo videa pro API)
+        if not title or provider.incomplete_id(vid):
             try:
                 info = client.video_info(vid)
-                title = info.get("title") or vid
+                title = title or info.get("title") or vid
                 description = info.get("description", "")
+                thumb = info.get("thumb") or thumb
+                vid = info.get("id") or vid
             except provider.ProviderError as e:
-                log("název videa %s nelze zjistit: %s" % (vid, e))
-                stats["failed"] += 1
-                title = vid
+                log("údaje o videu %s nelze zjistit: %s" % (vid, e))
+                if not title:
+                    stats["failed"] += 1
+                    title = vid
         if lib.upsert_video(vid, title, "manual", _parsed(title), thumb=thumb, description=description):
             stats["new"] += 1
         else:
@@ -214,3 +223,30 @@ def enrich(lib, metas, use_csfd=True, tmdb=None, progress=None, log=None):
                 lib.set_meta_status(rest["key"], "blocked")
             break
     return stats
+
+
+_SECRET_PATTERNS = [
+    (re.compile(r"eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}"), "***JWT***"),
+    (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "***@***"),
+    (re.compile(r"((?:password|pass|passwd|token|access_token|refresh_token|login|email|username)"
+                r"[\"']?\s*[=:]\s*[\"']?)[^&\"'\s<>;,]+", re.I), r"\1***"),
+    (re.compile(r"(<input\b[^>]*type=[\"']hidden[\"'][^>]*value=[\"'])[^\"']*", re.I), r"\1***"),
+    (re.compile(r"((?:_nss|PHPSESSID|CLIPSHARE|session|csrf\w*)[\"']?\s*[=:]\s*[\"']?)[^&\"'\s<>;,]+",
+                re.I), r"\1***"),
+]
+
+
+def sanitize(text, secrets=()):
+    """Odstraní z HTML přihlašovací údaje, e-maily, tokeny a skrytá pole formulářů
+    (diagnostické soubory se posílají dál, nesmí obsahovat nic citlivého)."""
+    text = text or ""
+    for secret in secrets:
+        secret = (secret or "").strip()
+        if len(secret) >= 3:
+            text = re.sub(re.escape(secret), "***", text, flags=re.I)
+            for digest in (hashlib.md5(secret.encode("utf-8")).hexdigest(),):
+                text = text.replace(digest, "***")
+                text = text.replace(hashlib.md5(digest.encode("ascii")).hexdigest(), "***")
+    for rx, repl in _SECRET_PATTERNS:
+        text = rx.sub(repl, text)
+    return text

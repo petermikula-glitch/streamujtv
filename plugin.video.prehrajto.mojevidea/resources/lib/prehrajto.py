@@ -54,6 +54,11 @@ TRACK_BLOCK_RE = re.compile(r"var\s+tracks\s*=\s*\[(.*?)\]\s*;", re.S)
 TRACK_ITEM_RE = re.compile(r"\{(.*?)\}", re.S)
 TRACK_URL_RE = re.compile(r"""(?:file|src):\s*["']([^"']+\.(?:vtt|srt)[^"']*)["']""")
 TRACK_LANG_RE = re.compile(r"""(?:srclang|label):\s*["']([A-Za-z]{2,4})""")
+PAGE_VIDEO_ID_RES = [
+    re.compile(r'data-video-id="(\d+)"'),
+    re.compile(r'["\']?video_?[iI]d["\']?\s*[:=]\s*["\']?(\d{3,15})'),
+    re.compile(r'/api/v2/videos/(\d+)'),
+]
 PREMIUM_RE = re.compile(r"PREMIUM\s*(?:<[^>]*>\s*)*(\d+)\s*dn", re.S)
 DAYS_RE = re.compile(r"Vyprší za\s*(?:<[^>]*>\s*)*(\d+)", re.S)
 
@@ -64,6 +69,12 @@ class PrehrajtoError(Exception):
 
 class LoginError(PrehrajtoError):
     pass
+
+
+class RateLimited(Exception):
+    def __init__(self, retry_after=0):
+        Exception.__init__(self, "HTTP 429")
+        self.retry_after = retry_after
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +287,16 @@ def parse_video_page(page):
     m = re.search(r'<meta\s+name="description"\s+content="([^"]*)"', page or "", re.I)
     if m:
         desc = html.unescape(m.group(1)).strip()
-    return {"title": title, "thumb": thumb, "description": desc}
+    return {"title": title, "thumb": thumb, "description": desc, "video_id": parse_page_video_id(page)}
+
+
+def parse_page_video_id(page):
+    """Číslo videa ze stránky videa (potřebuje ho JSON API pro stažení originálu)."""
+    for rx in PAGE_VIDEO_ID_RES:
+        m = rx.search(page or "")
+        if m:
+            return m.group(1)
+    return ""
 
 
 def jwt_expired(token, margin=30):
@@ -317,13 +337,26 @@ class PrehrajtoClient(object):
         self.opener = opener or urllib.request.build_opener(processor)
         self.noredirect = noredirect_opener or urllib.request.build_opener(processor, _NoRedirect())
         self._logged_in = False
+        self.sleep = time.sleep
 
     @property
     def has_credentials(self):
         return bool(self.username and self.password)
 
     # --- HTTP -------------------------------------------------------------
-    def _request(self, url, data=None, headers=None, follow=True):
+    def _request(self, url, data=None, headers=None, follow=True, retries=2):
+        """HTTP s opakováním po HTTP 429 (server dočasně omezuje dotazy)."""
+        for attempt in range(retries + 1):
+            try:
+                return self._request_once(url, data, headers, follow)
+            except RateLimited as e:
+                if attempt >= retries:
+                    raise PrehrajtoError("Přehraj.to dočasně omezuje dotazy (HTTP 429), zkus to za chvíli")
+                wait = min(30, e.retry_after or 5 * (attempt + 1))
+                self.log("prehrajto: HTTP 429, čekám %s s" % wait)
+                self.sleep(wait)
+
+    def _request_once(self, url, data=None, headers=None, follow=True):
         if not url.startswith("http"):
             url = BASE + url
         hdrs = {"User-Agent": USER_AGENT, "Accept-Language": "cs-CZ,cs;q=0.9"}
@@ -343,7 +376,11 @@ class PrehrajtoClient(object):
                 e.close()
                 return "", url, location, e.code
             if e.code == 429:
-                raise PrehrajtoError("Přehraj.to dočasně omezuje dotazy (HTTP 429), zkus to za chvíli")
+                try:
+                    retry_after = int(e.headers.get("Retry-After") or 0)
+                except (TypeError, ValueError):
+                    retry_after = 0
+                raise RateLimited(retry_after)
             raise PrehrajtoError("HTTP %s: %s" % (e.code, mask_secrets(url)))
         except Exception as e:  # noqa: BLE001
             raise PrehrajtoError("Přehraj.to je nedostupné: %s" % e)
@@ -502,7 +539,8 @@ class PrehrajtoClient(object):
     def video_info(self, ref):
         page, _ = self._get(video_page_url(ref))
         info = parse_video_page(page)
-        info["id"] = ref
+        vid, slug, h = split_ref(ref)
+        info["id"] = make_ref(vid or info.get("video_id"), slug, h)
         return info
 
     # --- přehrání -----------------------------------------------------------
@@ -535,6 +573,11 @@ class PrehrajtoClient(object):
 
     def _original(self, ref):
         vid, slug, h = split_ref(ref)
+        if not vid and self.has_credentials:
+            try:
+                vid = parse_page_video_id(self._get(video_page_url(ref))[0])
+            except PrehrajtoError:
+                vid = ""
         if vid:
             try:
                 data = (self.api("videos/%s/download" % vid) or {}).get("data") or {}

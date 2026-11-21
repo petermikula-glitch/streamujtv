@@ -105,3 +105,20 @@ class DialogProgress(object):
 class DialogProgressBG(DialogProgress):
     def update(self, percent=0, heading=None, message=None):
         pass
+
+
+WINDOW_PROPERTIES = {}
+
+
+class Window(object):
+    def __init__(self, wid=0):
+        self.wid = wid
+
+    def setProperty(self, k, v):
+        WINDOW_PROPERTIES[k] = v
+
+    def getProperty(self, k):
+        return WINDOW_PROPERTIES.get(k, "")
+
+    def clearProperty(self, k):
+        WINDOW_PROPERTIES.pop(k, None)

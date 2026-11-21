@@ -6,7 +6,7 @@ import time
 
 from nameparser import movie_key, normalize, show_key
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
@@ -77,6 +77,14 @@ CREATE TABLE IF NOT EXISTS search_history (
     query TEXT PRIMARY KEY,
     ts INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS history (
+    vid TEXT PRIMARY KEY,          -- ID videa
+    last_played INTEGER NOT NULL,
+    position REAL DEFAULT 0,       -- s, kde se skončilo
+    total REAL DEFAULT 0,          -- s, délka videa
+    plays INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_history_played ON history(last_played);
 CREATE TABLE IF NOT EXISTS settings_kv (
     k TEXT PRIMARY KEY,
     v TEXT
@@ -108,16 +116,64 @@ def _row(row):
     return d
 
 
+# rozpracované = přehráno aspoň minutu a méně než tento podíl délky
+IN_PROGRESS_MIN = 60
+IN_PROGRESS_MAX = 0.92
+
+
 class Library(object):
-    def __init__(self, path):
+    def __init__(self, path, video_key=None, prefer_ref=None):
+        """``video_key(id)`` → klíč, podle kterého se poznají dvě ID téhož videa
+        (Přehraj.to: hash); ``prefer_ref(nové, staré)`` → které ID si nechat."""
         self.path = path
+        self.video_key = video_key or (lambda vid: vid)
+        self.prefer_ref = prefer_ref or (lambda new, old: old)
         self.conn = sqlite3.connect(path, timeout=20)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
-        self.conn.execute("INSERT OR IGNORE INTO settings_kv(k, v) VALUES ('schema', ?)",
+        self._migrate()
+        self.conn.execute("INSERT OR REPLACE INTO settings_kv(k, v) VALUES ('schema', ?)",
                           (str(SCHEMA_VERSION),))
         self.conn.commit()
+
+    def _migrate(self):
+        cols = [r[1] for r in self.conn.execute("PRAGMA table_info(videos)")]
+        if "vkey" not in cols:
+            self.conn.execute("ALTER TABLE videos ADD COLUMN vkey TEXT DEFAULT ''")
+        if "size" not in cols:
+            self.conn.execute("ALTER TABLE videos ADD COLUMN size TEXT DEFAULT ''")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_vkey ON videos(vkey)")
+        for (vid,) in self.conn.execute("SELECT id FROM videos WHERE vkey IS NULL OR vkey=''").fetchall():
+            self.conn.execute("UPDATE videos SET vkey=? WHERE id=?", (self.video_key(vid), vid))
+        # duplicity z dřívějška (stejné video pod dvěma ID) – nech jedno
+        dupes = self.conn.execute(
+            "SELECT vkey FROM videos WHERE vkey != '' GROUP BY vkey HAVING COUNT(*) > 1").fetchall()
+        for (vkey,) in dupes:
+            ids = [r[0] for r in self.conn.execute(
+                "SELECT id FROM videos WHERE vkey=? ORDER BY added_at", (vkey,)).fetchall()]
+            keep = ids[0]
+            for other in ids[1:]:
+                keep = self.prefer_ref(other, keep)
+            for other in ids:
+                if other != keep:
+                    self._merge_into(other, keep)
+        self.conn.commit()
+
+    def _merge_into(self, old, new):
+        """Smaže řádek ``old`` a jeho vazby převede na ``new``."""
+        self.conn.execute("UPDATE OR IGNORE collection_items SET target=? WHERE target=?",
+                          ("v:" + new, "v:" + old))
+        self.conn.execute("DELETE FROM collection_items WHERE target=?", ("v:" + old,))
+        self.conn.execute("UPDATE OR IGNORE history SET vid=? WHERE vid=?", (new, old))
+        self.conn.execute("DELETE FROM history WHERE vid=?", (old,))
+        self.conn.execute("DELETE FROM videos WHERE id=?", (old,))
+
+    def _rename_video(self, old, new):
+        self.conn.execute("UPDATE videos SET id=? WHERE id=?", (new, old))
+        self.conn.execute("UPDATE OR IGNORE collection_items SET target=? WHERE target=?",
+                          ("v:" + new, "v:" + old))
+        self.conn.execute("UPDATE OR IGNORE history SET vid=? WHERE vid=?", (new, old))
 
     def close(self):
         self.conn.close()
@@ -141,13 +197,32 @@ class Library(object):
     def get_video(self, vid):
         return _row(self.conn.execute("SELECT * FROM videos WHERE id=?", (vid,)).fetchone())
 
+    def find_video(self, vid):
+        """Video podle ID, nebo podle klíče (stejné video pod jiným tvarem ID)."""
+        v = self.get_video(vid)
+        if v is None:
+            v = _row(self.conn.execute("SELECT * FROM videos WHERE vkey=? LIMIT 1",
+                                       (self.video_key(vid),)).fetchone())
+        return v
+
     def upsert_video(self, vid, raw_title, source, parsed, duration=0, thumb="", description="",
-                     now=None):
+                     now=None, size="", quality=""):
         """Vloží nebo aktualizuje video. Vrací True, pokud je nové."""
         now = now or int(time.time())
-        existing = self.get_video(vid)
+        existing = self.find_video(vid)
+        if existing and existing["id"] != vid:
+            # stejné video pod jiným ID (např. ruční odkaz bez čísla videa) – sluč
+            keep = self.prefer_ref(vid, existing["id"])
+            if keep == vid:
+                self._rename_video(existing["id"], vid)
+                existing["id"] = vid
+            vid = existing["id"]
         if existing:
             updates = {"last_seen": now}
+            if size and not existing.get("size"):
+                updates["size"] = size
+            if quality and not existing["quality"]:
+                updates["quality"] = quality
             if duration and not existing["duration"]:
                 updates["duration"] = duration
             if thumb and not existing["thumb"]:
@@ -159,6 +234,8 @@ class Library(object):
                 updates["source"] = source
             if not existing["locked"] and raw_title and raw_title != existing["raw_title"]:
                 updates.update(self._parsed_fields(raw_title, parsed))
+                if not updates["quality"]:
+                    updates["quality"] = quality or existing["quality"]
             sets = ", ".join("%s=?" % k for k in updates)
             self.conn.execute("UPDATE videos SET %s WHERE id=?" % sets, list(updates.values()) + [vid])
             self._ensure_meta_for_video(vid)
@@ -166,7 +243,10 @@ class Library(object):
             return False
         fields = self._parsed_fields(raw_title, parsed)
         fields.update({"id": vid, "source": source, "added_at": now, "last_seen": now,
-                       "duration": duration or 0, "thumb": thumb or "", "description": description or ""})
+                       "duration": duration or 0, "thumb": thumb or "", "description": description or "",
+                       "vkey": self.video_key(vid), "size": size or ""})
+        if quality and not fields["quality"]:
+            fields["quality"] = quality
         cols = ", ".join(fields)
         marks = ", ".join("?" for _ in fields)
         self.conn.execute("INSERT INTO videos (%s) VALUES (%s)" % (cols, marks), list(fields.values()))
@@ -222,6 +302,7 @@ class Library(object):
     def delete_video(self, vid):
         self.conn.execute("DELETE FROM videos WHERE id=?", (vid,))
         self.conn.execute("DELETE FROM collection_items WHERE target=?", ("v:" + vid,))
+        self.conn.execute("DELETE FROM history WHERE vid=?", (vid,))
         self.conn.commit()
         self.cleanup_meta()
 
@@ -246,7 +327,7 @@ class Library(object):
         return self.conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
 
     def clear(self):
-        for t in ("videos", "meta", "collection_items", "collections"):
+        for t in ("videos", "meta", "collection_items", "collections", "history"):
             self.conn.execute("DELETE FROM %s" % t)
         self.conn.commit()
 
@@ -494,6 +575,55 @@ class Library(object):
     def collections_containing(self, target):
         return [r[0] for r in self.conn.execute(
             "SELECT collection_id FROM collection_items WHERE target=?", (target,)).fetchall()]
+
+    # --- historie přehrávání -------------------------------------------------
+    def record_play(self, vid, position=0.0, total=0.0, started=False, now=None):
+        """Zapíše přehrávání. ``started`` = nové spuštění (zvýší počet přehrání)."""
+        now = now or int(time.time())
+        row = self.conn.execute("SELECT plays, total FROM history WHERE vid=?", (vid,)).fetchone()
+        if row is None:
+            self.conn.execute("INSERT INTO history(vid, last_played, position, total, plays) "
+                              "VALUES (?, ?, ?, ?, ?)", (vid, now, position, total, 1 if started else 0))
+        else:
+            self.conn.execute("UPDATE history SET last_played=?, position=?, total=?, plays=plays+? "
+                              "WHERE vid=?", (now, position, total or row["total"], 1 if started else 0, vid))
+        self.conn.commit()
+
+    def resume_points(self, vids=None):
+        """{vid: (pozice, délka)} jen pro rozkoukaná videa."""
+        q = ("SELECT vid, position, total FROM history WHERE position >= ? AND total > 0 "
+             "AND position < total * ?")
+        params = [IN_PROGRESS_MIN, IN_PROGRESS_MAX]
+        rows = self.conn.execute(q, params).fetchall()
+        out = dict((r[0], (r[1], r[2])) for r in rows)
+        if vids is not None:
+            vids = set(vids)
+            out = dict((k, v) for k, v in out.items() if k in vids)
+        return out
+
+    def watched(self, vids=None):
+        rows = self.conn.execute("SELECT vid FROM history WHERE total > 0 AND position >= total * ?",
+                                 (IN_PROGRESS_MAX,)).fetchall()
+        out = set(r[0] for r in rows)
+        return out & set(vids) if vids is not None else out
+
+    def history_videos(self, in_progress=False, limit=100):
+        q = ("SELECT v.*, h.last_played, h.position, h.total, h.plays FROM history h "
+             "JOIN videos v ON v.id = h.vid WHERE v.hidden = 0 ")
+        params = []
+        if in_progress:
+            q += "AND h.position >= ? AND h.total > 0 AND h.position < h.total * ? "
+            params += [IN_PROGRESS_MIN, IN_PROGRESS_MAX]
+        q += "ORDER BY h.last_played DESC LIMIT ?"
+        params.append(limit)
+        return [_row(r) for r in self.conn.execute(q, params).fetchall()]
+
+    def remove_history(self, vid=None):
+        if vid:
+            self.conn.execute("DELETE FROM history WHERE vid=?", (vid,))
+        else:
+            self.conn.execute("DELETE FROM history")
+        self.conn.commit()
 
     # --- historie hledání ----------------------------------------------------
     def add_search(self, query, keep=20):

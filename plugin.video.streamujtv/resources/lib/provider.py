@@ -10,7 +10,8 @@ from streamuj import (CHECK_BAD_LOGIN, CHECK_NO_PREMIUM, CHECK_PREMIUM, LoginErr
 
 __all__ = ["CHECK_BAD_LOGIN", "CHECK_NO_PREMIUM", "CHECK_PREMIUM", "LoginError", "QUALITY_LABEL",
            "QUALITY_ORDER", "USER_AGENT", "thumb_url", "video_page_url", "NAME", "ProviderError",
-           "make_client", "find_video_id", "premium_text"]
+           "make_client", "find_video_id", "premium_text", "incomplete_id", "video_key",
+           "prefer_ref", "diagnostics", "LINK_TTL"]
 
 NAME = "streamuj.tv"
 ProviderError = streamuj.StreamujError
@@ -34,3 +35,33 @@ def find_video_id(text):
 
 def premium_text(expiration):
     return expiration or "?"
+
+
+#: jak dlouho si pamatovat adresu streamu (s); 0 = nepamatovat. Adresy streamuj.tv
+#: obsahují časové razítko a jejich platnost není známá.
+LINK_TTL = 0
+
+
+def incomplete_id(vid):
+    return False
+
+
+def video_key(vid):
+    return vid
+
+
+def prefer_ref(new, old):
+    return old
+
+
+def diagnostics(client):
+    """Stránky účtu pro ladění: {název souboru: obsah}. Citlivé údaje maže plugin."""
+    client.login()
+    out = {}
+    for name, url in (("moje_videa.html", streamuj.BASE_URL + "my_videos"),
+                      ("profil.html", streamuj.BASE_URL + "my_profile")):
+        try:
+            out[name] = client._request(url)[0]
+        except streamuj.StreamujError as e:
+            out[name] = "CHYBA: %s" % e
+    return out

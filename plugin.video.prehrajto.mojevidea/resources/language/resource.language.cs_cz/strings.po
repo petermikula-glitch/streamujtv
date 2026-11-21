@@ -291,6 +291,18 @@ msgctxt "#30135"
 msgid "%d %% and more"
 msgstr "%d %% a více"
 
+msgctxt "#30136"
+msgid "Continue watching"
+msgstr "Rozkoukané"
+
+msgctxt "#30137"
+msgid "Recently played"
+msgstr "Naposledy přehrané"
+
+msgctxt "#30138"
+msgid "Remove from playback history"
+msgstr "Odebrat z historie přehrávání"
+
 msgctxt "#30200"
 msgid "Synchronize with Přehraj.to account"
 msgstr "Synchronizovat s účtem Přehraj.to"
@@ -384,8 +396,8 @@ msgid "Fill in your Přehraj.to login and password in the add-on settings first.
 msgstr "Nejdřív vyplň přihlašovací údaje k Přehraj.to v nastavení doplňku."
 
 msgctxt "#30223"
-msgid "Premium is active, remaining: %s"
-msgstr "Premium je aktivní, zbývá: %s"
+msgid "Premium is active, days remaining: %s"
+msgstr "Premium je aktivní, zbývá dní: %s"
 
 msgctxt "#30224"
 msgid "The account has no active premium – only the transcoded versions will play."
@@ -426,6 +438,26 @@ msgstr "nikdy"
 msgctxt "#30233"
 msgid "Update the Kodi video library now?"
 msgstr "Aktualizovat teď knihovnu videí v Kodi?"
+
+msgctxt "#30234"
+msgid "Save diagnostics (for troubleshooting)"
+msgstr "Uložit diagnostiku (pro ladění)"
+
+msgctxt "#30235"
+msgid "Choose a folder for the diagnostic files"
+msgstr "Vyber složku pro diagnostické soubory"
+
+msgctxt "#30236"
+msgid "Diagnostics saved to %s. Login, e-mail, tokens and hidden form fields were removed."
+msgstr "Diagnostika je uložená v %s. Přihlašovací údaje, e-mail, tokeny a skrytá pole formulářů byly odstraněny."
+
+msgctxt "#30237"
+msgid "Clear playback history"
+msgstr "Vymazat historii přehrávání"
+
+msgctxt "#30238"
+msgid "Clear the whole playback history?"
+msgstr "Vymazat celou historii přehrávání?"
 
 msgctxt "#30300"
 msgid "Assign ČSFD / TMDB…"

@@ -36,7 +36,14 @@ rozdíly jsou v sekci [Přehraj.to](#přehrajto--rozdíly).
   a s titulky, pokud je video má.
 - **Export do knihovny Kodi** (`.strm` + `.nfo` s hodnocením), takže se filmy a seriály
   objeví i v hlavní knihovně Kodi.
-- Ruční **import odkazů** (jeden odkaz, nebo textový soubor se seznamem odkazů).
+- Ruční **import odkazů** (jeden odkaz, nebo textový soubor se seznamem odkazů). Stejné video
+  přidané odkazem i synchronizací se v katalogu sloučí (kolekce i historie zůstanou).
+- **Rozkoukané a Naposledy přehrané** – služba na pozadí si pamatuje, kde jste ve videu
+  skončili; v seznamech (i ve filmech a dílech) Kodi nabídne pokračování, dokoukaná videa
+  jsou označená jako zhlédnutá.
+- **Diagnostika** (*Nástroje → Uložit diagnostiku*) – uloží stránky vašeho účtu do vybrané
+  složky, aby šel parser doladit podle skutečného webu. Jméno, e-mail, heslo, tokeny a skrytá
+  pole formulářů se z nich před uložením odstraní.
 
 ## Instalace
 
@@ -67,6 +74,12 @@ V *Nástroje → Stav účtu* ověříte přihlášení a platnost premia.
 - Přehrávání: s **Premium** se přehrává **originální soubor** (JSON API Přehraj.to, záložně
   stažení přes web), bez premia nebo při chybě nejlepší **překódovaná verze** (až 1080p).
   Titulky ze stránky videa se načtou automaticky.
+- U verzí filmu se zobrazuje **kvalita a velikost** souboru z výpisu nahraných videí.
+- Adresa souboru se **pamatuje 6 hodin** (podepsaný odkaz platí zhruba den), takže opakované
+  spuštění nebo pokračování ve sledování nechodí znovu na web.
+- Když Přehraj.to odpoví „příliš mnoho dotazů“ (HTTP 429), doplněk chvíli počká a zkusí to znovu.
+- U ručně vloženého odkazu se ze stránky videa dočte číslo videa (potřebuje ho rychlejší
+  stažení originálu přes API).
 - Přihlášení se ukládá (cookies v profilu doplňku) – každé nové přihlášení totiž na Přehraj.to
   zakládá další záznam ve „Správě přihlášených zařízení“.
 - Oblíbená videa a playlisty Přehraj.to nemá, volby v nastavení proto chybí.

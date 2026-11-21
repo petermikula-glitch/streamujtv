@@ -43,8 +43,21 @@ class Monitor(object):
 
 
 class Player(object):
+    PLAYING = False
+    TIME = 0.0
+    TOTAL = 0.0
+
+    def __init__(self):
+        pass
+
     def isPlayingVideo(self):
-        return False
+        return Player.PLAYING
+
+    def getTime(self):
+        return Player.TIME
+
+    def getTotalTime(self):
+        return Player.TOTAL
 
 
 class Actor(object):

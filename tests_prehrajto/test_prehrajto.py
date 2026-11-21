@@ -202,3 +202,119 @@ def test_live_bad_login():
     with pytest.raises(prehrajto.LoginError):
         c.login()
     assert c.check_user() == (prehrajto.CHECK_BAD_LOGIN, None)
+
+
+# --- vylepšení 1.2 ---------------------------------------------------------------
+
+def test_retry_after_429():
+    c = Fake({})
+    calls = []
+    sleeps = []
+
+    def once(url, data=None, headers=None, follow=True):
+        calls.append(url)
+        if len(calls) == 1:
+            raise prehrajto.RateLimited(3)
+        return "ok", url, "", 200
+    c._request_once = once
+    c.sleep = sleeps.append
+    assert prehrajto.PrehrajtoClient._request(c, "/neco")[0] == "ok"
+    assert sleeps == [3] and len(calls) == 2
+
+
+def test_retry_gives_up():
+    c = Fake({})
+    c._request_once = lambda *a, **k: (_ for _ in ()).throw(prehrajto.RateLimited(0))
+    c.sleep = lambda s: None
+    with pytest.raises(prehrajto.PrehrajtoError):
+        prehrajto.PrehrajtoClient._request(c, "/neco")
+
+
+def test_video_info_completes_ref():
+    page = fixture("video_synthetic.html").replace("<body>", '<body><div data-video-id="1234567"></div>')
+    c = Fake({"/pelisky/4f9a1b2c3d4e5f60": (page, None, "", 200)})
+    info = c.video_info(":pelisky:4f9a1b2c3d4e5f60")
+    assert info["id"] == "1234567:pelisky:4f9a1b2c3d4e5f60"
+
+
+def test_provider_keys():
+    assert provider.video_key(REF) == provider.video_key(":x:4f9a1b2c3d4e5f60")
+    assert provider.prefer_ref(REF, ":pelisky:4f9a1b2c3d4e5f60") == REF
+    assert provider.prefer_ref(":pelisky:4f9a1b2c3d4e5f60", REF) == REF
+    assert provider.incomplete_id(":a:4f9a1b2c3d4e5f60") and not provider.incomplete_id(REF)
+
+
+def _lib(tmp_path):
+    from db import Library
+    return Library(str(tmp_path / "c.db"), video_key=provider.video_key, prefer_ref=provider.prefer_ref)
+
+
+def test_manual_link_then_sync_merges(tmp_path):
+    import catalog
+    lib = _lib(tmp_path)
+
+    class C(object):
+        def video_info(self, ref):
+            return {"id": ref, "title": "Pelíšky (1999)"}  # číslo videa stránka neprozradila
+
+        def my_videos(self, progress=None):
+            return prehrajto.parse_video_list(fixture("uploads_synthetic.html"))
+    catalog.import_links(C(), lib, [(":pelisky:4f9a1b2c3d4e5f60", "")])
+    cid = lib.create_collection("Chci vidět")
+    lib.add_to_collection(cid, "v::pelisky:4f9a1b2c3d4e5f60")
+    lib.record_play(":pelisky:4f9a1b2c3d4e5f60", 600, 1000)
+    catalog.sync_account(C(), lib)
+    assert lib.count_videos() == 2  # Pelíšky jen jednou + Hra o trůny
+    v = lib.get_video(REF)
+    assert v is not None and v["size"] == "4.2 GB" and v["quality"] == "1080p"
+    assert lib.collection_targets(cid) == ["v:" + REF]
+    assert lib.resume_points() == {REF: (600, 1000)}
+
+
+def test_sync_then_manual_link_is_existing(tmp_path):
+    import catalog
+    lib = _lib(tmp_path)
+
+    class C(object):
+        def video_info(self, ref):
+            return {"id": ref, "title": "x"}
+
+        def my_videos(self, progress=None):
+            return prehrajto.parse_video_list(fixture("uploads_synthetic.html"))
+    catalog.sync_account(C(), lib)
+    stats = catalog.import_links(C(), lib, [(":jiny-nazev:4f9a1b2c3d4e5f60", "")])
+    assert stats["existing"] == 1 and lib.count_videos() == 2
+    assert lib.get_video(REF) is not None
+
+
+def test_existing_duplicates_merged_on_open(tmp_path):
+    from db import Library
+    path = str(tmp_path / "d.db")
+    plain = Library(path)  # bez klíče – duplicity vzniknou
+    import nameparser
+    plain.upsert_video(":pelisky:4f9a1b2c3d4e5f60", "Pelíšky", "manual", nameparser.parse("Pelíšky"))
+    plain.upsert_video(REF, "Pelíšky", "account", nameparser.parse("Pelíšky"))
+    plain.conn.execute("UPDATE videos SET vkey=''")
+    plain.conn.commit()
+    plain.close()
+    lib = Library(path, video_key=provider.video_key, prefer_ref=provider.prefer_ref)
+    assert [r[0] for r in lib.conn.execute("SELECT id FROM videos")] == [REF]
+
+
+def test_play_uses_link_cache(plugin, monkeypatch):
+    import xbmcplugin
+    calls = []
+
+    def streams(self, ref):
+        calls.append(ref)
+        return [{"lang": "", "quality": "ORIG", "url": "orig:" + ref, "subtitles": {}}], ""
+    monkeypatch.setattr(prehrajto.PrehrajtoClient, "get_streams", streams)
+    monkeypatch.setattr(prehrajto.PrehrajtoClient, "resolve", lambda self, u: "https://cdn/orig.mkv")
+    for _ in range(2):
+        plugin.run(["plugin://plugin.video.prehrajto.mojevidea/", "1", "?action=play&vid=" + REF])
+        assert xbmcplugin.RESOLVED[-1][1].path.startswith("https://cdn/orig.mkv|")
+    assert len(calls) == 1  # podruhé z paměti
+
+
+def test_version_label_shows_size(plugin):
+    assert plugin._version_label({"lang": "", "quality": "1080p", "size": "4.2 GB"}) == "1080p · 4.2 GB"

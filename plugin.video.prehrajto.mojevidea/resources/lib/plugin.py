@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Router a obrazovky doplňku."""
+import json
 import sys
 import time
 import urllib.parse
@@ -32,8 +33,40 @@ def url_for(action, **params):
         dict((k, v) for k, v in params.items() if v is not None and v != ""))
 
 
+PLAYING_PROPERTY = ADDON_ID + ".playing"
+
+
 def open_library():
-    return Library(profile_path("catalog.db"))
+    return Library(profile_path("catalog.db"), video_key=provider.video_key, prefer_ref=provider.prefer_ref)
+
+
+_PLAYBACK = {}
+
+
+def _playback_state():
+    """{"resume": {vid: (pozice, délka)}, "watched": set()} – načte se jednou za běh."""
+    if not _PLAYBACK:
+        with open_library() as lib:
+            _PLAYBACK["resume"] = lib.resume_points()
+            _PLAYBACK["watched"] = lib.watched()
+    return _PLAYBACK
+
+
+def _apply_playback(li, vid):
+    state = _playback_state()
+    point = state["resume"].get(vid)
+    if KODI_MAJOR >= 20:
+        tag = li.getVideoInfoTag()
+        if point:
+            tag.setResumePoint(float(point[0]), float(point[1]))
+        if vid in state["watched"]:
+            tag.setPlaycount(1)
+    else:
+        if point:
+            li.setProperty("ResumeTime", str(int(point[0])))
+            li.setProperty("TotalTime", str(int(point[1])))
+        if vid in state["watched"]:
+            li.setInfo("video", {"playcount": 1})
 
 
 def make_client():
@@ -164,7 +197,10 @@ def _meta_context(meta, collection_id=None):
 
 def _video_context(video):
     vid = video["id"]
-    return [
+    items = []
+    if video.get("last_played"):
+        items.append((_(30138), "RunPlugin(%s)" % url_for("history_remove", vid=vid)))
+    return items + [
         (_(30325), "RunPlugin(%s)" % url_for("video_info", vid=vid)),
         (_(30302), "RunPlugin(%s)" % url_for("video_edit", vid=vid)),
         (_(30304) if video.get("hidden") else _(30303),
@@ -174,7 +210,7 @@ def _video_context(video):
 
 
 def _version_label(video):
-    parts = [p for p in (video.get("lang"), video.get("quality")) if p]
+    parts = [p for p in (video.get("lang"), video.get("quality"), video.get("size")) if p]
     return " · ".join(parts)
 
 
@@ -200,6 +236,7 @@ def add_movie(meta, collection_id=None):
     li.addContextMenuItems(_meta_context(meta, collection_id))
     if count == 1:
         li.setProperty("IsPlayable", "true")
+        _apply_playback(li, meta["first_video"])
         xbmcplugin.addDirectoryItem(HANDLE, url_for("play", vid=meta["first_video"]), li, False)
     else:
         xbmcplugin.addDirectoryItem(HANDLE, url_for("versions", key=meta["key"]), li, True)
@@ -241,6 +278,7 @@ def add_video(video, meta=None, label=None, mediatype="video"):
     _set_info(li, info, meta.get("cast") if meta else None)
     _art(li, meta.get("poster") if meta else "", video.get("thumb"), meta.get("fanart") if meta else "")
     li.setProperty("IsPlayable", "true")
+    _apply_playback(li, video["id"])
     li.addContextMenuItems(_video_context(video))
     xbmcplugin.addDirectoryItem(HANDLE, url_for("play", vid=video["id"]), li, False)
 
@@ -285,6 +323,8 @@ def root(params):
     add_dir(_(30101), "shows_menu", "DefaultTVShows.png")
     add_dir(_(30104), "recent", "DefaultRecentlyAddedMovies.png")
     add_dir(_(30134), "all_videos", "DefaultVideo.png")
+    add_dir(_(30136), "in_progress", "DefaultInProgressShows.png")
+    add_dir(_(30137), "played", "DefaultRecentlyAddedEpisodes.png")
     add_dir(_(30102), "search_menu", "DefaultAddonsSearch.png")
     add_dir(_(30103), "collections", "DefaultSets.png")
     add_dir(_(30105), "unmatched", "DefaultVideoDeleted.png")
@@ -440,6 +480,53 @@ def all_videos(params):
     _video_list(lambda lib: lib.all_videos(),
                 [xbmcplugin.SORT_METHOD_LABEL_IGNORE_THE, xbmcplugin.SORT_METHOD_DATEADDED,
                  xbmcplugin.SORT_METHOD_VIDEO_YEAR, xbmcplugin.SORT_METHOD_VIDEO_RATING])
+
+
+def in_progress(params):
+    """Rozkoukaná videa – pokračování tam, kde se skončilo."""
+    _video_list(lambda lib: lib.history_videos(in_progress=True), [xbmcplugin.SORT_METHOD_UNSORTED])
+
+
+def played(params):
+    _video_list(lambda lib: lib.history_videos(), [xbmcplugin.SORT_METHOD_UNSORTED])
+
+
+def history_remove(params):
+    with open_library() as lib:
+        lib.remove_history(params.get("vid"))
+    xbmc.executebuiltin("Container.Refresh")
+
+
+def history_clear(params):
+    if yesno(_(30238)):
+        with open_library() as lib:
+            lib.remove_history()
+
+
+def diagnostics(params):
+    """Uloží stránky účtu (bez přihlašovacích údajů) pro ladění parseru."""
+    if not _require_credentials():
+        return
+    folder = xbmcgui.Dialog().browse(3, _(30235), "files")
+    if not folder:
+        return
+    try:
+        pages = provider.diagnostics(make_client())
+    except provider.ProviderError as e:
+        ok(_(30328) % e)
+        return
+    secrets = [setting("username"), setting("password")]
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    sep = "\\" if "\\" in folder and "/" not in folder else "/"
+    base = folder.rstrip("/\\") + sep + "diagnostika-%s-%s" % (ADDON_ID, stamp)
+    xbmcvfs.mkdirs(base)
+    for name, content in pages.items():
+        f = xbmcvfs.File(base + sep + name, "w")
+        try:
+            f.write(catalog.sanitize(content, secrets))
+        finally:
+            f.close()
+    ok(_(30236) % base)
 
 
 def _video_list(load, sorts):
@@ -618,6 +705,8 @@ def tools(params):
     add_action(_(30205), "account_status", "DefaultUser.png")
     add_action(_(30209), "stats", "DefaultIconInfo.png")
     add_action(_(30204), "refresh_all", "DefaultAddonInfoProvider.png")
+    add_action(_(30237), "history_clear", "DefaultIconError.png")
+    add_action(_(30234), "diagnostics", "DefaultIconInfo.png")
     add_action(_(30207), "clear_library", "DefaultIconError.png")
     add_action(_(30208), "settings", "DefaultAddonProgram.png")
     end(cache=False)
@@ -993,8 +1082,34 @@ def _pick_stream(streams):
     return sorted(streams, key=score)[0]
 
 
+def _link_cache_get(vid):
+    if not provider.LINK_TTL or setting_bool("ask_stream"):
+        return None
+    with open_library() as lib:
+        raw = lib.get_kv("link:" + vid)
+    try:
+        data = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    if data and time.time() - data.get("ts", 0) < provider.LINK_TTL:
+        return data
+    return None
+
+
+def _link_cache_put(vid, final, subtitles):
+    if not provider.LINK_TTL:
+        return
+    with open_library() as lib:
+        lib.set_kv("link:" + vid, json.dumps({"url": final, "subtitles": subtitles, "ts": int(time.time())}))
+
+
 def play(params):
     vid = params["vid"]
+    cached = _link_cache_get(vid)
+    if cached:
+        log("play %s: adresa z paměti" % vid)
+        _resolved(vid, cached["url"], cached.get("subtitles") or {})
+        return
     client = make_client()
     try:
         streams, message = client.get_streams(vid)
@@ -1012,12 +1127,19 @@ def play(params):
         notify(_(30323) % e, time_ms=8000)
         xbmcplugin.setResolvedUrl(HANDLE, False, xbmcgui.ListItem())
         return
+    _link_cache_put(vid, final, stream.get("subtitles") or {})
+    _resolved(vid, final, stream.get("subtitles") or {})
+
+
+def _resolved(vid, final, subtitles):
     li = xbmcgui.ListItem(path=final + "|User-Agent=" + urllib.parse.quote(provider.USER_AGENT))
     if final.split("?")[0].lower().endswith(".mp4"):
         li.setMimeType("video/mp4")
         li.setContentLookup(False)
-    if setting_bool("subtitles") and stream.get("subtitles"):
-        li.setSubtitles(list(stream["subtitles"].values()))
+    if setting_bool("subtitles") and subtitles:
+        li.setSubtitles(list(subtitles.values()))
+    # služba na pozadí podle toho zapisuje, kde se ve videu skončilo
+    xbmcgui.Window(10000).setProperty(PLAYING_PROPERTY, vid)
     xbmcplugin.setResolvedUrl(HANDLE, True, li)
 
 
@@ -1035,7 +1157,8 @@ ROUTES = {
     "stats": stats, "clear_library": clear_library, "export_library": export_library,
     "settings": open_settings, "meta_assign": meta_assign, "meta_refresh": meta_refresh,
     "video_edit": video_edit, "video_hide": video_hide, "video_delete": video_delete,
-    "video_info": video_info, "play": play,
+    "video_info": video_info, "play": play, "in_progress": in_progress, "played": played,
+    "history_remove": history_remove, "history_clear": history_clear, "diagnostics": diagnostics,
 }
 
 

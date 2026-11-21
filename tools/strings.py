@@ -80,6 +80,9 @@ STRINGS = {
             "Katalog je prázdný. Spusť synchronizaci s účtem v Nástrojích nebo importuj odkazy."),
     30133: ("%d videos", "Počet videí: %d"),
     30134: ("All videos", "Všechna videa"),
+    30136: ("Continue watching", "Rozkoukané"),
+    30137: ("Recently played", "Naposledy přehrané"),
+    30138: ("Remove from playback history", "Odebrat z historie přehrávání"),
     30135: ("%d %% and more", "%d %% a více"),
     # --- nástroje ---
     30200: ("Synchronize with {svc} account", "Synchronizovat s účtem {svc}"),
@@ -127,6 +130,12 @@ STRINGS = {
     30231: ("Last synchronization: %s", "Poslední synchronizace: %s"),
     30232: ("never", "nikdy"),
     30233: ("Update the Kodi video library now?", "Aktualizovat teď knihovnu videí v Kodi?"),
+    30234: ("Save diagnostics (for troubleshooting)", "Uložit diagnostiku (pro ladění)"),
+    30235: ("Choose a folder for the diagnostic files", "Vyber složku pro diagnostické soubory"),
+    30236: ("Diagnostics saved to %s. Login, e-mail, tokens and hidden form fields were removed.",
+            "Diagnostika je uložená v %s. Přihlašovací údaje, e-mail, tokeny a skrytá pole formulářů byly odstraněny."),
+    30237: ("Clear playback history", "Vymazat historii přehrávání"),
+    30238: ("Clear the whole playback history?", "Vymazat celou historii přehrávání?"),
     # --- úpravy ---
     30300: ("Assign ČSFD / TMDB…", "Přiřadit ČSFD / TMDB…"),
     30301: ("Refresh metadata", "Obnovit metadata"),
@@ -188,7 +197,7 @@ ADDONS = {
     "plugin.video.prehrajto.mojevidea": {"svc": "Přehraj.to", "name": "Prehraj.to", "overrides": {
         30001: ("E-mail", "E-mail"),
         30006: ("Premium (filled by account check)", "Premium (vyplní ověření účtu)"),
-        30223: ("Premium is active, remaining: %s", "Premium je aktivní, zbývá: %s"),
+        30223: ("Premium is active, days remaining: %s", "Premium je aktivní, zbývá dní: %s"),
         30224: ("The account has no active premium – only the transcoded versions will play.",
                 "Účet nemá aktivní premium – přehrají se jen překódované verze."),
     }},
