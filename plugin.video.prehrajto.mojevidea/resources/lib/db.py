@@ -8,6 +8,7 @@ from nameparser import movie_key, normalize, parse, show_key, title_key
 
 SCHEMA_VERSION = 8
 BACKUP_VERSION = 1
+MAX_SQL_KEYS = 500  # SQLite před 3.32 dovolí nejvýš 999 parametrů v jednom dotazu
 OPTIONAL_BACKUP_TABLES = ("watchlist", "watched_marks", "progress_hidden", "saved_movie_filters",
                           "episode_additions", "episode_visits")
 BACKUP_TABLES = ("videos", "meta", "collections", "collection_items", "history", "search_history",
@@ -750,6 +751,12 @@ class Library(object):
                order="title", limit=None, keys=None, offset=0):
         if keys is not None and not keys:
             return []
+        if keys is not None and len(keys) > MAX_SQL_KEYS:
+            # Starší SQLite dovolí jen 999 parametrů: vybrat vše a klíče porovnat tady.
+            wanted = set(keys)
+            rows = [m for m in self.movies(genre, year_from, year_to, min_rating, country, order)
+                    if m["key"] in wanted]
+            return rows[max(0, int(offset)):][:int(limit)] if limit else rows
         where, params = self._movie_where(genre, year_from, year_to, min_rating, country, keys)
         q = self._MOVIE_SELECT + "WHERE " + where + " GROUP BY m.key "
         q += self._order(order)
@@ -776,6 +783,10 @@ class Library(object):
         if keys is not None:
             if not keys:
                 return []
+            if len(keys) > MAX_SQL_KEYS:
+                wanted = set(keys)
+                rows = [m for m in self.shows(genre, min_rating, order) if m["key"] in wanted]
+                return rows[:int(limit)] if limit else rows
             where.append("m.key IN (%s)" % ",".join("?" for _ in keys))
             params.extend(keys)
         q = (self._MOVIE_SELECT.replace("MIN(v.id) AS first_video",

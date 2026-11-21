@@ -77,6 +77,33 @@ def indexed_links(folder, state_file, addon_id, vids=None, with_history=False):
             offset = end
 
 
+def remove_items(paths):
+    """Odebere z knihovny Kodi položky, jejichž exportovaný soubor doplněk právě smazal.
+    (Aktualizace knihovny v Kodi chybějící soubory sama neodstraní.) Vrací počet."""
+    wanted = {_path_key(path) for path in paths}
+    removed = 0
+    if not wanted:
+        return removed
+    for kind, method, key in MEDIA:
+        offset = 0
+        found = []
+        while True:
+            result = rpc("VideoLibrary.Get" + method + "s", properties=["file"],
+                         limits={"start": offset, "end": offset + 250},
+                         sort={"method": "file", "order": "ascending"})
+            items = result.get(key, [])
+            found += [item[kind + "id"] for item in items if item.get("file") and _path_key(item["file"]) in wanted]
+            limits = result.get("limits") or {}
+            end = limits.get("end", offset + len(items))
+            if not items or end <= offset or end >= limits.get("total", end):
+                break
+            offset = end
+        for item_id in found:
+            rpc("VideoLibrary.Remove" + method, **{kind + "id": item_id})
+            removed += 1
+    return removed
+
+
 def _native_history(item):
     resume = item.get("resume") or {}
     total = float(resume.get("total") or 0)

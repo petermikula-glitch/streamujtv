@@ -227,3 +227,65 @@ def test_rewatching_a_watched_film_keeps_its_resume_point(plugin, monkeypatch):
         lib.record_play(REF, 1500, 6200, now=now - 60)
         lib.set_watched([REF], True)
         assert lib.resume_points() == {}
+
+
+def test_export_removes_files_of_titles_that_left_the_catalogue(plugin, monkeypatch, tmp_path):
+    import json
+
+    import xbmc
+    import xbmcaddon
+
+    root = tmp_path / "kodi-export"
+    xbmcaddon.SETTINGS.update(library_path=str(root), library_auto_export="true", remove_missing="true")
+    episode = "2:episode:bbbbbbbbbbbbbbbb"
+    kept = "4:film:dddddddddddddddd"
+
+    class Client:
+        listing_complete = True
+        videos = [{"id": REF, "title": "Pelisky.1999.CZ", "duration": 6000},
+                  {"id": kept, "title": "Samotari.2000.CZ", "duration": 6000},
+                  {"id": episode, "title": "Archa.S01E01.CZ", "duration": 2880}]
+
+        def my_videos(self, progress):
+            return self.videos
+
+    client = Client()
+    monkeypatch.setattr(plugin.ui, "make_client", lambda: client)
+    plugin.run_sync(background=True)
+    gone = root / "Filmy" / "Pelisky (1999)"
+    edited = root / "Filmy" / "Samotari (2000)" / "Samotari (2000).nfo"
+    old_episode = root / "Serialy" / "Archa" / "Season 01" / "Archa S01E01.strm"
+    assert (gone / "Pelisky (1999).strm").exists() and old_episode.exists()
+
+    library = {"movies": [{"movieid": 5, "file": str(gone / "Pelisky (1999).strm")},
+                          {"movieid": 6, "file": str(root / "Filmy" / "Samotari (2000)" / "Samotari (2000).strm")}],
+               "episodes": [{"episodeid": 9, "file": str(old_episode)}]}
+    removed = []
+
+    def execute(raw):
+        request = json.loads(raw)
+        method, params = request["method"], request["params"]
+        if method.startswith("VideoLibrary.Remove"):
+            removed.append((method, params))
+            return json.dumps({"jsonrpc": "2.0", "id": 1, "result": "OK"})
+        key = "movies" if method == "VideoLibrary.GetMovies" else "episodes"
+        return json.dumps({"jsonrpc": "2.0", "id": 1, "result": {key: library[key]}})
+
+    monkeypatch.setattr(xbmc, "executeJSONRPC", execute, raising=False)
+    # film zmizel z účtu, díl byl přečíslován, do .nfo druhého filmu někdo ručně zasáhl a i ten zmizel
+    edited.write_text(edited.read_text() + "<!-- moje poznámka -->")
+    client.videos = [{"id": episode, "title": "Archa.S01E05.CZ", "duration": 2880}]
+    plugin.run_sync(background=True)
+
+    assert not gone.exists()                                  # soubory i prázdná složka titulu jsou pryč
+    assert not old_episode.exists()
+    assert (root / "Serialy" / "Archa" / "Season 01" / "Archa S01E05.strm").exists()
+    assert edited.exists()                                    # ručně upravený soubor zůstává
+    assert not edited.with_suffix(".strm").exists()
+    assert sorted((method, sorted(params.items())) for method, params in removed) == [
+        ("VideoLibrary.RemoveEpisode", [("episodeid", 9)]),
+        ("VideoLibrary.RemoveMovie", [("movieid", 5)]),
+        ("VideoLibrary.RemoveMovie", [("movieid", 6)])]
+    removed.clear()
+    plugin.run_sync(background=True)                          # nic dalšího se nemaže
+    assert not removed and edited.exists()

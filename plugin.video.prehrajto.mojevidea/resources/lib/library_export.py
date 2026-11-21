@@ -15,7 +15,8 @@ import xbmcvfs
 from exporter import _join, _nfo, _play_url, _safe
 
 ExportResult = namedtuple(
-    "ExportResult", "movies shows changed protected failed folder generation scan_pending")
+    "ExportResult", "movies shows changed protected failed folder generation scan_pending removed",
+    defaults=((),))
 
 
 def _connect(state_file):
@@ -148,6 +149,35 @@ def _replace_file(directory, path, content, existed):
             xbmcvfs.delete(temporary) if remote else os.unlink(temporary)
 
 
+def _remove_stale(folder, local, files, owned):
+    """Smaže soubory, které doplněk dříve vytvořil a jejichž titul už v katalogu není
+    (smazané video, přečíslovaný díl, opravený název). Soubor, který mezitím někdo
+    upravil, zůstane na místě a doplněk ho přestane považovat za svůj."""
+    removed = []
+    for relative in [name for name in owned if name not in files]:
+        directory, _, filename = relative.rpartition("/")
+        directory = _join(folder, *directory.split("/"))
+        path = _join(directory, filename)
+        try:
+            if local and (os.path.islink(path) or os.path.commonpath(
+                    (folder, os.path.realpath(directory))) != folder):
+                continue
+            if xbmcvfs.exists(path):
+                if sha256(_read(path).encode("utf-8")).hexdigest() == owned[relative]:
+                    if not xbmcvfs.delete(path):
+                        continue  # zkusí se znovu při příštím exportu
+                    removed.append(path)
+            del owned[relative]
+            while len(directory) > len(folder):  # prázdné složky titulu a série
+                folders, names = xbmcvfs.listdir(directory + "/")
+                if folders or names or not xbmcvfs.rmdir(directory + "/"):
+                    break
+                directory = directory.rpartition("/")[0] if "://" in directory else os.path.dirname(directory)
+        except (OSError, RuntimeError, ValueError):
+            continue
+    return removed
+
+
 def export(lib, folder, base_url, state_file):
     folder = export_folder(folder)
     local = "://" not in folder
@@ -182,13 +212,16 @@ def export(lib, folder, base_url, state_file):
                     links[relative] = parse_qs(urlsplit(content).query)["vid"][0]
             except (OSError, RuntimeError, ValueError):
                 failed += 1
+        removed = _remove_stale(folder, local, files, owned)
+        changed += len(removed)
         generation += int(changed > 0 or (row is None and bool(owned)))
         state.execute("INSERT OR REPLACE INTO exports VALUES (?, ?, ?, ?, ?)",
                       (folder, json.dumps(names), json.dumps(owned), generation, scanned))
         state.execute("DELETE FROM exported_streams WHERE folder=?", (folder,))
         state.executemany("INSERT INTO exported_streams VALUES (?, ?, ?)",
                           ((folder, relative, vid) for relative, vid in links.items()))
-    return ExportResult(movies, shows, changed, protected, failed, folder, generation, generation > scanned)
+    return ExportResult(movies, shows, changed, protected, failed, folder, generation, generation > scanned,
+                        tuple(path for path in removed if path.endswith(".strm")))
 
 
 def mark_scanned(state_file, result):

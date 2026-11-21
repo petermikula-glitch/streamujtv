@@ -22,6 +22,11 @@ def _export_to_kodi(folder, automatic=False, prompt_scan=True):
             result = library_export.export(lib, folder, "plugin://%s/" % ADDON_ID, state_file)
         if result.failed:
             notify(_(30461) % result.failed, time_ms=8000)
+        if result.removed:
+            try:
+                kodi_library.remove_items(result.removed)
+            except kodi_library.KodiLibraryError:
+                log_error("položky smazaných souborů se z knihovny Kodi nepodařilo odebrat")
         if result.protected and not automatic:
             notify(_(30462) % result.protected, time_ms=8000)
         if not automatic:

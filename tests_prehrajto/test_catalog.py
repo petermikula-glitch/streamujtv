@@ -379,3 +379,21 @@ def test_yearless_film_lookup_uses_the_index(tmp_path):
             "EXPLAIN QUERY PLAN SELECT key FROM meta WHERE kind='movie' AND key > ? AND key < ? AND key != ?",
             ("movie:a|", "movie:a|￿", "x")))
         assert "SEARCH" in plan
+
+
+def test_large_key_sets_do_not_exceed_sqlite_parameter_limit(tmp_path):
+    import db
+    import nameparser
+    with db.Library(str(tmp_path / "c.db")) as lib, lib.conn:
+        for i in range(12):
+            raw = "Film %02d %d CZ" % (i, 1990 + i)
+            lib.upsert_video("%d:f:%016x" % (i + 1, i + 1), raw, "account", nameparser.parse(raw))
+            raw = "Serial %02d S01E01 CZ" % i
+            lib.upsert_video("%d:s:%016x" % (i + 100, i + 100), raw, "account", nameparser.parse(raw))
+        lib.conn.setlimit(__import__("sqlite3").SQLITE_LIMIT_VARIABLE_NUMBER, 999) \
+            if hasattr(lib.conn, "setlimit") else None
+        keys = [m["key"] for m in lib.movies()] + ["movie:neexistuje %d|" % i for i in range(1500)]
+        assert [m["key"] for m in lib.movies(keys=keys)] == [m["key"] for m in lib.movies()]
+        assert len(lib.movies(keys=keys, limit=5, offset=10)) == 2
+        show_keys = [m["key"] for m in lib.shows()] + ["show:neexistuje %d" % i for i in range(1500)]
+        assert len(lib.shows(keys=show_keys)) == 12

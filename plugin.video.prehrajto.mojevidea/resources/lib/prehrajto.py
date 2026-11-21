@@ -40,6 +40,7 @@ USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like G
               "Chrome/130.0 Safari/537.36")
 TIMEOUT = 30
 UPLOADS_PATH = "/profil/nahrana-videa"
+MAX_LISTING_PAGES = 1000  # pojistka proti nekonečnému stránkování; výpis nad limit se hlásí jako neúplný
 
 QUALITY_ORDER = ("ORIG", "UHD", "FHD", "HD", "SD")
 QUALITY_LABEL = {"ORIG": "originál", "UHD": "2160p", "FHD": "1080p", "HD": "720p", "SD": "480p"}
@@ -683,7 +684,7 @@ class PrehrajtoClient(object):
         return CHECK_NO_PREMIUM, None
 
     # --- výpisy -------------------------------------------------------------
-    def fetch_listing(self, start_url, max_pages=200, progress=None, delay=0.5):
+    def fetch_listing(self, start_url, max_pages=MAX_LISTING_PAGES, progress=None, delay=0.5):
         self.listing_complete = False
         start_url = start_url if start_url.startswith("http") else BASE + start_url
         start_parts = urllib.parse.urlsplit(start_url)
@@ -711,11 +712,16 @@ class PrehrajtoClient(object):
             if ((not items and len(visited) > 1)
                     or (items and not any(split_ref(item["id"])[0] for item in items))):
                 skipped_page = True
+            before = len(videos)
             for item in items:
                 h = item["id"].rsplit(":", 1)[-1]
                 if h not in seen:
                     seen.add(h)
                     videos.append(item)
+            if items and len(visited) > 1 and len(videos) == before:
+                # Stránka jen zopakovala už načtená videa (např. náhradní obsah za neexistující
+                # stránku). Výpis pak nelze považovat za úplný a nesmí se podle něj mazat.
+                skipped_page = True
             if progress and progress(len(visited), len(videos)):
                 return videos
             for nxt in parse_pagination(page, final):

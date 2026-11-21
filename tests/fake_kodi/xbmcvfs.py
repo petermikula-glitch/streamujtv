@@ -27,3 +27,25 @@ class File(object):
 
     def close(self):
         self.f.close()
+
+
+def delete(path):
+    try:
+        os.remove(path)
+        return True
+    except OSError:
+        return False
+
+
+def listdir(path):
+    names = sorted(os.listdir(path))
+    return ([n for n in names if os.path.isdir(os.path.join(path, n))],
+            [n for n in names if not os.path.isdir(os.path.join(path, n))])
+
+
+def rmdir(path, force=False):
+    try:
+        os.rmdir(path)
+        return True
+    except OSError:
+        return False

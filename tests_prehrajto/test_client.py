@@ -315,3 +315,12 @@ def test_original_ignores_redirect_back_to_the_site():
                        "/pelisky-1999-cz-1080p/4f9a1b2c3d4e5f60": (page, None, "", 200)})
         client.api = lambda path: (_ for _ in ()).throw(prehrajto.PrehrajtoError("API HTTP 403"))
         assert client._original(REF) == expected
+
+
+def test_listing_that_repeats_a_page_is_not_complete():
+    page1 = fixture("uploads_synthetic.html")
+    client = Fake({"/profil/nahrana-videa?page=2": (page1, None, "", 200),
+                   "/profil/nahrana-videa": (page1, None, "", 200)})
+    videos = client.fetch_listing(prehrajto.UPLOADS_PATH, delay=0)
+    assert videos and client.listing_complete is False
+    assert prehrajto.MAX_LISTING_PAGES >= 1000
