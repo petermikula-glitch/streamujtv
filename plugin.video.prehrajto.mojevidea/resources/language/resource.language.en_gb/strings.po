@@ -84,7 +84,7 @@ msgid "TMDB API key (optional fallback source)"
 msgstr ""
 
 msgctxt "#30023"
-msgid "Show rating in titles"
+msgid "Show rating in descriptions"
 msgstr ""
 
 msgctxt "#30024"
@@ -625,4 +625,88 @@ msgstr ""
 
 msgctxt "#30349"
 msgid "Catalogue restored"
+msgstr ""
+
+msgctxt "#30350"
+msgid "TMDB catalogue"
+msgstr ""
+
+msgctxt "#30351"
+msgid "Popular"
+msgstr ""
+
+msgctxt "#30352"
+msgid "Top rated"
+msgstr ""
+
+msgctxt "#30353"
+msgid "Upcoming movies"
+msgstr ""
+
+msgctxt "#30354"
+msgid "On the air"
+msgstr ""
+
+msgctxt "#30355"
+msgid "Enter your TMDB API key in the add-on settings to browse the catalogue."
+msgstr ""
+
+msgctxt "#30356"
+msgid "Open settings"
+msgstr ""
+
+msgctxt "#30357"
+msgid "By year"
+msgstr ""
+
+msgctxt "#30358"
+msgid "Invalid TMDB catalogue page"
+msgstr ""
+
+msgctxt "#30359"
+msgid "Search Přehraj.to by original title"
+msgstr ""
+
+msgctxt "#30360"
+msgid "Continue watching"
+msgstr ""
+
+msgctxt "#30361"
+msgid "My videos"
+msgstr ""
+
+msgctxt "#30362"
+msgid "Discover"
+msgstr ""
+
+msgctxt "#30363"
+msgid "Play from library"
+msgstr ""
+
+msgctxt "#30364"
+msgid "Open series in library"
+msgstr ""
+
+msgctxt "#30365"
+msgid "Next episode · %s"
+msgstr ""
+
+msgctxt "#30366"
+msgid "%d %% · %d min left"
+msgstr ""
+
+msgctxt "#30367"
+msgid "No videos in progress or next episodes yet."
+msgstr ""
+
+msgctxt "#30368"
+msgid "Přehraj.to sign-in failed. Check your credentials in settings."
+msgstr ""
+
+msgctxt "#30369"
+msgid "Přehraj.to search failed. %s"
+msgstr ""
+
+msgctxt "#30370"
+msgid "No videos found on Přehraj.to."
 msgstr ""

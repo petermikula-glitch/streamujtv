@@ -52,6 +52,22 @@ class Tmdb(object):
         except Exception as e:  # noqa: BLE001
             raise TmdbError("TMDB je nedostupné: %s" % e)
 
+    def genres(self, kind):
+        return self._get("/genre/%s/list" % kind).get("genres") or []
+
+    def browse(self, kind, category, page=1, genre="", year=""):
+        params = {"page": page}
+        if category == "discover":
+            params.update(sort_by="popularity.desc", include_adult="false")
+            if genre:
+                params["with_genres"] = genre
+            if year:
+                params["primary_release_year" if kind == "movie" else "first_air_date_year"] = year
+            data = self._get("/discover/" + kind, **params)
+        else:
+            data = self._get("/%s/%s" % (kind, category), **params)
+        return data.get("results") or [], min(data.get("total_pages") or 0, 500)
+
     def search(self, query, want_series=False):
         """Seznam kandidátů pro ruční výběr: [{id, title, year, orig_title}]."""
         data = self._get("/search/" + ("tv" if want_series else "movie"), query=query,

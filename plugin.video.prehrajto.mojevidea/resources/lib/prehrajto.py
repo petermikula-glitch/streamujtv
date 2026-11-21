@@ -542,7 +542,7 @@ class PrehrajtoClient(object):
             self.login()
         path = "/hledej/" + urllib.parse.quote(query, safe="")
         search_path = urllib.parse.unquote(path).rstrip("/")
-        url = BASE + path
+        url = BASE + path + "?vp-page=1"
         if page > 1:
             target = urllib.parse.urlsplit(cursor)
             cursor_path = urllib.parse.unquote(target.path).rstrip("/")
