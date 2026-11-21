@@ -46,6 +46,7 @@ class Player(object):
     PLAYING = False
     TIME = 0.0
     TOTAL = 0.0
+    FILE = ""
 
     def __init__(self):
         pass
@@ -58,6 +59,11 @@ class Player(object):
 
     def getTotalTime(self):
         return Player.TOTAL
+
+    def getPlayingFile(self):
+        if not Player.FILE:
+            raise RuntimeError("Kodi is not playing any file")
+        return Player.FILE
 
 
 class Actor(object):

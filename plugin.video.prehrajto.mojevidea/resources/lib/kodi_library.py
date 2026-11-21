@@ -153,7 +153,9 @@ def publish_history(lib, folder, state_file, addon_id, vids, mark=None):
         if mark is None and kodi_updated > local["updated"]:
             continue
         watched = (local["watched"] or kodi_watched) if mark is None else mark
-        position = 0 if watched else local["position"]
+        # Znovu rozkoukané zhlédnuté video: záložku v Kodi nemazat.
+        rewatching = mark is None and bool(lib.resume_points([canonical]))
+        position = 0 if watched and not rewatching else local["position"]
         total = local["total"] or kodi_total
         if canonical != exported and position:
             target = lib.find_video(exported)

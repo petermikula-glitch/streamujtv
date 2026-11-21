@@ -170,6 +170,8 @@ def _apply_playback(li, vid, watched=False, suggested=None):
             li.getVideoInfoTag().setPlaycount(1)
         else:
             li.setInfo("video", {"playcount": 1})
+        if vid in state["resume"]:  # už zhlédnuté video rozkoukané znovu
+            _set_resume_point(li, state["resume"][vid])
         return
     point = state["resume"].get(vid) or suggested
     if point:

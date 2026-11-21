@@ -980,8 +980,10 @@ class Library(object):
 
     def resume_points(self, vids=None):
         """{vid: (pozice, délka)} jen pro rozkoukaná videa."""
+        # Značka „zhlédnuto" skryje jen starší rozkoukání; nové sledování po označení se nabízí dál.
         q = ("SELECT vid, position, total FROM history WHERE position >= ? AND total > 0 "
-             "AND position < total * ? AND vid NOT IN (SELECT vid FROM watched_marks)")
+             "AND position < total * ? AND vid NOT IN "
+             "(SELECT vid FROM watched_marks WHERE marked_at >= history.last_played)")
         params = [IN_PROGRESS_MIN, IN_PROGRESS_MAX]
         rows = self.conn.execute(q, params).fetchall()
         out = dict((r[0], (r[1], r[2])) for r in rows)

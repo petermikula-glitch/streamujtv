@@ -7,6 +7,7 @@
 import json
 import os
 import sys
+import threading
 import time
 from hashlib import sha256
 
@@ -21,6 +22,7 @@ INCOMPLETE_RETRY_DELAY = 3600
 STARTUP_DELAY = 60      # s po startu Kodi, než se poprvé zkusí synchronizace
 TICK = 5                # s – jak často se zapisuje pozice přehrávání
 SYNC_CHECK_EVERY = 300  # s
+WATCHED_SHARE = 0.92    # od tohoto podílu délky se video počítá jako dokoukané (jako v katalogu)
 PLAYING_PROPERTY = kodiutils.ADDON_ID + ".playing"
 
 
@@ -56,6 +58,19 @@ class PlaybackTracker(xbmc.Player):
         self.kodi_updates = set()
         self.position = 0.0
         self.total = 0.0
+        self.path_hash = None
+
+    def _playing_hash(self):
+        try:
+            path = self.getPlayingFile().split("|", 1)[0]
+        except (RuntimeError, AttributeError):  # Kodi přehrávání mezitím ukončilo
+            return None
+        return sha256(path.encode("utf-8")).hexdigest()
+
+    def onPlayBackStarted(self):
+        # Kodi otevírá další video, aniž by ohlásilo zastavení předchozího: uzavřít ho
+        # s poslední známou pozicí dřív, než přehrávač začne hlásit čas nového videa.
+        self.finish()
 
     def onAVStarted(self):
         self.next_offer = None
@@ -63,12 +78,9 @@ class PlaybackTracker(xbmc.Player):
         self.finish()
         if not pending:
             return
-        try:
-            path = self.getPlayingFile().split("|", 1)[0]
-        except RuntimeError:  # Kodi přehrávání mezitím ukončilo
+        if self._playing_hash() != pending["path_hash"]:
             return
-        if sha256(path.encode("utf-8")).hexdigest() != pending["path_hash"]:
-            return
+        self.path_hash = pending["path_hash"]
         self.vid = pending["vid"]
         self.replacement = pending.get("replacement", False)
         self.position = 0.0
@@ -81,6 +93,8 @@ class PlaybackTracker(xbmc.Player):
             return
         try:
             if self.isPlayingVideo():
+                if self.path_hash and self._playing_hash() != self.path_hash:
+                    return  # přehrávač už hlásí čas jiného videa
                 self.position = self.getTime()
                 self.total = self.getTotalTime() or self.total
         except RuntimeError:  # přehrávání právě skončilo
@@ -96,13 +110,20 @@ class PlaybackTracker(xbmc.Player):
             kodiutils.log_error("historii přehrávání nelze uložit: %s" % e)
 
     def finish(self, ended=False):
+        """Uloží poslední pozici. Vrací True, když video opravdu doběhlo do konce."""
+        completed = False
         if self.vid:
-            if ended and self.total:
+            # Kodi hlásí „konec" i při výpadku streamu uprostřed videa – za dokoukané
+            # se počítá jen konec poblíž skutečné délky.
+            if ended and self.total and self.total - self.position <= max(3 * TICK, self.total * (1 - WATCHED_SHARE)):
                 self.position = self.total
+                completed = True
             self.save()
             if kodiutils.setting_bool("library_share_history"):
                 self.kodi_updates.add(self.vid)
         self.vid = None
+        self.path_hash = None
+        return completed
 
     def publish_kodi_updates(self):
         if self.kodi_updates and not self.vid:
@@ -115,8 +136,9 @@ class PlaybackTracker(xbmc.Player):
 
     def onPlayBackEnded(self):
         vid = self.vid
-        self.finish(ended=True)
-        if vid and any(kodiutils.setting_bool(key) for key in ("offer_next_episode", "offer_next_movie")):
+        completed = self.finish(ended=True)
+        if vid and completed and any(kodiutils.setting_bool(key)
+                                     for key in ("offer_next_episode", "offer_next_movie")):
             self.next_offer = vid
 
     def offer_next_if_due(self):
@@ -185,15 +207,15 @@ def sync_due():
     return now >= retry_after and now - last >= hours * 3600
 
 
-def try_sync(player):
+def run_sync():
+    """Jedna automatická synchronizace (běží ve vlastním vlákně)."""
     try:
-        if sync_due() and not player.isPlayingVideo():
-            import plugin
-            kodiutils.log_info("automatická synchronizace")
-            stats = plugin.run_sync(background=True)
-            if stats["incomplete"] or stats["cancelled"]:
-                with plugin.open_library() as lib:
-                    lib.set_kv("sync_retry_after", int(time.time()) + INCOMPLETE_RETRY_DELAY)
+        import plugin
+        kodiutils.log_info("automatická synchronizace")
+        stats = plugin.run_sync(background=True)
+        if stats["incomplete"] or stats["cancelled"]:
+            with plugin.open_library() as lib:
+                lib.set_kv("sync_retry_after", int(time.time()) + INCOMPLETE_RETRY_DELAY)
     except Exception as e:  # noqa: BLE001 – služba nesmí spadnout
         kodiutils.log_error("automatická synchronizace selhala: %s" % e)
         # po chybě počkat před dalším pokusem
@@ -204,9 +226,38 @@ def try_sync(player):
             pass
 
 
+class SyncWorker(object):
+    """Synchronizace mimo hlavní smyčku služby.
+
+    Může trvat minuty (stahování stránek, metadata). Kdyby běžela v hlavní smyčce,
+    Kodi by po tu dobu nedoručilo události přehrávače a právě spuštěné video by se
+    přestalo sledovat (pozice, zhlédnutí, nabídka dalšího dílu)."""
+
+    def __init__(self):
+        self.thread = None
+
+    def running(self):
+        return bool(self.thread and self.thread.is_alive())
+
+    def start_if_due(self, player):
+        if self.running():
+            return False
+        try:
+            if not sync_due() or player.isPlayingVideo():
+                return False
+        except Exception as e:  # noqa: BLE001 – služba nesmí spadnout
+            kodiutils.log_error("automatickou synchronizaci nelze naplánovat: %s" % e)
+            return False
+        self.thread = threading.Thread(target=run_sync, name="prehrajto-sync")
+        self.thread.daemon = True  # při ukončení Kodi se na rozběhnutou synchronizaci nečeká
+        self.thread.start()
+        return True
+
+
 def main():
     monitor = LibraryMonitor()
     player = PlaybackTracker()
+    sync = SyncWorker()
     started = time.time()
     last_check = 0.0
     last_save = 0.0
@@ -223,7 +274,7 @@ def main():
                 last_save = now
         elif now - started >= STARTUP_DELAY and now - last_check >= SYNC_CHECK_EVERY:
             last_check = now
-            try_sync(player)
+            sync.start_if_due(player)
         if monitor.waitForAbort(TICK):
             break
     player.finish()

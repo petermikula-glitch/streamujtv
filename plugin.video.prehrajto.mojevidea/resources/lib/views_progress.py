@@ -94,11 +94,13 @@ def in_progress(params):
             if video["kind"] == "episode" and video["meta_key"]:
                 if vid in resume or vid in watched:
                     series.setdefault(video["meta_key"], []).append(video)
-            elif vid in resume:
+            elif vid in resume or vid in watched:
+                # rozhoduje naposledy přehraná verze: film dokoukaný v jiné verzi už rozkoukaný není
                 key = video["meta_key"] or vid
                 if key not in movies:
-                    entries.append(video)
                     movies.add(key)
+                    if vid in resume:
+                        entries.append(video)
         for history in series.values():
             video = _series_progress(lib, history, resume, watched)
             if video:

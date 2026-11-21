@@ -184,6 +184,10 @@ def _format_position(seconds):
 
 def play(params):
     vid = params["vid"]
+    with open_library() as lib:
+        known = lib.find_video(vid)
+    if known:
+        vid = known["id"]  # starší tvar ID (.strm, oblíbené) → ID z katalogu, jinak by se historie nespárovala
     xbmcgui.Window(10000).clearProperty(PLAYING_PROPERTY)
     retry = params.get("retry") == "1"
     replacement = params.get("replacement") == "1"

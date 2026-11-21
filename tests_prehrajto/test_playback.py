@@ -166,8 +166,16 @@ def test_next_episode_offer_only_on_natural_end_and_resumes(plugin, monkeypatch)
     tracker.onPlayBackStopped()
     assert tracker.next_offer is None
 
-    tracker.vid, tracker.total = refs[0], 600
+    tracker.vid, tracker.total, tracker.position = refs[0], 600, 250
+    tracker.onPlayBackEnded()  # výpadek streamu uprostřed dílu Kodi hlásí také jako konec
+    assert tracker.next_offer is None
+    with plugin.open_library() as lib:
+        assert lib.resume_points([refs[0]]) == {refs[0]: (250.0, 600.0)} and not lib.watched([refs[0]])
+
+    tracker.vid, tracker.total, tracker.position = refs[0], 600, 596
     tracker.onPlayBackEnded()
+    with plugin.open_library() as lib:
+        assert lib.watched([refs[0]]) == {refs[0]}
     xbmcgui.YESNO_ANSWERS.append(True)
     tracker.offer_next_if_due()
     tracker.offer_next_if_due()
@@ -348,3 +356,107 @@ def test_failed_playback_offers_only_another_version_of_same_episode(plugin, mon
     assert xbmcplugin.RESOLVED[-1][1].tag.data["resumepoint"] == (300.0, 1800.0)
     plugin.playback_failed(next_video, "Přehrávání se nezdařilo", replacement=True)
     assert len(xbmc.BUILTINS) == 1
+
+
+def _load_service(plugin):
+    import importlib.util
+    from pathlib import Path
+    path = Path(plugin.__file__).parents[2] / "service.py"
+    spec = importlib.util.spec_from_file_location("prehrajto_service", path)
+    service = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(service)
+    return service
+
+
+def test_switching_videos_cannot_overwrite_the_previous_position(plugin, monkeypatch):
+    import nameparser
+    import xbmc
+    import xbmcgui
+    other = "2:film-b:00000000000000bb"
+    with plugin.open_library() as lib:
+        lib.upsert_video(REF, "Film.A.1999.CZ", "account", nameparser.parse("Film.A.1999.CZ"))
+        lib.upsert_video(other, "Film.B.2001.CZ", "account", nameparser.parse("Film.B.2001.CZ"))
+    plugin._link_cache_put(REF, "https://cdn/a.mp4", {}, None)
+    plugin._link_cache_put(other, "https://cdn/b.mp4", {}, None)
+    service = _load_service(plugin)
+    tracker = service.PlaybackTracker()
+    monkeypatch.setattr(xbmc.Player, "PLAYING", True)
+
+    plugin.play({"vid": REF})
+    monkeypatch.setattr(xbmc.Player, "FILE", "https://cdn/a.mp4|User-Agent=x")
+    monkeypatch.setattr(xbmc.Player, "TIME", 3000.0)
+    monkeypatch.setattr(xbmc.Player, "TOTAL", 6000.0)
+    tracker.onAVStarted()
+    tracker.update()
+    assert (tracker.vid, tracker.position) == (REF, 3000.0)
+
+    # uživatel pustí film B: přehrávač už hlásí čas B, ale onAVStarted ještě nepřišlo
+    plugin.play({"vid": other})
+    monkeypatch.setattr(xbmc.Player, "FILE", "https://cdn/b.mp4|User-Agent=x")
+    monkeypatch.setattr(xbmc.Player, "TIME", 0.0)
+    tracker.update()
+    assert tracker.position == 3000.0
+    tracker.onPlayBackStarted()
+    assert tracker.vid is None
+    assert xbmcgui.Window(10000).getProperty(plugin.PLAYING_PROPERTY)  # záznam pro B zůstal
+    tracker.onAVStarted()
+    assert tracker.vid == other
+    with plugin.open_library() as lib:
+        assert lib.resume_points([REF]) == {REF: (3000.0, 6000.0)}
+
+
+def test_play_records_history_under_the_catalogue_id(plugin):
+    import nameparser
+    import xbmcgui
+    import json
+    with plugin.open_library() as lib:
+        lib.upsert_video(REF, "Film.A.1999.CZ", "account", nameparser.parse("Film.A.1999.CZ"))
+    plugin._link_cache_put(REF, "https://cdn/a.mp4", {}, None)
+    plugin.play({"vid": ":" + REF.split(":", 1)[1]})  # starší tvar bez čísla videa (.strm, oblíbené)
+    pending = json.loads(xbmcgui.Window(10000).getProperty(plugin.PLAYING_PROPERTY))
+    assert pending["vid"] == REF
+
+
+def test_auto_sync_runs_outside_the_service_loop(plugin, monkeypatch):
+    import threading
+    import xbmc
+    service = _load_service(plugin)
+    started, release, ran_in = threading.Event(), threading.Event(), []
+
+    def slow_sync():
+        ran_in.append(threading.current_thread().name)
+        started.set()
+        release.wait(5)
+
+    monkeypatch.setattr(service, "run_sync", slow_sync)
+    monkeypatch.setattr(service, "sync_due", lambda: True)
+    worker = service.SyncWorker()
+    player = service.PlaybackTracker()
+    monkeypatch.setattr(xbmc.Player, "PLAYING", True)
+    assert worker.start_if_due(player) is False  # během přehrávání se nezačíná
+    monkeypatch.setattr(xbmc.Player, "PLAYING", False)
+    assert worker.start_if_due(player) is True
+    assert started.wait(5) and worker.running()
+    assert worker.start_if_due(player) is False  # druhá se nespustí, smyčka služby běží dál
+    release.set()
+    worker.thread.join(5)
+    assert not worker.running() and ran_in == ["prehrajto-sync"]
+
+
+def test_film_finished_on_another_version_leaves_in_progress(plugin):
+    import nameparser
+    import xbmcplugin
+    other = "2:pelisky-1999-sk:00000000000000bb"
+    with plugin.open_library() as lib:
+        lib.upsert_video(REF, "Pelisky.1999.CZ", "account", nameparser.parse("Pelisky.1999.CZ"), duration=6000)
+        lib.upsert_video(other, "Pelisky.1999.SK", "account", nameparser.parse("Pelisky.1999.SK"), duration=6000)
+        lib.record_play(REF, 1200, 6000, now=1000)
+        lib.record_play(other, 6000, 6000, now=2000)
+    plugin.in_progress({})
+    assert not [url for url, _item, _folder in xbmcplugin.ITEMS if "action=play" in url]
+    with plugin.open_library() as lib:
+        lib.record_play(REF, 1500, 6000, now=3000)  # znovu puštěná první verze je zase rozkoukaná
+    del xbmcplugin.ITEMS[:]
+    plugin.ui._PLAYBACK.clear()
+    plugin.in_progress({})
+    assert [url for url, _item, _folder in xbmcplugin.ITEMS if "action=play" in url] == [plugin.url_for("play", vid=REF)]

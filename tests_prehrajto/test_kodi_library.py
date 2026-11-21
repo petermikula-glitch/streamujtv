@@ -160,3 +160,70 @@ def test_kodi_wizard_checks_sources_and_only_shares_verified_exports(plugin, mon
         lib.record_play(REF, 1200, 6200)
     plugin.publish_kodi_history({REF})
     assert native["resume"]["position"] == 900.0
+
+
+def test_rewatching_a_watched_film_keeps_its_resume_point(plugin, monkeypatch):
+    import json
+    import os
+    import time
+
+    import nameparser
+    import xbmc
+    import xbmcaddon
+    import xbmcgui
+    import xbmcplugin
+    from helpers import REF
+
+    root = os.path.join(xbmcaddon.PROFILE_DIR[0], "kodi")
+    native = {"movieid": 7, "file": os.path.join(root, "Filmy", "Pelisky (1999)", "Pelisky (1999).strm"),
+              "playcount": 0, "resume": {"position": 0, "total": 0}, "lastplayed": ""}
+    sent = []
+
+    def execute(raw):
+        request = json.loads(raw)
+        method, params = request["method"], request["params"]
+        result = {"Files.GetSources": {"sources": [{"file": os.path.join(root, "Filmy") + "/"}]},
+                  "VideoLibrary.GetMovies": {"movies": [native.copy()]},
+                  "VideoLibrary.GetEpisodes": {"episodes": []},
+                  "VideoLibrary.GetMovieDetails": {"moviedetails": native.copy()}}.get(method, "OK")
+        if method == "VideoLibrary.SetMovieDetails":
+            sent.append(params)
+            native.update({k: v for k, v in params.items() if k != "movieid"})
+        return json.dumps({"jsonrpc": "2.0", "id": 1, "result": result})
+
+    monkeypatch.setattr(xbmc, "executeJSONRPC", execute, raising=False)
+    with plugin.open_library() as lib:
+        lib.upsert_video(REF, "Pelisky.1999.CZ", "account", nameparser.parse("Pelisky.1999.CZ"))
+    xbmcgui.BROWSE_ANSWERS.append(root)
+    plugin.kodi_choose_folder({})
+    xbmcaddon.SETTINGS["library_share_history"] = "true"
+
+    # před týdnem dokoukáno z knihovny Kodi → značka zhlédnuto
+    native.update(playcount=1)
+    plugin.import_kodi_marks({("movie", 7): True})
+    with plugin.open_library() as lib, lib.conn:
+        lib.conn.execute("UPDATE watched_marks SET marked_at=marked_at-7*86400")
+    # dnes puštěno znovu a zastaveno ve 25. minutě
+    now = int(time.time())
+    native.update(resume={"position": 1500.0, "total": 6200.0},
+                  lastplayed=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)))
+    with plugin.open_library() as lib:
+        lib.record_play(REF, 1500, 6200, started=True, now=now)
+        assert lib.resume_points() == {REF: (1500.0, 6200.0)}
+        assert lib.watched() == {REF}
+    plugin.publish_kodi_history({REF})
+    assert native["resume"]["position"] == 1500.0 and native["playcount"] == 1
+    assert not any("resume" in params for params in sent)
+
+    del xbmcplugin.ITEMS[:]
+    plugin.ui._PLAYBACK.clear()
+    plugin.movies({"order": "title"})
+    tag = xbmcplugin.ITEMS[0][1].tag.data
+    assert tag["playcount"] == 1 and tag["resumepoint"] == (1500.0, 6200.0)
+
+    # ruční označení po rozkoukání pozici skryje (značka je novější než přehrávání)
+    with plugin.open_library() as lib:
+        lib.set_watched([REF], False)
+        lib.record_play(REF, 1500, 6200, now=now - 60)
+        lib.set_watched([REF], True)
+        assert lib.resume_points() == {}
