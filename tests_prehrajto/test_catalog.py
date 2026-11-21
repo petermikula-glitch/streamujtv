@@ -279,3 +279,103 @@ def test_library_response_cache_expiry_and_trim(tmp_path):
         assert keys == ["search:online:3", "search:online:4", "tmdb:/b"]
         lib.cache_clear("search:online:")
         assert [row[0] for row in lib.conn.execute("SELECT key FROM cache")] == ["tmdb:/b"]
+
+
+def _old_parse(lib, vid, title, year=0, kind="movie", season=0, episode=0):
+    """Vrátí video do stavu, v jakém ho uložila verze se starými pravidly rozpoznávání."""
+    import db
+    key = db.meta_key_for(kind, title, year)
+    lib.conn.execute("UPDATE videos SET kind=?, title=?, year=?, season=?, episode=?, meta_key=? WHERE id=?",
+                     (kind, title, year, season, episode, key, vid))
+    lib._ensure_meta_for_video(vid)
+    lib._cleanup_meta()
+    return key
+
+
+def test_upgrade_refiles_titles_with_corrected_parsing_and_keeps_collections(tmp_path):
+    import db
+    import nameparser
+    path = str(tmp_path / "c.db")
+    names = {"1:a:%016x" % 1: "Johnny English (2003) CZ dabing", "2:b:%016x" % 2: "Johnny English Reborn CZ",
+             "3:c:%016x" % 3: "Ulice 4012. díl", "4:d:%016x" % 4: "Ulice 4013. díl",
+             "5:e:%016x" % 5: "Pelisky.1999.CZ", "6:f:%016x" % 6: "The English Patient (1996)"}
+    with db.Library(path) as lib, lib.conn:
+        for vid, raw in names.items():
+            lib.upsert_video(vid, raw, "account", nameparser.parse(raw))
+        ids = list(names)
+        old = _old_parse(lib, ids[0], "Johnny", 2003)
+        _old_parse(lib, ids[1], "Johnny", 0)
+        _old_parse(lib, ids[2], "Ulice 4012 díl")
+        _old_parse(lib, ids[3], "Ulice 4013 díl")
+        _old_parse(lib, ids[5], "The", 1996)
+        lib.conn.execute("UPDATE videos SET locked=1 WHERE id=?", (ids[5],))  # ruční úprava se nemění
+        cid = lib.create_collection("Komedie")
+        lib.add_to_collection(cid, old)
+        lib.record_play(ids[0], 600, 6000)
+        lib.update_meta("movie:pelisky|1999", {"status": "ok", "title": "Pelíšky", "rating": 91})
+        lib.conn.execute("PRAGMA user_version = 7")
+
+    with db.Library(path) as lib:
+        videos = {v["id"]: v for v in lib.all_videos()}
+        assert videos[ids[0]]["meta_key"] == "movie:johnny english|2003"
+        assert videos[ids[1]]["meta_key"] == "movie:johnny english reborn|"
+        assert [(videos[i]["kind"], videos[i]["meta_key"], videos[i]["episode"]) for i in ids[2:4]] == [
+            ("episode", "show:ulice", 4012), ("episode", "show:ulice", 4013)]
+        assert videos[ids[5]]["meta_key"] == "movie:the|1996"
+        assert lib.collection_targets(cid) == ["movie:johnny english|2003"]
+        assert lib.resume_points() == {ids[0]: (600.0, 6000.0)}
+        assert lib.get_meta("movie:pelisky|1999")["rating"] == 91  # nedotčené tituly si metadata nechají
+        assert lib.get_meta(old) is None and lib.get_meta("movie:johnny english|2003")["status"] == "new"
+        assert lib.conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+        assert lib._reparse_unlocked() == 0
+
+
+def test_retitled_upload_keeps_collection_and_hidden_progress(tmp_path):
+    import db
+    import nameparser
+    vid = "7:matrix:%016x" % 7
+    with db.Library(str(tmp_path / "c.db")) as lib:
+        lib.upsert_video(vid, "Matrix 1999 CZ", "account", nameparser.parse("Matrix 1999 CZ"))
+        cid = lib.create_collection("Sci-fi")
+        lib.add_to_collection(cid, "movie:matrix|1999")
+        lib.set_progress_hidden("movie:matrix|1999", True)
+        lib.upsert_video(vid, "The Matrix (1999) CZ", "account", nameparser.parse("The Matrix (1999) CZ"))
+        assert lib.collection_targets(cid) == ["movie:the matrix|1999"]
+        assert [meta["key"] for meta in lib.hidden_progress()] == ["movie:the matrix|1999"]
+        key = lib.edit_video(vid, "movie", "Matrix", 1999)
+        assert lib.collection_targets(cid) == [key]
+
+
+def test_restore_rejects_wrong_value_types_and_repairs_missing_titles(tmp_path):
+    import db
+    import nameparser
+    with db.Library(str(tmp_path / "c.db")) as lib:
+        lib.upsert_video("8:film:%016x" % 8, "Film 2001 CZ", "account", nameparser.parse("Film 2001 CZ"))
+        backup = lib.export_backup("addon")
+        for table, column, value in (("videos", "season", "x"), ("videos", "raw_title", 5),
+                                     ("meta", "genres", "{bad"), ("meta", "genres", "[[1]]")):
+            broken = json.loads(json.dumps(backup))
+            broken["tables"][table][0][column] = value
+            with pytest.raises(ValueError):
+                lib.restore_backup(broken, "addon")
+        without_meta = json.loads(json.dumps(backup))
+        without_meta["tables"]["meta"] = []
+        lib.restore_backup(without_meta, "addon")
+        assert [m["key"] for m in lib.movies()] == ["movie:film|2001"]
+        assert lib.genres() == []
+
+
+def test_yearless_film_lookup_uses_the_index(tmp_path):
+    import db
+    import nameparser
+    with db.Library(str(tmp_path / "c.db")) as lib:
+        lib.upsert_video("1:a:%016x" % 1, "Avatar 2009 CZ", "account", nameparser.parse("Avatar 2009 CZ"))
+        lib.upsert_video("2:b:%016x" % 2, "Avatar EN", "account", nameparser.parse("Avatar EN"))
+        lib.upsert_video("3:c:%016x" % 3, "Avatarka", "account", nameparser.parse("Avatarka"))
+        keys = {v["id"]: v["meta_key"] for v in lib.all_videos()}
+        assert keys == {"1:a:%016x" % 1: "movie:avatar|2009", "2:b:%016x" % 2: "movie:avatar|2009",
+                        "3:c:%016x" % 3: "movie:avatarka|"}
+        plan = " ".join(row[3] for row in lib.conn.execute(
+            "EXPLAIN QUERY PLAN SELECT key FROM meta WHERE kind='movie' AND key > ? AND key < ? AND key != ?",
+            ("movie:a|", "movie:a|￿", "x")))
+        assert "SEARCH" in plan

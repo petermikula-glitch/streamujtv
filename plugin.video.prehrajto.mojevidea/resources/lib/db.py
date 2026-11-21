@@ -4,9 +4,9 @@ import json
 import sqlite3
 import time
 
-from nameparser import movie_key, normalize, parse, show_key
+from nameparser import movie_key, normalize, parse, show_key, title_key
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 BACKUP_VERSION = 1
 OPTIONAL_BACKUP_TABLES = ("watchlist", "watched_marks", "progress_hidden", "saved_movie_filters",
                           "episode_additions", "episode_visits")
@@ -151,6 +151,19 @@ META_FIELDS = ("status", "source", "csfd_id", "csfd_url", "tmdb_id", "title", "o
                "plot", "poster", "fanart", "runtime")
 
 
+def _json_list(text):
+    """Sloupec se seznamem (žánry, země…) obsahuje JSON seznam řetězců."""
+    try:
+        value = json.loads(text or "[]")
+    except (TypeError, ValueError):
+        return False
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _json_items(text):
+    return json.loads(text) if text and _json_list(text) else []
+
+
 def meta_key_for(kind, title, year):
     if kind == "episode":
         return "show:" + show_key(title)
@@ -186,14 +199,20 @@ class Library(object):
         self.conn.row_factory = sqlite3.Row
         try:
             if self.conn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
-                self.conn.execute("PRAGMA journal_mode=WAL")
+                try:
+                    self.conn.execute("PRAGMA journal_mode=WAL")
+                except sqlite3.OperationalError:
+                    # Souběžně startující služba právě drží zámek; tenhle příkaz na něj nečeká.
+                    # Režim nastaví ten druhý proces, BEGIN IMMEDIATE níže už počká.
+                    pass
                 with self.conn:
                     self.conn.execute("BEGIN IMMEDIATE")
-                    if self.conn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+                    previous = self.conn.execute("PRAGMA user_version").fetchone()[0]
+                    if previous < SCHEMA_VERSION:
                         for statement in SCHEMA.split(";"):
                             if statement.strip():
                                 self.conn.execute(statement)
-                        self._migrate()
+                        self._migrate(previous)
                         self.conn.execute("INSERT OR REPLACE INTO settings_kv(k, v) VALUES ('schema', ?)",
                                           (str(SCHEMA_VERSION),))
                         self.conn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
@@ -201,7 +220,7 @@ class Library(object):
             self.conn.close()
             raise
 
-    def _migrate(self):
+    def _migrate(self, previous=0):
         cols = [r[1] for r in self.conn.execute("PRAGMA table_info(videos)")]
         if "vkey" not in cols:
             self.conn.execute("ALTER TABLE videos ADD COLUMN vkey TEXT DEFAULT ''")
@@ -229,6 +248,52 @@ class Library(object):
             for other in ids:
                 if other != keep:
                     self._merge_into(other, keep)
+        if previous < 8:
+            # 1.3.7 opravila rozpoznávání názvů (Johnny English, Ulice 4012. díl, S01E02: …)
+            self._reparse_unlocked()
+
+    def _carry_links(self, old_key, new_key):
+        """Když se titul přesune pod jiný klíč (přejmenování na webu, oprava rozpoznání)
+        a pod starým nezůstane žádné video, kolekce a skrytí v Rozkoukaných jdou s ním."""
+        if not old_key or old_key == new_key:
+            return
+        if self.conn.execute("SELECT 1 FROM videos WHERE meta_key=? LIMIT 1", (old_key,)).fetchone():
+            return
+        self.conn.execute(
+            "INSERT OR IGNORE INTO collection_items(collection_id, target, added) "
+            "SELECT collection_id, ?, added FROM collection_items WHERE target=?", (new_key, old_key))
+        self.conn.execute(
+            "INSERT OR IGNORE INTO progress_hidden(target) SELECT ? FROM progress_hidden WHERE target=?",
+            (new_key, old_key))
+        self.conn.execute("DELETE FROM collection_items WHERE target=?", (old_key,))
+        self.conn.execute("DELETE FROM progress_hidden WHERE target=?", (old_key,))
+
+    def _reparse_unlocked(self):
+        """Znovu rozpozná názvy videí, která uživatel ručně neupravil (po opravě pravidel
+        rozpoznávání nebo po obnově starší zálohy). Vrací počet přeřazených videí."""
+        moved = 0
+        watched = ("kind", "title", "year", "season", "episode", "meta_key")
+        rows = [_row(r) for r in self.conn.execute("SELECT * FROM videos WHERE locked=0 ORDER BY id").fetchall()]
+        parsed = [(video, parse(video["raw_title"])) for video in rows]
+        # Filmy bez roku se přiřazují k jedinému stejnojmennému filmu s rokem, proto až ve
+        # druhém kole – po úklidu titulů, které první kolo vyprázdnilo.
+        for with_year in (True, False):
+            for video, result in parsed:
+                if (result["kind"] != "movie" or bool(result.get("year"))) != with_year:
+                    continue
+                fields = self._parsed_fields(video["raw_title"], result)
+                if all(fields[name] == video[name] for name in watched):
+                    continue
+                fields["quality"] = fields["quality"] or video["quality"]
+                fields["lang"] = fields["lang"] or video["lang"]
+                sets = ", ".join("%s=?" % name for name in fields)
+                self.conn.execute("UPDATE videos SET %s WHERE id=?" % sets, list(fields.values()) + [video["id"]])
+                self._ensure_meta_for_video(video["id"])
+                self._carry_links(video["meta_key"], fields["meta_key"])
+                moved += 1
+            if moved:
+                self._cleanup_meta()
+        return moved
 
     def _merge_into(self, old, new):
         """Smaže řádek ``old`` a jeho vazby převede na ``new``."""
@@ -281,7 +346,9 @@ class Library(object):
         # Uživatel může zálohu upravit. Názvy sloupců bereme výhradně ze schématu.
         inserts = {}
         for table in BACKUP_TABLES:
-            columns = [row[1] for row in self.conn.execute("PRAGMA table_info(%s)" % table)]
+            info = self.conn.execute("PRAGMA table_info(%s)" % table).fetchall()
+            columns = [row[1] for row in info]
+            numeric = {row[1] for row in info if row[2].upper() in ("INTEGER", "REAL")}
             rows = tables[table]
             if table == "videos" and isinstance(rows, list) and all(isinstance(row, dict) for row in rows):
                 rows = [dict(row, search_name=normalize(row["raw_title"])) if isinstance(row.get("raw_title"), str)
@@ -289,7 +356,11 @@ class Library(object):
             if not isinstance(rows, list) or any(
                     not isinstance(row, dict) or set(row) != set(columns)
                     or any(value is not None and type(value) not in (str, int, float)
-                           for value in row.values()) for row in rows):
+                           for value in row.values())
+                    or any(row[name] is not None and (type(row[name]) is str) == (name in numeric)
+                           for name in columns) for row in rows):
+                raise ValueError("Invalid backup rows")
+            if table == "meta" and not all(_json_list(row[name]) for row in rows for name in JSON_FIELDS):
                 raise ValueError("Invalid backup rows")
             inserts[table] = (columns, rows)
         with self.conn:
@@ -302,6 +373,12 @@ class Library(object):
             self.conn.execute("DELETE FROM watchlist_availability")
             self.conn.execute("DELETE FROM settings_kv WHERE k LIKE 'link:%' OR k LIKE 'tmdb:season:%' "
                               "OR k IN ('last_sync', 'account_snapshot', 'sync_retry_after')")
+            # záloha může být starší (jiná pravidla rozpoznávání) nebo ručně upravená
+            for (vid,) in self.conn.execute(
+                    "SELECT id FROM videos WHERE meta_key NOT IN (SELECT key FROM meta)").fetchall():
+                self._ensure_meta_for_video(vid)
+            self._reparse_unlocked()
+            self._cleanup_meta()
 
     # --- key/value ---------------------------------------------------------
     # --- mezipaměť odpovědí (TMDB, online hledání) -------------------------
@@ -400,6 +477,7 @@ class Library(object):
                 self.conn.execute("UPDATE videos SET %s WHERE id=?" % sets, list(updates.values()) + [vid])
                 if "meta_key" in updates:
                     self._ensure_meta_for_video(vid)
+                    self._carry_links(existing["meta_key"], updates["meta_key"])
             return False
         fields = self._parsed_fields(raw_title, parsed or parse(raw_title))
         fields.update({"id": vid, "source": source, "added_at": now, "last_seen": now,
@@ -453,9 +531,10 @@ class Library(object):
         key = meta_key_for(parsed["kind"], parsed["title"], parsed.get("year"))
         if parsed["kind"] == "movie" and not parsed.get("year"):
             # film bez roku v názvu patří k jedinému stejnojmennému filmu s rokem
-            prefix = "movie:" + normalize(parsed["title"]) + "|"
-            rows = self.conn.execute("SELECT key FROM meta WHERE kind='movie' AND key LIKE ? "
-                                     "AND key != ?", (prefix + "%", key)).fetchall()
+            # rozsah místo LIKE: použije index (LIKE procházelo celou tabulku pro každé video)
+            prefix = "movie:" + title_key(parsed["title"]) + "|"
+            rows = self.conn.execute("SELECT key FROM meta WHERE kind='movie' AND key > ? AND key < ? "
+                                     "AND key != ?", (prefix, prefix + "\uffff", key)).fetchall()
             if len(rows) == 1:
                 key = rows[0][0]
         return {
@@ -491,7 +570,10 @@ class Library(object):
     def edit_video(self, vid, kind, title, year=0, season=0, episode=0):
         """Ruční úprava (uzamkne video proti přepsání synchronizací)."""
         with self.conn:
+            previous = self.get_video(vid)
             key = self._edit_video(vid, kind, title, year, season, episode)
+            if previous:
+                self._carry_links(previous["meta_key"], key)
             self._cleanup_meta()
         return key
 
@@ -831,7 +913,7 @@ class Library(object):
         for r in self.conn.execute(
                 "SELECT m.genres FROM meta m WHERE m.kind=? AND EXISTS "
                 "(SELECT 1 FROM videos v WHERE v.meta_key=m.key AND v.hidden=0)", (kind,)):
-            for g in json.loads(r[0] or "[]"):
+            for g in _json_items(r[0]):
                 counts[g] = counts.get(g, 0) + 1
         return sorted(counts.items(), key=lambda kv: kv[0].lower())
 
@@ -840,7 +922,7 @@ class Library(object):
         for r in self.conn.execute(
                 "SELECT m.countries FROM meta m WHERE m.kind=? AND EXISTS "
                 "(SELECT 1 FROM videos v WHERE v.meta_key=m.key AND v.hidden=0)", (kind,)):
-            for g in json.loads(r[0] or "[]"):
+            for g in _json_items(r[0]):
                 counts[g] = counts.get(g, 0) + 1
         return sorted(counts.items(), key=lambda kv: kv[0].lower())
 

@@ -6,6 +6,7 @@ Z názvu typu ``Pernikovy.tata.S02E05.CZ.dabing.1080p.mkv`` nebo
 aby šlo videa roztřídit na filmy a seriály a dohledat je na ČSFD.
 """
 import re
+import time
 import unicodedata
 
 EXTENSIONS = r"(?:mkv|mp4|avi|m4v|mov|wmv|mpg|mpeg|ts|flv|webm)"
@@ -24,31 +25,62 @@ _TAG_WORDS = [
     r"proper", r"repack", r"extended", r"unrated", r"directors\.?cut", r"remastered", r"limited",
     r"internal", r"complete",
 ]
-_TAG_RE = re.compile(r"(?:^|\s)(?:%s)(?=\s|$)" % "|".join(_TAG_WORDS), re.I)
+_TAG_WORD_RE = re.compile(r"(?:%s)\Z" % "|".join(_TAG_WORDS), re.I)
+# Značky, které jsou zároveň běžná slova názvů (Johnny English, Charlotte's Web, La vie en rose,
+# A Complete Unknown). Název ukončí jen tehdy, když za nimi až do konce následují samé značky.
+_AMBIGUOUS_TAGS = frozenset((
+    "english", "czech", "slovak", "en", "web", "cam", "complete", "limited", "internal", "extended",
+    "proper", "dual", "multi", "sub", "subs",
+))
+
+# hranice značek dílů: "(S01E02)", "S01E02:", "- S01E02,"
+_B = r"(?:^|[\s(\-])"
+_E = r"(?=[\s,:;)\-]|$)"
 
 _EP_PATTERNS = [
-    # S01E02, S1E2, S01 E02, S01E02E03
-    re.compile(r"(?:^|\s)s(\d{1,2})\s?e(\d{1,3})(?:\s?e\d{1,3})?(?=\s|$)", re.I),
+    # S01E02, S1E2, S01 E02, S01E02E03, S01E02-E03
+    re.compile(_B + r"s(\d{1,2})\s?e(\d{1,4})(?:\s?-?\s?e\d{1,4})?" + _E, re.I),
     # 1x02
-    re.compile(r"(?:^|\s)(\d{1,2})x(\d{1,3})(?=\s|$)", re.I),
+    re.compile(_B + r"(\d{1,2})x(\d{1,4})" + _E, re.I),
     # 1. série 2. díl / 1 serie 2 dil / série 1 díl 2
-    re.compile(r"(?:^|\s)(\d{1,2})\s?\.?\s?s[eé]rie\s+(\d{1,3})\s?\.?\s?d[ií]l", re.I),
-    re.compile(r"(?:^|\s)s[eé]rie\s?(\d{1,2})\s+d[ií]l\s?(\d{1,3})", re.I),
-    re.compile(r"(?:^|\s)(\d{1,2})\s?\.?\s?sezona\s+(\d{1,3})\s?\.?\s?(?:d[ií]l|epizoda)", re.I),
-    re.compile(r"(?:^|\s)season\s?(\d{1,2})\s+episode\s?(\d{1,3})", re.I),
+    re.compile(r"(?:^|\s)(\d{1,2})\s?\.?\s?s[eé]rie\s+(\d{1,4})\s?\.?\s?d[ií]l", re.I),
+    re.compile(r"(?:^|\s)s[eé]rie\s?(\d{1,2})\s+d[ií]l\s?(\d{1,4})", re.I),
+    re.compile(r"(?:^|\s)(\d{1,2})\s?\.?\s?sezona\s+(\d{1,4})\s?\.?\s?(?:d[ií]l|epizoda)", re.I),
+    re.compile(r"(?:^|\s)season\s?(\d{1,2})\s+episode\s?(\d{1,4})", re.I),
 ]
-# jen díl bez série → 1. série
+# jen díl bez série → 1. série (denní seriály mají i čtyřmístná čísla dílů)
 _EP_ONLY_PATTERNS = [
-    re.compile(r"(?:^|\s)e[pP]?(\d{1,3})(?=\s|$)", re.I),
-    re.compile(r"(?:^|\s)(\d{1,3})\s?\.?\s?d[ií]l(?=\s|$)", re.I),
-    re.compile(r"(?:^|\s)d[ií]l\s?(\d{1,3})(?=\s|$)", re.I),
-    re.compile(r"(?:^|\s)epizoda\s?(\d{1,3})(?=\s|$)", re.I),
-    re.compile(r"(?:^|\s)episode\s?(\d{1,3})(?=\s|$)", re.I),
+    re.compile(_B + r"e[pP]?(\d{1,4})" + _E, re.I),
+    re.compile(r"(?:^|\s)(\d{1,4})\s?\.?\s?d[ií]l" + _E, re.I),
+    re.compile(r"(?:^|\s)d[ií]l\s?(\d{1,4})" + _E, re.I),
+    re.compile(r"(?:^|\s)epizoda\s?(\d{1,4})" + _E, re.I),
+    re.compile(r"(?:^|\s)episode\s?(\d{1,4})" + _E, re.I),
 ]
 # celá série bez dílu ("S02", "2. série")
 _SEASON_ONLY = re.compile(r"(?:^|\s)(?:s(\d{1,2})|(\d{1,2})\s?\.?\s?s[eé]rie)(?=\s|$)", re.I)
 
 _YEAR_RE = re.compile(r"(?:^|[\s(\[])((?:19[2-9]|20[0-4])\d)(?=[\s)\]]|$)")
+
+
+def _cut_at_tags(title, anchored):
+    """Zkrátí název u první technické nebo jazykové značky.
+
+    ``anchored`` = název už končí u roku nebo čísla dílu; text před nimi je téměř vždy
+    čistý název, takže dvojznačná slova (english, web…) ho neukončují."""
+    words = title.split(" ")
+    mixed_case = any(c.islower() for c in title)
+    for index in range(1, len(words)):
+        word = words[index].lower()
+        if not _TAG_WORD_RE.match(word):
+            continue
+        # "Film EN", "Film WEB" – značka psaná verzálkami v jinak běžně psaném názvu je značka
+        shouting = mixed_case and words[index].isupper()
+        if word in _AMBIGUOUS_TAGS and not shouting:
+            rest = [w.lower() for w in words[index + 1:] if w]
+            if anchored or not rest or not all(_TAG_WORD_RE.match(w) for w in rest):
+                continue
+        return " ".join(words[:index])
+    return title
 
 
 def strip_accents(text):
@@ -128,6 +160,7 @@ def parse(raw_title):
               "lang": _detect_lang(text), "quality": _detect_quality(text)}
 
     cut = len(text)
+    marker = (0, 0)  # část textu s číslem dílu – čísla v ní nejsou rok
     for pat in _EP_PATTERNS:
         m = pat.search(text)
         if m:
@@ -135,6 +168,7 @@ def parse(raw_title):
             result["season"] = int(m.group(1))
             result["episode"] = int(m.group(2))
             cut = min(cut, m.start())
+            marker = m.span()
             break
     if result["kind"] == "movie":
         for pat in _EP_ONLY_PATTERNS:
@@ -144,6 +178,7 @@ def parse(raw_title):
                 result["season"] = 1
                 result["episode"] = int(m.group(1))
                 cut = min(cut, m.start())
+                marker = m.span()
                 break
     if result["kind"] == "movie":
         m = _SEASON_ONLY.search(text)
@@ -153,20 +188,20 @@ def parse(raw_title):
             cut = min(cut, m.start())
 
     years = list(_YEAR_RE.finditer(text))
+    latest = time.localtime().tm_year + 1  # "Blade Runner 2049" není film z roku 2049
     # rok, který není na začátku názvu (např. "2001 Vesmírná odysea" ponechá v názvu)
     for ym in reversed(years):
         start = ym.start(1)
         if start == 0 and len(text) > 4:
+            continue
+        if int(ym.group(1)) > latest or marker[0] <= start < marker[1]:
             continue
         result["year"] = int(ym.group(1))
         if result["kind"] == "movie" or start < cut:
             cut = min(cut, start)
         break
 
-    title = text[:cut]
-    tm = _TAG_RE.search(" " + title + " ")
-    if tm and tm.start() > 0:
-        title = (" " + title)[:tm.start()]
+    title = _cut_at_tags(text[:cut], anchored=cut < len(text))
     title = re.sub(r"\(\s*\)", "", title)
     title = _tidy(title)
     if not title:
@@ -175,9 +210,15 @@ def parse(raw_title):
     return result
 
 
+def title_key(title):
+    """Klíč názvu. Názvy bez latinky a číslic (azbuka…) by po normalizaci splynuly
+    do jednoho prázdného klíče, proto se u nich použije název sám."""
+    return normalize(title) or re.sub(r"\s+", " ", (title or "").casefold()).strip()
+
+
 def show_key(title):
-    return normalize(title)
+    return title_key(title)
 
 
 def movie_key(title, year):
-    return "%s|%s" % (normalize(title), year or "")
+    return "%s|%s" % (title_key(title), year or "")
