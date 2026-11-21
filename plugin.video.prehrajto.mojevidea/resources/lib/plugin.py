@@ -26,7 +26,8 @@ from nameparser import normalize, parse
 import provider
 import search_results
 from db import Library
-from kodiutils import (_, ADDON, ADDON_ID, FANART, ICON, KODI_MAJOR, Progress, keyboard, log,
+import kodiutils
+from kodiutils import (ADDON, ADDON_ID, FANART, ICON, KODI_MAJOR, Progress, keyboard, log,
                        log_error, log_info, notify, number, ok, profile_path, select, set_setting,
                        setting, setting_bool, setting_int, text_viewer, yesno)
 from tmdb import IMG, Tmdb, TmdbError
@@ -72,10 +73,60 @@ AVAILABILITY_BATCH = 4
 ACTOR_PAGE_SIZE = 20
 
 
+_URL_SAFE = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~")
+
+
+def _url_value(value):
+    text = value if isinstance(value, str) else str(value)
+    if _URL_SAFE.issuperset(text):
+        return text
+    return urllib.parse.quote_plus(text)
+
+
 def url_for(action, **params):
-    params["action"] = action
-    return BASE_URL + "?" + urllib.parse.urlencode(
-        dict((k, v) for k, v in params.items() if v is not None and v != ""))
+    """Stejný výsledek jako ``urlencode`` (action na konci), jen bez zbytečného kódování."""
+    parts = ["%s=%s" % (_url_value(k), _url_value(v)) for k, v in params.items()
+             if v is not None and v != "" and k != "action"]
+    parts.append("action=" + _url_value(action))
+    return BASE_URL + "?" + "&".join(parts)
+
+
+_STRINGS = {}
+
+
+def _(string_id):
+    """Přeložené řetězce se v jednom běhu doplňku nemění – stačí je načíst jednou."""
+    try:
+        return _STRINGS[string_id]
+    except KeyError:
+        value = _STRINGS[string_id] = kodiutils._(string_id)
+        return value
+
+
+_PENDING_ITEMS = []
+LIST_CAST_LIMIT = 6
+
+
+def _list_item(label="", label2="", path=""):
+    """Položka seznamu mimo GUI vlákno (rychlejší tvorba dlouhých výpisů)."""
+    return xbmcgui.ListItem(label, label2, path, offscreen=True)
+
+
+def _add_item(url, li, folder):
+    """Položky se odešlou najednou v ``end()`` přes addDirectoryItems."""
+    _PENDING_ITEMS.append((url, li, bool(folder)))
+
+
+def _flush_items():
+    if _PENDING_ITEMS:
+        items = list(_PENDING_ITEMS)
+        del _PENDING_ITEMS[:]
+        xbmcplugin.addDirectoryItems(HANDLE, items, len(items))
+
+
+def _fail_directory():
+    del _PENDING_ITEMS[:]
+    xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
 
 
 PLAYING_PROPERTY = ADDON_ID + ".playing"
@@ -217,8 +268,12 @@ def _plot(meta, extra_lines=None):
     return "\n".join(lines)
 
 
-def _set_info(li, info, cast=None):
-    """Kodi 20+ používá InfoTagVideo, Kodi 19 setInfo."""
+def _set_info(li, info, cast=None, cast_limit=LIST_CAST_LIMIT):
+    """Kodi 20+ používá InfoTagVideo, Kodi 19 setInfo.
+
+    Ve výpisech stačí hlavní herci (``cast_limit``); úplné obsazení má detail titulu."""
+    if cast and cast_limit:
+        cast = cast[:cast_limit]
     if KODI_MAJOR >= 20:
         tag = li.getVideoInfoTag()
         setters = {
@@ -328,7 +383,20 @@ def _version_label(video, playback_type=""):
     return " · ".join(part for part in parts if part)
 
 
-def add_movie(meta, lib, collection_id=None, repair=False, matching=None):
+def _movie_versions(lib, movies):
+    """Verze všech filmů s více videi jedním dotazem (místo dotazu pro každý film)."""
+    keys = [movie["key"] for movie in movies if (movie.get("video_count") or 1) > 1]
+    return lib.videos_grouped(keys) if keys else {}
+
+
+def _add_movies(lib, movies, **kwargs):
+    movies = list(movies)
+    versions = _movie_versions(lib, movies)
+    for movie in movies:
+        add_movie(movie, lib, versions=versions, **kwargs)
+
+
+def add_movie(meta, lib, collection_id=None, repair=False, matching=None, versions=None):
     year = _display_year(meta)
     label = _display_title(meta) + (" (%d)" % year if year else "")
     count = meta.get("video_count") or 1
@@ -336,7 +404,7 @@ def add_movie(meta, lib, collection_id=None, repair=False, matching=None):
     extra = [langs]
     if count > 1:
         extra.append(_(30133) % count)
-    li = xbmcgui.ListItem(label)
+    li = _list_item(label)
     info = _meta_info(meta, "movie")
     info["plot"] = _plot(meta, extra)
     info["duration"] = (meta.get("runtime") or 0) * 60 or meta.get("duration") or 0
@@ -347,7 +415,7 @@ def add_movie(meta, lib, collection_id=None, repair=False, matching=None):
     context = _meta_context(meta, collection_id)
     if repair:
         li.addContextMenuItems(context)
-        xbmcplugin.addDirectoryItem(HANDLE, url_for("repair_title", key=meta["key"]), li, True)
+        _add_item(url_for("repair_title", key=meta["key"]), li, True)
         return
     vids = [meta["first_video"]]
     vid = vids[0]
@@ -358,7 +426,10 @@ def add_movie(meta, lib, collection_id=None, repair=False, matching=None):
         vid = preferred["id"]
         vids = [video["id"] for video in videos]
     elif count > 1:
-        videos = lib.videos_for_meta(meta["key"])
+        if versions is not None and meta["key"] in versions:
+            videos = versions[meta["key"]]
+        else:
+            videos = lib.videos_for_meta(meta["key"])
         preferred = min(videos, key=_version_score, default=None)
         if not preferred:
             return
@@ -376,7 +447,7 @@ def add_movie(meta, lib, collection_id=None, repair=False, matching=None):
     else:
         _apply_playback(li, vid, watched=watched)
     li.addContextMenuItems(context)
-    xbmcplugin.addDirectoryItem(HANDLE, url_for("play", vid=vid, offer_transfer=offer_transfer), li, False)
+    _add_item(url_for("play", vid=vid, offer_transfer=offer_transfer), li, False)
 
 
 def add_show(meta, collection_id=None, repair=False, new_count=0):
@@ -384,14 +455,14 @@ def add_show(meta, collection_id=None, repair=False, new_count=0):
     label = _display_title(meta) + (" (%d)" % year if year else "")
     if new_count:
         label += " · " + _(30433) % new_count
-    li = xbmcgui.ListItem(label)
+    li = _list_item(label)
     info = _meta_info(meta, "tvshow")
     info["tvshowtitle"] = _display_title(meta)
     info["plot"] = _plot(meta, [_(30133) % (meta.get("video_count") or 0)])
     _set_info(li, info, meta.get("cast"))
     _art(li, meta.get("poster"), meta.get("thumb"), meta.get("fanart"))
     li.addContextMenuItems(_meta_context(meta, collection_id))
-    xbmcplugin.addDirectoryItem(HANDLE, url_for("repair_title" if repair else "show", key=meta["key"]), li, True)
+    _add_item(url_for("repair_title" if repair else "show", key=meta["key"]), li, True)
 
 
 def add_video(video, meta=None, label=None, mediatype="video", progress="", choose_stream=False,
@@ -401,7 +472,7 @@ def add_video(video, meta=None, label=None, mediatype="video", progress="", choo
     episode_data = episode_data or {}
     if label is None:
         label = video["raw_title"]
-    li = xbmcgui.ListItem(label)
+    li = _list_item(label)
     info = {"title": label, "mediatype": mediatype, "duration": video.get("duration") or 0}
     extra = [progress, _version_label(video), "%s: %s" % (_(30330), video["raw_title"])]
     if meta:
@@ -429,28 +500,29 @@ def add_video(video, meta=None, label=None, mediatype="video", progress="", choo
         context.insert(-1, _episode_detail_action(meta["key"], video["season"], video["episode"]))
     li.addContextMenuItems(context)
     url = url_for("play", vid=video["id"], offer_transfer=offer_transfer)
-    xbmcplugin.addDirectoryItem(HANDLE, url, li, False)
+    _add_item(url, li, False)
 
 
 def add_dir(label, action, icon="", context=None, **params):
-    li = xbmcgui.ListItem(label)
+    li = _list_item(label)
     li.setArt({"icon": icon or "DefaultFolder.png", "thumb": icon or "DefaultFolder.png",
                "fanart": FANART})
     if context:
         li.addContextMenuItems(context)
-    xbmcplugin.addDirectoryItem(HANDLE, url_for(action, **params), li, True)
+    _add_item(url_for(action, **params), li, True)
 
 
 def add_action(label, action, icon="", **params):
-    li = xbmcgui.ListItem(label)
+    li = _list_item(label)
     li.setArt({"icon": icon or "DefaultAddonService.png", "thumb": icon or "DefaultAddonService.png",
                "fanart": FANART})
-    xbmcplugin.addDirectoryItem(HANDLE, url_for(action, **params), li, False)
+    _add_item(url_for(action, **params), li, False)
 
 
 def end(content=None, sort=None, cache=True):
     if content:
         xbmcplugin.setContent(HANDLE, content)
+    _flush_items()
     for s in sort or [xbmcplugin.SORT_METHOD_NONE]:
         xbmcplugin.addSortMethod(HANDLE, s)
     xbmcplugin.endOfDirectory(HANDLE, cacheToDisc=cache)
@@ -585,7 +657,7 @@ def tmdb_filters(params):
         options = _tmdb_filter_options(make_tmdb(), kind, field)
     except TmdbError as e:
         notify(str(e), time_ms=8000)
-        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+        _fail_directory()
         return
     if selection[field]:
         options.insert(0, ("", _(30428)))
@@ -771,7 +843,7 @@ def tmdb_titles(params, *, cache=False):
     except (ValueError, TmdbError) as e:
         notify(str(e), time_ms=8000)
         if not catalogue or isinstance(e, ValueError):
-            xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+            _fail_directory()
             return
 
     refine = None
@@ -797,6 +869,7 @@ def tmdb_titles(params, *, cache=False):
             genre = search_results.GENRES.get(selection["genre"])
             countries = {alias for alias, code in COUNTRY_QUERY_ALIASES.items() if code == origin}
             countries |= FILM_ORIGINS.get(origin, (0, set()))[1] | {origin.lower()}
+            matching = []
             for movie in library_items:
                 if movie["key"] in shown or (start and not start <= _display_year(movie) <= end_year):
                     continue
@@ -804,8 +877,9 @@ def tmdb_titles(params, *, cache=False):
                     continue
                 if genre and not any(normalize(name) in genre[1] | {normalize(_(genre[0]))} for name in movie["genres"]):
                     continue
-                add_movie(movie, lib)
+                matching.append(movie)
                 shown.add(movie["key"])
+            _add_movies(lib, matching)
     if partial:
         notify(_(30497))
     if next_page:
@@ -836,7 +910,7 @@ def add_tmdb_title(item, kind, lib, library_items, status=None, refine=None, pro
         label += " · " + _(30364)
     if provider_found:
         label += " · " + _(30535)
-    li = xbmcgui.ListItem(label)
+    li = _list_item(label)
     _set_info(li, {"title": title, "originaltitle": original, "year": released_year,
                    "plot": item.get("overview") or "", "rating": item.get("vote_average") or 0,
                    "votes": item.get("vote_count") or 0, "rating_type": "tmdb",
@@ -872,7 +946,7 @@ def add_tmdb_title(item, kind, lib, library_items, status=None, refine=None, pro
         target = url_for("show", key=match["key"])
         context.insert(0, (_(30364), "Container.Update(%s)" % target))
     li.addContextMenuItems(context)
-    xbmcplugin.addDirectoryItem(HANDLE, target, li, folder)
+    _add_item(target, li, folder)
     return match["key"] if match else None
 
 
@@ -922,7 +996,7 @@ def online_filters(params):
     options = ({}, {"audio": "CZ"}, {"audio": "SK"}, {"quality": "FHD"},
                {"hide_previews": "1"}, {"unknown_audio": "1"})
     choice = select(_(30507), [_(label) for label in (30496, 30508, 30509, 30510, 30511, 30541)])
-    xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+    _fail_directory()
     if choice < 0:
         return
     filters = _online_filters(params) if choice else {}
@@ -1126,7 +1200,7 @@ def tmdb_title(params):
         detail = client.details(tmdb_id, want_series)
     except (ValueError, TmdbError) as e:
         notify(str(e), time_ms=8000)
-        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+        _fail_directory()
         return
     detail["rating_source"] = "tmdb"
     with open_library() as lib:
@@ -1136,16 +1210,16 @@ def tmdb_title(params):
         saved = lib.watchlist_has(kind, tmdb_id)
 
     def add_option(label, action, folder=True, **route_params):
-        li = xbmcgui.ListItem(label)
+        li = _list_item(label)
         info = _meta_info(detail, "tvshow" if want_series else "movie")
         info["title"] = label
         info["plot"] = detail["plot"]
-        _set_info(li, info, detail["cast"])
+        _set_info(li, info, detail["cast"], cast_limit=None)
         _art(li, poster=detail["poster"], fanart=detail["fanart"])
         if not folder:
             li.setProperty("IsPlayable", "true")
             _apply_playback(li, route_params["vid"])
-        xbmcplugin.addDirectoryItem(HANDLE, url_for(action, **route_params), li, folder)
+        _add_item(url_for(action, **route_params), li, folder)
 
     if match and want_series:
         add_option(_(30364), "show", key=match["key"])
@@ -1329,7 +1403,7 @@ def watchlist(params):
             fresh = ready and (kind, entry["tmdb_id"]) in new_titles
             if ready:
                 name += " · " + _(30513 if fresh else 30363 if preferred else 30364)
-            item = xbmcgui.ListItem(name)
+            item = _list_item(name)
             _art(item, poster=entry["poster"])
             args = {"kind": kind, "tmdb_id": entry["tmdb_id"]}
             detail_url = url_for("tmdb_title", **args)
@@ -1350,7 +1424,7 @@ def watchlist(params):
                 target = url_for("show", key=match["key"])
                 context.insert(0, (_(30364), "Container.Update(%s)" % target))
             item.addContextMenuItems(context)
-            xbmcplugin.addDirectoryItem(HANDLE, target, item, not preferred)
+            _add_item(target, item, not preferred)
     if not found:
         notify(_(30438 if ready_only else 30377))
     end("videos", cache=False)
@@ -1389,7 +1463,7 @@ def tmdb_search(params):
         titles, next_page, partial = _tmdb_page_batch(lambda current: client.search_titles(query, current), page)
     except (TmdbError, ValueError) as e:
         notify(str(e), time_ms=8000)
-        xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+        _fail_directory()
         return
     with open_library() as lib:
         library_items = {"movie": lib.movies(), "tv": lib.shows()}
@@ -1454,11 +1528,11 @@ def movie_filter_create(params):
         options = MOVIE_FILTER_OPTIONS[field]
         index = select(_(heading), [_(label) for label in options.values()], preselect=0)
         if index < 0:
-            xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+            _fail_directory()
             return
         criteria[field] = list(options)[index]
     # Nová adresa dovolí vrátit se z výsledků bez opětovného otevírání dialogů.
-    xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+    _fail_directory()
     xbmc.executebuiltin("Container.Update(%s)" % url_for(
         "movies", filtered=1, order=params.get("order", "added"), **criteria))
 
@@ -1521,8 +1595,7 @@ def movies(params):
             if not matched:
                 notify(_(30121))
         else:
-            for movie in items:
-                add_movie(movie, lib)
+            _add_movies(lib, items)
     end("movies", MOVIE_SORTS, cache=False)
 
 
@@ -1642,7 +1715,7 @@ def show(params):
     for number, entries in seasons.items():
         title = _season_label(number)
         summary = _season_summary(entries, watched)
-        li = xbmcgui.ListItem("%s · %s" % (title, summary.split("\n")[0]))
+        li = _list_item("%s · %s" % (title, summary.split("\n")[0]))
         info = _meta_info(meta, "season")
         info.update({"title": title, "season": number, "tvshowtitle": _display_title(meta),
                      "plot": _plot(meta, [summary])})
@@ -1654,7 +1727,7 @@ def show(params):
         complete = episode_keys == completed_keys
         context.insert(1, _watch_action(complete, label=30412, key=key, season=number))
         li.addContextMenuItems(context)
-        xbmcplugin.addDirectoryItem(HANDLE, url_for("season", key=key, season=number), li, True)
+        _add_item(url_for("season", key=key, season=number), li, True)
     end("seasons", cache=False)
 
 
@@ -1733,7 +1806,7 @@ def _add_episode_groups(meta, videos, watched, episode_data):
         if len(group) == 1:
             add_video(video, meta, label=label, mediatype="episode", episode_data=data)
             continue
-        li = xbmcgui.ListItem("%s · %s" % (label, _(30133) % len(group)))
+        li = _list_item("%s · %s" % (label, _(30133) % len(group)))
         info = _meta_info(meta, "episode")
         info.update(title=label, season=number, episode=episode, tvshowtitle=_display_title(meta),
                     duration=data.get("duration") or video.get("duration") or 0)
@@ -1749,7 +1822,7 @@ def _add_episode_groups(meta, videos, watched, episode_data):
         if season_key and episode:
             context.insert(-1, _episode_detail_action(key, number, episode))
         li.addContextMenuItems(context)
-        xbmcplugin.addDirectoryItem(HANDLE, versions_url, li, True)
+        _add_item(versions_url, li, True)
 
 
 def season(params):
@@ -1922,7 +1995,8 @@ def in_progress(params):
                 entries.append(video)
         entries.sort(key=lambda video: video["last_played"], reverse=True)
         entries = entries[:100]
-        metas = {key: lib.get_meta(key) or {} for key in {v["meta_key"] for v in entries}}
+        found = lib.get_metas(v["meta_key"] for v in entries)
+        metas = {v["meta_key"]: found.get(v["meta_key"]) or {} for v in entries}
 
     keys = (_episode_metadata_key(metas[v["meta_key"]], v["season"]) for v in entries
             if v["kind"] == "episode" and v["episode"])
@@ -2081,7 +2155,7 @@ def diagnostics(params):
 def _video_list(load, sorts):
     with open_library() as lib:
         videos = load(lib)
-        metas = dict((m["key"], m) for m in (lib.get_meta(k) for k in set(v["meta_key"] for v in videos)) if m)
+        metas = lib.get_metas(v["meta_key"] for v in videos)
     for v in videos:
         meta = metas.get(v["meta_key"]) or {}
         if v["kind"] == "episode":
@@ -2250,7 +2324,7 @@ def _main_search_action(card):
 
 
 def _search_entry(card, label, action, args, video, context=(), direct_resume=False):
-    li = xbmcgui.ListItem(label)
+    li = _list_item(label)
     meta = card["local"] or {}
     poster_path = (card["tmdb"] or {}).get("poster_path")
     poster = meta.get("poster") or (IMG + "w500" + poster_path if poster_path else "")
@@ -2272,7 +2346,7 @@ def _search_entry(card, label, action, args, video, context=(), direct_resume=Fa
             args = dict(args, continue_play=1)
     if items:
         li.addContextMenuItems(items)
-    xbmcplugin.addDirectoryItem(HANDLE, url_for(action, **args), li, action != "play")
+    _add_item(url_for(action, **args), li, action != "play")
 
 
 def _search_label(card, requested_year=0):
@@ -2387,7 +2461,7 @@ def search(params):
     if from_keyboard:
         query = (keyboard(_(30118)) or "").strip()
         if not query:
-            xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+            _fail_directory()
             return
     include_online = params.get("online", "0" if setting("search_online") == "false" else "1") == "1"
     discovery = search_results.discover_query(query, COUNTRY_QUERY_ALIASES)
@@ -2401,9 +2475,8 @@ def search(params):
         return
     if countries:
         with open_library() as lib:
-            for movie in lib.movies():
-                if any(normalize(country) in countries for country in movie["countries"]):
-                    add_movie(movie, lib)
+            _add_movies(lib, (movie for movie in lib.movies()
+                              if any(normalize(country) in countries for country in movie["countries"])))
         end("movies", MOVIE_SORTS, cache=from_keyboard)
         return
     filters = _online_filters(params)
@@ -2533,7 +2606,7 @@ def provider_search(params):
     if from_keyboard:
         query = (keyboard(_(30340)) or "").strip()
         if not query:
-            xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
+            _fail_directory()
             return
         params = dict(params, q=query)
     series = params.get("series") == "1"
@@ -2653,7 +2726,7 @@ def add_provider_result(video, label=None):
     language = _provider_version(video, parse(video["title"]))["lang"]
     if not any(part.strip() and not part.strip().endswith(" titulky") for part in language.split(",")):
         label += " · " + _(30512)
-    li = xbmcgui.ListItem(label)
+    li = _list_item(label)
     description = "\n".join(filter(None, (_version_label(video), video["title"])))
     _set_info(li, {"title": label or video["title"], "mediatype": "video", "duration": video["duration"],
                    "plot": description})
@@ -2661,7 +2734,7 @@ def add_provider_result(video, label=None):
     li.setProperty("IsPlayable", "true")
     save_url = url_for("provider_save", vid=video["id"], title=video["title"])
     li.addContextMenuItems([(_(30342), "RunPlugin(%s)" % save_url)])
-    xbmcplugin.addDirectoryItem(HANDLE, url_for("play", vid=video["id"]), li, False)
+    _add_item(url_for("play", vid=video["id"]), li, False)
 
 
 def provider_save(params):
@@ -2704,9 +2777,10 @@ def collection(params):
         shows_ = dict((m["key"], m) for m in lib.shows(keys=keys))
         videos = [lib.get_video(t[2:]) for t in targets if t.startswith("v:")]
         counts = lib.unread_episode_counts() if shows_ else {}
+        versions = _movie_versions(lib, movies_.values())
         for t in keys:
             if t in movies_:
-                add_movie(movies_[t], lib, collection_id=cid)
+                add_movie(movies_[t], lib, collection_id=cid, versions=versions)
             elif t in shows_:
                 add_show(shows_[t], collection_id=cid, new_count=counts.get(t, 0))
     for v in videos:
@@ -3767,6 +3841,7 @@ def run(argv=None):
     argv = argv or sys.argv
     BASE_URL = argv[0]
     _PLAYBACK.clear()
+    del _PENDING_ITEMS[:]
     HANDLE = int(argv[1]) if len(argv) > 1 and argv[1].lstrip("-").isdigit() else -1
     query = argv[2][1:] if len(argv) > 2 and argv[2].startswith("?") else (argv[2] if len(argv) > 2 else "")
     params = dict(urllib.parse.parse_qsl(query))

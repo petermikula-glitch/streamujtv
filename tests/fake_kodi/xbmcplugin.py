@@ -34,3 +34,9 @@ def setContent(handle, content):
 
 def addSortMethod(handle, method, label2Mask=""):
     pass
+
+
+def addDirectoryItems(handle, items, totalItems=0):
+    for url, listitem, is_folder in items:
+        ITEMS.append((url, listitem, is_folder))
+    return True

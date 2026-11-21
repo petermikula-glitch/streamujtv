@@ -536,6 +536,17 @@ class Library(object):
     def get_meta(self, key):
         return _row(self.conn.execute("SELECT * FROM meta WHERE key=?", (key,)).fetchone())
 
+    def get_metas(self, keys):
+        """{klíč: meta} pro více titulů jedním dotazem (po dávkách kvůli limitu parametrů)."""
+        keys = list(dict.fromkeys(k for k in keys if k))
+        found = {}
+        for i in range(0, len(keys), 500):
+            batch = keys[i:i + 500]
+            query = "SELECT * FROM meta WHERE key IN (%s)" % ",".join("?" for _ in batch)
+            for row in self.conn.execute(query, batch):
+                found[row["key"]] = _row(row)
+        return found
+
     def update_meta(self, key, data, lock_videos=False):
         data = dict(data)
         values = {}

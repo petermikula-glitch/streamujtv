@@ -1647,6 +1647,7 @@ def test_provider_filters_try_verified_original_title(plugin, monkeypatch):
 
     xbmcplugin.ITEMS.clear()
     plugin.add_provider_result({"id": REF, "title": "Original Name", "duration": 5600, "thumb": ""})
+    plugin._flush_items()
     assert "Jazyk neuveden" in xbmcplugin.ITEMS[0][1].label
 
 
