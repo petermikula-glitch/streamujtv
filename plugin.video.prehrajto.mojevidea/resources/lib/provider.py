@@ -5,7 +5,7 @@ Sdílený kód (catalog.py, plugin.py) mluví se službou jen přes tento modul.
 """
 import prehrajto
 from prehrajto import (CHECK_BAD_LOGIN, CHECK_NO_PREMIUM, CHECK_PREMIUM, LoginError,
-                       QUALITY_LABEL, QUALITY_ORDER, USER_AGENT, thumb_url, video_page_url)
+                       QUALITY_LABEL, QUALITY_ORDER, RateLimited, USER_AGENT, thumb_url, video_page_url)
 
 __all__ = ["CHECK_BAD_LOGIN", "CHECK_NO_PREMIUM", "CHECK_PREMIUM", "LoginError", "QUALITY_LABEL",
            "QUALITY_ORDER", "USER_AGENT", "thumb_url", "video_page_url", "NAME", "ProviderError",

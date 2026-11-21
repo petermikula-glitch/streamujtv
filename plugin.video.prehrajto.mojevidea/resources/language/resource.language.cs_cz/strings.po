@@ -84,8 +84,8 @@ msgid "TMDB API key (optional fallback source)"
 msgstr "TMDB API klíč (volitelný záložní zdroj)"
 
 msgctxt "#30023"
-msgid "Show rating in titles"
-msgstr "Zobrazovat hodnocení v názvech"
+msgid "Show rating in descriptions"
+msgstr "Zobrazovat hodnocení v popisech"
 
 msgctxt "#30024"
 msgid "Ratings and descriptions"
@@ -626,3 +626,87 @@ msgstr "Záloha uložena do %s"
 msgctxt "#30349"
 msgid "Catalogue restored"
 msgstr "Katalog obnoven"
+
+msgctxt "#30350"
+msgid "TMDB catalogue"
+msgstr "Katalog TMDB"
+
+msgctxt "#30351"
+msgid "Popular"
+msgstr "Oblíbené"
+
+msgctxt "#30352"
+msgid "Top rated"
+msgstr "Nejlépe hodnocené"
+
+msgctxt "#30353"
+msgid "Upcoming movies"
+msgstr "Připravované filmy"
+
+msgctxt "#30354"
+msgid "On the air"
+msgstr "Právě vysílané"
+
+msgctxt "#30355"
+msgid "Enter your TMDB API key in the add-on settings to browse the catalogue."
+msgstr "Pro katalog TMDB vyplňte vlastní API klíč v nastavení doplňku."
+
+msgctxt "#30356"
+msgid "Open settings"
+msgstr "Otevřít nastavení"
+
+msgctxt "#30357"
+msgid "By year"
+msgstr "Podle roku"
+
+msgctxt "#30358"
+msgid "Invalid TMDB catalogue page"
+msgstr "Neplatná stránka katalogu TMDB"
+
+msgctxt "#30359"
+msgid "Search Přehraj.to by original title"
+msgstr "Hledat pod původním názvem na Přehraj.to"
+
+msgctxt "#30360"
+msgid "Continue watching"
+msgstr "Pokračovat ve sledování"
+
+msgctxt "#30361"
+msgid "My videos"
+msgstr "Moje videa"
+
+msgctxt "#30362"
+msgid "Discover"
+msgstr "Objevovat"
+
+msgctxt "#30363"
+msgid "Play from library"
+msgstr "Přehrát z knihovny"
+
+msgctxt "#30364"
+msgid "Open series in library"
+msgstr "Otevřít seriál v knihovně"
+
+msgctxt "#30365"
+msgid "Next episode · %s"
+msgstr "Další díl · %s"
+
+msgctxt "#30366"
+msgid "%d %% · %d min left"
+msgstr "%d %% · zbývá %d min"
+
+msgctxt "#30367"
+msgid "No videos in progress or next episodes yet."
+msgstr "Zatím tu nejsou rozkoukaná videa ani další díly."
+
+msgctxt "#30368"
+msgid "Přehraj.to sign-in failed. Check your credentials in settings."
+msgstr "Přihlášení k Přehraj.to selhalo. Zkontroluj údaje v nastavení."
+
+msgctxt "#30369"
+msgid "Přehraj.to search failed. %s"
+msgstr "Hledání na Přehraj.to se nezdařilo. %s"
+
+msgctxt "#30370"
+msgid "No videos found on Přehraj.to."
+msgstr "Na Přehraj.to se nenašla žádná videa."
