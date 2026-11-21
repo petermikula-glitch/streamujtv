@@ -167,6 +167,16 @@
                     </dependencies>
                     <control type="toggle"/>
                 </setting>
+                <setting id="library_share_history" type="boolean" label="30485" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="library_status" type="action" label="30475" help="">
+                    <level>0</level>
+                    <data>RunPlugin(plugin://plugin.video.prehrajto.mojevidea/?action=kodi_status)</data>
+                    <control type="button" format="action"/>
+                </setting>
             </group>
         </category>
     </section>

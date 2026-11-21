@@ -805,6 +805,28 @@ class Library(object):
                               "WHERE vid=?", (now, position, total or row["total"], 1 if started else 0, vid))
         self.conn.commit()
 
+    def playback_history(self, vid):
+        row = self.conn.execute("SELECT * FROM history WHERE vid=?", (vid,)).fetchone()
+        mark = self.conn.execute("SELECT marked_at FROM watched_marks WHERE vid=?", (vid,)).fetchone()
+        state = _row(row) or {"last_played": 0, "position": 0, "total": 0, "plays": 0}
+        state["updated"] = max(state["last_played"], mark[0] if mark else 0)
+        state["watched"] = bool(mark or (state["total"] and state["position"] >= state["total"] * IN_PROGRESS_MAX))
+        return state
+
+    def import_kodi_history(self, vid, position, total, watched, updated):
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            local = self.playback_history(vid)
+            if local["updated"] >= updated:
+                return False
+            self.conn.execute("INSERT OR REPLACE INTO history VALUES (?, ?, ?, ?, ?)",
+                              (vid, updated, position, total, local["plays"]))
+            if watched:
+                self.conn.execute("INSERT OR REPLACE INTO watched_marks VALUES (?, ?)", (vid, updated))
+            else:
+                self.conn.execute("DELETE FROM watched_marks WHERE vid=?", (vid,))
+        return True
+
     def resume_points(self, vids=None):
         """{vid: (pozice, délka)} jen pro rozkoukaná videa."""
         q = ("SELECT vid, position, total FROM history WHERE position >= ? AND total > 0 "

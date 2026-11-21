@@ -573,8 +573,8 @@ def test_home_search_and_tmdb_catalogue_links(plugin, monkeypatch):
     xbmcplugin.ITEMS.clear()
     plugin.search({"q": "Pelíšky"})
     urls = [parse_qs(urlsplit(url).query) for url, _, _ in xbmcplugin.ITEMS]
-    assert [url["action"][0] for url in urls] == ["play", "provider_search", "tmdb_search"]
-    assert all(url["q"] == ["Pelíšky"] for url in urls[1:])
+    assert [url["action"][0] for url in urls] == ["play", "search"]
+    assert urls[1]["q"] == ["Pelíšky"] and urls[1]["online"] == ["1"]
     xbmcplugin.ITEMS.clear()
 
     plugin.tmdb_search({"q": "Pelíšky"})
@@ -1062,3 +1062,141 @@ def test_export_retries_failed_file_before_scanning(plugin, monkeypatch, tmp_pat
     assert not xbmc.BUILTINS
     plugin._export_to_kodi(str(root), automatic=True)
     assert list(root.rglob("*.nfo")) and xbmc.BUILTINS == ["UpdateLibrary(video)"]
+
+
+def test_search_opens_exact_episode_and_prioritizes_movie_year(plugin):
+    from urllib.parse import parse_qs, urlsplit
+
+    import nameparser
+    import xbmcplugin
+
+    exact = "2:archa:bbbbbbbbbbbbbbbb"
+    other = "3:archa:cccccccccccccccc"
+    newer = "4:pelisky:dddddddddddddddd"
+    with plugin.open_library() as lib:
+        for vid, title in ((other, "Archa.S01E03.CZ"), (exact, "Archa.S02E03.CZ"),
+                           (newer, "Pelisky.2026.CZ"), (REF, "Pelisky.1999.CZ")):
+            lib.upsert_video(vid, title, "account", nameparser.parse(title))
+        lib.record_play(exact, 90, 1800)
+    plugin.search({"q": "archa 2x03"})
+    url, item, folder = xbmcplugin.ITEMS[0]
+    assert parse_qs(urlsplit(url).query)["vid"] == [exact]
+    assert not folder and "S02E03 · Pokračovat" in item.label
+    assert item.tag.data["resumepoint"] == (90.0, 1800.0)
+    xbmcplugin.ITEMS.clear()
+    plugin.search({"q": "pelisky 1999"})
+    assert "(1999)" in xbmcplugin.ITEMS[0][1].label
+    assert "(2026)" in xbmcplugin.ITEMS[1][1].label
+
+
+def test_online_search_merges_verified_matches_and_shows_versions(plugin, monkeypatch):
+    from urllib.parse import parse_qsl, urlsplit
+
+    import nameparser
+    import xbmcplugin
+
+    alt = "2:pelisky:aaaaaaaaaaaaaaaa"
+    other = "3:pelisky:bbbbbbbbbbbbbbbb"
+    calls = []
+
+    class TmdbSearch:
+        enabled = True
+
+        def search_titles(self, query, _page):
+            assert query == "Pelíšky"
+            return [{"media_type": "movie", "id": 10, "title": query, "release_date": "1999-01-01"},
+                    {"media_type": "movie", "id": 11, "title": query, "release_date": "2026-01-01"}], 1
+
+    def provider_search(_client, query, page, cursor):
+        calls.append((query, page, cursor))
+        return [
+            {"id": REF, "title": "Pelisky.1999.CZ", "duration": 6000, "thumb": ""},
+            {"id": alt, "title": "Pelisky.1999.EN.1080p", "duration": 6000, "thumb": ""},
+            {"id": other, "title": "Pelisky.2026.CZ", "duration": 6000, "thumb": ""},
+        ], ""
+
+    monkeypatch.setattr(plugin, "make_tmdb", TmdbSearch)
+    monkeypatch.setattr(provider, "search_catalog", provider_search)
+    with plugin.open_library() as lib:
+        lib.upsert_video(REF, "Pelisky.1999.CZ", "account", nameparser.parse("Pelisky.1999.CZ"))
+    plugin.search({"q": "Pelíšky 1999", "online": "1"})
+    assert len(xbmcplugin.ITEMS) == 4  # dva tituly a odkazy na úplné výsledky jednotlivých zdrojů
+    local_label = xbmcplugin.ITEMS[0][1]
+    assert "Můj katalog, Přehraj.to, TMDB" in local_label.label
+    assert "(2026)" in xbmcplugin.ITEMS[1][1].label
+    detail = local_label.context[0][1][len("Container.Update("):-1]
+    xbmcplugin.ITEMS.clear()
+    plugin.search_title(dict(parse_qsl(urlsplit(detail).query)))
+    rows = [dict(parse_qsl(urlsplit(url).query)) for url, _, _ in xbmcplugin.ITEMS]
+    assert [row["vid"] for row in rows if row["action"] == "play"] == [REF, alt]
+    assert calls == [("Pelíšky 1999", 1, "")]
+
+
+def test_kodi_wizard_checks_sources_and_only_shares_verified_exports(plugin, monkeypatch, tmp_path):
+    import nameparser
+    import xbmc
+    import xbmcaddon
+    import xbmcgui
+
+    root = tmp_path / "kodi"
+    foreign = tmp_path / "foreign.strm"
+    foreign.write_text("plugin://another.addon/?action=play&vid=" + REF)
+    ours = root / "Filmy" / "Pelisky (1999)" / "Pelisky (1999).strm"
+    native = {"movieid": 7, "file": str(ours), "playcount": 0,
+              "resume": {"position": 600, "total": 6200},
+              "lastplayed": "2025-02-03 04:05:06"}
+    controls = []
+    def execute(raw):
+        request = json.loads(raw)
+        method, params = request["method"], request["params"]
+        controls.append((method, params))
+        if method == "Files.GetSources":
+            result = {"sources": [{"file": str(root / "Filmy") + "/"}]}
+        elif method == "VideoLibrary.GetMovies":
+            result = {"movies": [native.copy(), dict(native, movieid=8, file=str(foreign))]}
+        elif method == "VideoLibrary.GetEpisodes":
+            result = {"episodes": []}
+        elif method == "VideoLibrary.GetMovieDetails":
+            result = {"moviedetails": native.copy()}
+        elif method == "VideoLibrary.SetMovieDetails":
+            native.update({key: value for key, value in params.items() if key != "movieid"})
+            result = "OK"
+        else:
+            raise AssertionError(method)
+        return json.dumps({"jsonrpc": "2.0", "id": 1, "result": result})
+
+    monkeypatch.setattr(xbmc, "executeJSONRPC", execute, raising=False)
+    with plugin.open_library() as lib:
+        lib.upsert_video(REF, "Pelisky.1999.CZ", "account", nameparser.parse("Pelisky.1999.CZ"))
+    xbmcgui.BROWSE_ANSWERS.append(str(root))
+    plugin.kodi_choose_folder({})
+    assert ours.is_file()
+    assert "Přidat videa" in xbmcgui.OK_DIALOGS[-1]
+    plugin.kodi_status({})
+    assert "Zdroj filmů — nalezen" in xbmcgui.OK_DIALOGS[-1]
+    assert "Kodi načetlo 1 z 1" in xbmcgui.OK_DIALOGS[-1]
+
+    xbmcaddon.SETTINGS["library_share_history"] = "true"
+    assert plugin._import_kodi_history(force=True) == 1
+    with plugin.open_library() as lib:
+        assert lib.resume_points() == {REF: (600, 6200)}
+        lib.record_play(REF, 900, 6200)
+    assert plugin._import_kodi_history(force=True) == 0
+    plugin.publish_kodi_history({REF})
+    assert native["resume"] == {"position": 900.0, "total": 6200.0}
+    assert {params["movieid"] for method, params in controls if method == "VideoLibrary.SetMovieDetails"} == {7}
+
+    native["playcount"] = 1
+    plugin.import_kodi_marks({("movie", 7): True})
+    with plugin.open_library() as lib:
+        assert lib.watched() == {REF}
+    native["playcount"] = 0
+    plugin.import_kodi_marks({("movie", 7): False})
+    with plugin.open_library() as lib:
+        assert not lib.watched()
+
+    ours.write_text(foreign.read_text())
+    with plugin.open_library() as lib:
+        lib.record_play(REF, 1200, 6200)
+    plugin.publish_kodi_history({REF})
+    assert native["resume"]["position"] == 900.0

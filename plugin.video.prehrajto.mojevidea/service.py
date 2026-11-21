@@ -52,6 +52,7 @@ class PlaybackTracker(xbmc.Player):
         xbmc.Player.__init__(self)
         self.vid = None
         self.next_offer = None
+        self.kodi_updates = set()
         self.position = 0.0
         self.total = 0.0
 
@@ -97,7 +98,15 @@ class PlaybackTracker(xbmc.Player):
             if ended and self.total:
                 self.position = self.total
             self.save()
+            if kodiutils.setting_bool("library_share_history"):
+                self.kodi_updates.add(self.vid)
         self.vid = None
+
+    def publish_kodi_updates(self):
+        if self.kodi_updates and not self.vid:
+            updates, self.kodi_updates = self.kodi_updates, set()
+            import plugin
+            plugin.publish_kodi_history(updates)
 
     def onPlayBackStopped(self):
         self.finish()
@@ -128,6 +137,30 @@ class PlaybackTracker(xbmc.Player):
             except Exception as e:  # Kodi musí službu nechat běžet i po chybě mezipaměti
                 kodiutils.log_error("opakování přehrávání selhalo: %s" % e)
                 kodiutils.notify(kodiutils._(30405), time_ms=8000)
+
+
+class LibraryMonitor(xbmc.Monitor):
+    def __init__(self):
+        xbmc.Monitor.__init__(self)
+        self.marks = {}
+
+    def onNotification(self, sender, method, data):
+        if method != "VideoLibrary.OnUpdate" or not kodiutils.setting_bool("library_share_history"):
+            return
+        try:
+            event = json.loads(data)
+            item = event.get("item") or event
+            count = event.get("playcount")
+            if item.get("type") in ("movie", "episode") and isinstance(count, int) and count >= 0:
+                self.marks[(item["type"], item["id"])] = count > 0
+        except (ValueError, TypeError, AttributeError, KeyError):
+            pass
+
+    def import_marks(self):
+        if self.marks:
+            marks, self.marks = self.marks, {}
+            import plugin
+            plugin.import_kodi_marks(marks)
 
 
 def sync_due():
@@ -163,13 +196,16 @@ def try_sync(player):
 
 
 def main():
-    monitor = xbmc.Monitor()
+    monitor = LibraryMonitor()
     player = PlaybackTracker()
     started = time.time()
     last_check = 0.0
     last_save = 0.0
     while not monitor.abortRequested():
         now = time.time()
+        if not player.vid:
+            monitor.import_marks()
+            player.publish_kodi_updates()
         player.offer_next_if_due()
         if player.vid:
             player.update()
@@ -182,6 +218,7 @@ def main():
         if monitor.waitForAbort(TICK):
             break
     player.finish()
+    player.publish_kodi_updates()
 
 
 if __name__ == "__main__":

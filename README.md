@@ -48,8 +48,8 @@ rozdíly jsou v sekci [Přehraj.to](#přehrajto--rozdíly).
 ### Vyhledávání na Přehraj.to a záloha
 
 V doplňku Přehraj.to otevřete **Hledat** a zadejte dotaz. Pod výsledky z vlastního katalogu
-vyberte **Hledat na celém Přehraj.to** nebo **Hledat v TMDB**.
-Výsledky odpovídají tomu, co služba vrátí pro daný dotaz a přihlášený účet.
+vyberte **Zahrnout online výsledky**. Pod společným přehledem jsou odkazy na úplné
+výsledky jednotlivých služeb.
 Video můžete přehrát rovnou nebo ho přes kontextovou nabídku přidat do vlastního katalogu.
 
 V **Nástroje → Zálohovat katalog** uložíte katalog, kolekce, ruční úpravy a historii
@@ -81,6 +81,17 @@ knihovny Kodi po automatickém exportu** načte nové soubory do nastavených
 zdrojů Kodi. Přidejte podsložky `Filmy` a `Serialy` ve správci zdrojů
 Kodi jako obsah typu Filmy a Seriály. Export zachovává ručně upravené soubory
 v cílové složce.
+
+Hledání přijímá také dotazy s rokem nebo číslem dílu, například
+`Pelíšky 1999` a `Hra o trůny 2x03`. Volba **Zahrnout online výsledky** přidá
+první stránku z Přehraj.to a případně TMDB a sloučí jednoznačné shody.
+**Detail výsledku a verze** v kontextové nabídce otevře přehrávání a dostupné varianty.
+
+V **Nástroje → Propojit s knihovnou Kodi** lze vybrat složku, exportovat videa,
+přejít k přidání zdrojů a zkontrolovat, kolik exportovaných videí Kodi načetlo.
+Po zapnutí **Sdílet historii sledování s knihovnou Kodi** doplněk propojí
+pozice a zhlédnutí u rozpoznaných exportů. Záznamy z Kodi se načtou při otevření
+Rozkoukaných nebo ručně v průvodci.
 
 ## Instalace
 

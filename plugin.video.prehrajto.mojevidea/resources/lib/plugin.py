@@ -7,6 +7,7 @@ import time
 import urllib.parse
 import uuid
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from hashlib import sha256
 from itertools import islice
@@ -19,9 +20,11 @@ import xbmcvfs
 
 import catalog
 import csfd
+import kodi_library
 import library_export
 from nameparser import normalize, parse
 import provider
+import search_results
 from db import Library
 from kodiutils import (_, ADDON, ADDON_ID, FANART, ICON, KODI_MAJOR, Progress, keyboard, log,
                        log_error, log_info, notify, number, ok, profile_path, select, set_setting,
@@ -1281,6 +1284,7 @@ def offer_next_episode(vid, player):
 
 
 def in_progress(params):
+    _import_kodi_history()
     with open_library() as lib:
         resume = lib.resume_points()
         watched = lib.watched()
@@ -1376,6 +1380,8 @@ def mark_watched(params):
             videos = _item_videos(lib, params)
         lib.set_watched(dict.fromkeys(video["id"] for video in videos), watched)
     _PLAYBACK.clear()
+    if videos:
+        publish_kodi_history({v["id"] for v in videos}, mark=watched)
     xbmc.executebuiltin("Container.Refresh")
 
 
@@ -1508,28 +1514,195 @@ def search_menu(params):
     end(cache=False)
 
 
+def _search_cards(query, include_online):
+    title, year, position = search_results.split_query(query)
+    with open_library() as lib:
+        movies, shows = lib.search(title)
+        if year and query != title:
+            literal_movies, literal_shows = lib.search(query)
+            movies = list({item["key"]: item for item in literal_movies + movies}.values())
+            shows = list({item["key"]: item for item in literal_shows + shows}.values())
+        candidates = []
+        for meta in ([] if position else movies) + shows:
+            kind = "movie" if meta["kind"] == "movie" else "tv"
+            videos = []
+            if kind == "movie" or position:
+                videos = lib.videos_for_meta(meta["key"], season=position[0] if position else None)
+                if position:
+                    videos = [v for v in videos if v["episode"] == position[1]]
+            candidates.append(search_results.new_card(
+                kind, _display_title(meta), _display_year(meta), position,
+                (meta.get("orig_title"), meta.get("search_title")), meta, videos))
+    online = _online_search(query, title, position) if include_online else {}
+    cards = search_results.combine(candidates, online.get("tmdb", []), online.get("provider", []),
+                                   position, provider.video_key)
+    cards.sort(key=lambda card: (
+        not bool(card["local"]),
+        bool(position and not card["videos"] and not card["provider"]),
+        bool(year and card["year"] != year),
+        search_results.compare_title(title, card["names"]),
+        normalize(card["title"])))
+    return cards, online.get("errors", [])
+
+
+def _online_search(query, title, position):
+    cache_key = "search:online"
+    with open_library() as lib:
+        cached = lib.get_kv(cache_key)
+    now = time.time()
+    if cached:
+        try:
+            payload = json.loads(cached)
+            ttl = 20 if payload.get("errors") else 600
+            if payload["query"] == query and now - payload["created"] < ttl:
+                return payload
+        except (TypeError, KeyError, ValueError):
+            pass
+
+    client = make_client()
+    tmdb = make_tmdb()
+    payload = {"created": now, "query": query, "errors": []}
+    provider_query = "%s S%02dE%02d" % (title, *position) if position else query
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        provider_task = pool.submit(provider.search_catalog, client, provider_query, 1, "")
+        tmdb_task = pool.submit(tmdb.search_titles, title, 1) if tmdb.enabled else None
+        try:
+            payload["provider"] = provider_task.result()[0]
+        except (provider.ProviderError, provider.RateLimited):
+            payload["errors"].append("Přehraj.to")
+        if tmdb_task:
+            try:
+                payload["tmdb"] = tmdb_task.result()[0]
+            except TmdbError:
+                payload["errors"].append("TMDB")
+    with open_library() as lib:
+        lib.set_kv(cache_key, json.dumps(payload))
+    return payload
+
+
+def _main_search_action(card):
+    resume = _playback_state()["resume"]
+    if card["videos"]:
+        preferred = min(card["videos"], key=lambda v: (v["id"] not in resume, _version_score(v)))
+        has_resume = preferred["id"] in resume
+        return (30466 if has_resume else 30465), "play", {"vid": preferred["id"]}, preferred
+    if card["kind"] == "tv" and not card["position"]:
+        if card["local"]:
+            return 30364, "show", {"key": card["local"]["key"]}, None
+        if card["provider"]:
+            return 30486, "provider_search", {"q": card["title"]}, None
+    if card["provider"]:
+        videos = [_provider_version(video, parse(video["title"])) for video in card["provider"]]
+        preferred = min(videos, key=lambda v: (v["id"] not in resume, _version_score(v)))
+        return (30466 if preferred["id"] in resume else 30465), "play", {"vid": preferred["id"]}, None
+    if card["local"]:
+        return 30364, "show", {"key": card["local"]["key"]}, None
+    return 30391, "tmdb_title", {"kind": card["kind"], "tmdb_id": card["tmdb"]["id"]}, None
+
+
+def _search_entry(card, label, action, args, video, context=(), direct_resume=False):
+    li = xbmcgui.ListItem(label)
+    meta = card["local"] or {}
+    poster_path = (card["tmdb"] or {}).get("poster_path")
+    poster = meta.get("poster") or (IMG + "w500" + poster_path if poster_path else "")
+    thumb = meta.get("thumb") or next((v.get("thumb") for v in card["provider"] if v.get("thumb")), "")
+    _art(li, poster, thumb, meta.get("fanart"))
+    _set_info(li, {"title": label, "year": card["year"],
+                   "mediatype": "episode" if card["position"] else
+                   ("movie" if card["kind"] == "movie" else "tvshow")})
+    items = list(context)
+    if action == "play":
+        vid = args["vid"]
+        li.setProperty("IsPlayable", "true")
+        if video:
+            offer = _apply_version_playback(li, video, items)
+            args = dict(args, offer_transfer=offer)
+        else:
+            _apply_playback(li, vid)
+        if direct_resume and vid in _playback_state()["resume"]:
+            args = dict(args, continue_play=1)
+    if items:
+        li.addContextMenuItems(items)
+    xbmcplugin.addDirectoryItem(HANDLE, url_for(action, **args), li, action != "play")
+
+
+def _search_label(card):
+    title = card["title"]
+    if card["position"]:
+        title += " S%02dE%02d" % card["position"]
+    if card["year"]:
+        title += " (%d)" % card["year"]
+    return title
+
+
 def search(params):
     query = params.get("q", "").strip()
     if not query:
-        # klávesnice jen jednou – výsledky mají vlastní adresu, aby se po návratu
-        # zpět neotevírala znovu
         query = keyboard(_(30118))
         xbmcplugin.endOfDirectory(HANDLE, succeeded=False)
         if query and query.strip():
             xbmc.executebuiltin("Container.Update(%s)" % url_for("search", q=query.strip()))
         return
+    include_online = params.get("online") == "1"
     with open_library() as lib:
         lib.add_search(query)
-        found_movies, found_shows = lib.search(query)
-        counts = lib.unread_episode_counts() if found_shows else {}
-        for m in found_movies:
-            add_movie(m, lib)
-    for m in found_shows:
-        add_show(m, new_count=counts.get(m["key"], 0))
-    if not found_movies and not found_shows:
-        notify(_(30389))
-    add_dir(_(30340), "provider_search", "DefaultAddonsSearch.png", q=query)
-    add_dir(_(30372), "tmdb_search", "DefaultAddonsSearch.png", q=query)
+    cards, errors = _search_cards(query, include_online)
+    for card in cards:
+        name = _search_label(card)
+        label, action, args, video = _main_search_action(card)
+        if action == "play":
+            name += " · " + _(label)
+        if include_online:
+            sources = ([_(30467)] if card["local"] else [])
+            sources += [source for present, source in ((card["provider"], "Přehraj.to"), (card["tmdb"], "TMDB"))
+                        if present]
+            if sources:
+                name += " · " + ", ".join(sources)
+        detail = url_for("search_title", q=query, online=int(include_online), card=search_results.card_id(card))
+        context = [(_(30468), "Container.Update(%s)" % detail)]
+        if card["local"]:
+            context.extend(_meta_context(card["local"]))
+        _search_entry(card, name, action, args, video, context)
+    if not cards:
+        notify(_(30121 if include_online else 30389))
+    if errors:
+        notify(_(30469) % ", ".join(errors))
+    if not include_online:
+        add_dir(_(30464), "search", "DefaultAddonsSearch.png", q=query, online=1)
+    else:
+        add_dir(_(30340), "provider_search", "DefaultAddonsSearch.png", q=query)
+        add_dir(_(30372), "tmdb_search", "DefaultAddonsSearch.png", q=search_results.split_query(query)[0])
+    end("videos", cache=False)
+
+
+def search_title(params):
+    cards, _errors = _search_cards(params["q"], params.get("online") == "1")
+    card = next((entry for entry in cards if search_results.card_id(entry) == params["card"]), None)
+    if not card:
+        end("videos", cache=False)
+        return
+    label, action, args, video = _main_search_action(card)
+    _search_entry(card, _(label), action, args, video, direct_resume=True)
+    used = {provider.video_key(args["vid"])} if action == "play" else set()
+    for entry in sorted(card["videos"], key=_version_score):
+        identity = provider.video_key(entry["id"])
+        if identity not in used:
+            used.add(identity)
+            _search_entry(card, _version_label(entry) or entry["raw_title"], "play", {"vid": entry["id"]}, entry)
+    for entry in card["provider"]:
+        identity = provider.video_key(entry["id"])
+        if identity not in used:
+            used.add(identity)
+            parsed = parse(entry["title"])
+            entry_info = _provider_version(entry, parsed)
+            label = _version_label(entry_info) or entry["title"]
+            if card["kind"] == "tv" and not card["position"] and parsed["episode"]:
+                label = "S%02dE%02d · %s" % (parsed["season"], parsed["episode"], label)
+            add_provider_result(entry, "Přehraj.to · " + label)
+    if card["tmdb"] and action != "tmdb_title":
+        add_dir(_(30391), "tmdb_title", kind=card["kind"], tmdb_id=card["tmdb"]["id"])
+    if card["local"] and card["kind"] == "tv" and action != "show":
+        add_dir(_(30364), "show", key=card["local"]["key"])
     end("videos", cache=False)
 
 
@@ -1729,6 +1902,7 @@ def tools(params):
     add_action(_(30203), "enrich", "DefaultAddonInfoProvider.png")
     add_action(_(30202), "add_link", "DefaultAddSource.png")
     add_action(_(30201), "import_file", "DefaultFile.png")
+    add_dir(_(30470), "kodi_setup", "DefaultAddonLibrary.png")
     add_action(_(30206), "export_library", "DefaultAddonLibrary.png")
     add_action(_(30205), "account_status", "DefaultUser.png")
     add_action(_(30204), "refresh_all", "DefaultAddonInfoProvider.png")
@@ -1967,7 +2141,7 @@ def restore_catalog(params):
     xbmc.executebuiltin("Container.Refresh")
 
 
-def _export_to_kodi(folder, automatic=False):
+def _export_to_kodi(folder, automatic=False, prompt_scan=True):
     state_file = profile_path("library-export.db")
     try:
         with open_library() as lib:
@@ -1979,10 +2153,11 @@ def _export_to_kodi(folder, automatic=False):
         if not automatic:
             notify(_(30227) % (result.movies, result.shows, folder), time_ms=8000)
         scan = (result.scan_pending and setting_bool("library_auto_scan") if automatic
-                else not result.failed and yesno(_(30233)))
+                else prompt_scan and not result.failed and yesno(_(30233)))
         if not result.failed and scan:
             xbmc.executebuiltin("UpdateLibrary(video)")
             library_export.mark_scanned(state_file, result)
+        return result
     except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
         log_error("export do Kodi selhal: %s" % type(error).__name__)
         notify(_(30463), time_ms=8000)
@@ -1995,6 +2170,138 @@ def export_library(params):
         ADDON.openSettings()
         return
     _export_to_kodi(folder)
+
+
+def _kodi_history_parameters():
+    folder = setting("library_path")
+    if folder and setting_bool("library_share_history"):
+        return folder, profile_path("library-export.db"), ADDON_ID
+    return None
+
+
+def _import_kodi_history(force=False):
+    args = _kodi_history_parameters()
+    if not args:
+        return None
+    try:
+        with open_library() as lib:
+            now = int(time.time())
+            if force or now - int(lib.get_kv("kodi:last_import", 0)) >= 30:
+                changed = kodi_library.import_history(lib, *args)
+                lib.set_kv("kodi:last_import", now)
+                _PLAYBACK.clear()
+                return changed
+    except (ValueError, OSError, sqlite3.Error, kodi_library.KodiLibraryError) as error:
+        log("kodi: history import failed (%s)" % type(error).__name__)
+    return None
+
+
+def publish_kodi_history(vids, mark=None):
+    args = _kodi_history_parameters()
+    if not args:
+        return
+    try:
+        with open_library() as lib:
+            kodi_library.publish_history(lib, *args, vids, mark=mark)
+    except (ValueError, OSError, sqlite3.Error, kodi_library.KodiLibraryError) as error:
+        log("kodi: history update failed (%s)" % type(error).__name__)
+
+
+def import_kodi_marks(marks):
+    args = _kodi_history_parameters()
+    if not args:
+        return
+    try:
+        with open_library() as lib:
+            for (kind, item_id), watched in marks.items():
+                kodi_library.accept_kodi_mark(lib, *args, kind, item_id, watched)
+    except (ValueError, OSError, sqlite3.Error, kodi_library.KodiLibraryError) as error:
+        log("kodi: watched state update failed (%s)" % type(error).__name__)
+
+
+def kodi_setup(params):
+    folder = setting("library_path")
+    add_action(_(30471), "kodi_choose_folder", "DefaultFolder.png")
+    if folder:
+        add_action(_(30472), "kodi_instructions", "DefaultAddonLibrary.png")
+        add_action(_(30473), "kodi_sources", "DefaultFolder.png")
+        add_action(_(30474), "kodi_scan", "DefaultRecentlyAddedMovies.png")
+        add_action(_(30475), "kodi_status", "DefaultIconInfo.png")
+        if setting_bool("library_share_history"):
+            add_action(_(30476), "kodi_import", "DefaultRecentlyAddedEpisodes.png")
+        else:
+            add_action(_(30477), "kodi_enable_history", "DefaultInProgressShows.png")
+    end(cache=False)
+
+
+def kodi_choose_folder(params):
+    current = setting("library_path")
+    folder = xbmcgui.Dialog().browse(0, _(30471), "files", defaultt=current)
+    if not folder:
+        return
+    set_setting("library_path", folder)
+    result = _export_to_kodi(folder, prompt_scan=False)
+    if result and not result.failed:
+        kodi_instructions(params)
+    xbmc.executebuiltin("Container.Refresh")
+
+
+def kodi_instructions(params):
+    folder = setting("library_path")
+    if folder:
+        root = library_export.export_folder(folder)
+        text_viewer(_(30470), _(30478) % (library_export._join(root, "Filmy"),
+                                         library_export._join(root, "Serialy")))
+
+
+def kodi_sources(params):
+    xbmc.executebuiltin("ActivateWindow(Videos,Files,return)")
+
+
+def kodi_scan(params):
+    folder = setting("library_path")
+    if not folder:
+        notify(_(30228))
+        return
+    result = _export_to_kodi(folder, prompt_scan=False)
+    if result and not result.failed:
+        xbmc.executebuiltin("UpdateLibrary(video)")
+        try:
+            library_export.mark_scanned(profile_path("library-export.db"), result)
+        except (OSError, sqlite3.Error):
+            log("kodi: scan status could not be saved")
+
+
+def kodi_status(params):
+    folder = setting("library_path")
+    if not folder:
+        ok(_(30228))
+        return
+    state_file = profile_path("library-export.db")
+    try:
+        movies, shows = kodi_library.source_status(folder)
+        indexed = list(kodi_library.indexed_links(folder, state_file, ADDON_ID))
+        exported = len(library_export.exported_streams(state_file, folder))
+    except (ValueError, OSError, sqlite3.Error, kodi_library.KodiLibraryError):
+        ok(_(30479))
+        return
+    status = _(30480) % (_(30481 if movies else 30482), _(30481 if shows else 30482), len(indexed), exported)
+    text_viewer(_(30475), status)
+
+
+def kodi_import(params):
+    changed = _import_kodi_history(force=True)
+    notify(_(30479) if changed is None else _(30483) % changed)
+    xbmc.executebuiltin("Container.Refresh")
+
+
+def kodi_enable_history(params):
+    if yesno(_(30484)):
+        folder = setting("library_path")
+        result = _export_to_kodi(folder, automatic=True) if folder else None
+        if result and not result.failed:
+            set_setting("library_share_history", "true")
+            kodi_import(params)
 
 
 def open_settings(params):
@@ -2477,7 +2784,7 @@ ROUTES = {
     "movie_decades": movie_decades, "movie_countries": movie_countries,
     "movie_ratings": movie_ratings, "versions": versions, "shows_menu": shows_menu, "shows": shows,
     "show": show, "season": season, "recent": recent, "all_videos": all_videos, "unmatched": unmatched, "hidden": hidden,
-    "search_menu": search_menu, "search": search, "search_delete": search_delete,
+    "search_menu": search_menu, "search": search, "search_delete": search_delete, "search_title": search_title,
     "provider_search": provider_search, "provider_save": provider_save,
     "tmdb_catalog": tmdb_catalog, "tmdb_categories": tmdb_categories,
     "tmdb_filters": tmdb_filters, "tmdb_titles": tmdb_titles, "tmdb_title": tmdb_title,
@@ -2501,6 +2808,9 @@ ROUTES = {
     "movie_filter_create": movie_filter_create, "movie_filter_save": movie_filter_save,
     "movie_filter_delete": movie_filter_delete, "episode_detail": episode_detail,
     "new_episodes": new_episodes, "batch_episodes": batch_episodes,
+    "kodi_setup": kodi_setup, "kodi_choose_folder": kodi_choose_folder, "kodi_instructions": kodi_instructions,
+    "kodi_sources": kodi_sources, "kodi_scan": kodi_scan, "kodi_status": kodi_status,
+    "kodi_import": kodi_import, "kodi_enable_history": kodi_enable_history,
 }
 
 

@@ -1062,3 +1062,95 @@ msgstr "Počet zachovaných souborů s vlastními úpravami: %d"
 msgctxt "#30463"
 msgid "Kodi library export failed. Check the export folder."
 msgstr "Export do knihovny Kodi se nezdařil. Zkontroluj složku exportu."
+
+msgctxt "#30464"
+msgid "Include online results"
+msgstr "Zahrnout online výsledky"
+
+msgctxt "#30465"
+msgid "Play"
+msgstr "Přehrát"
+
+msgctxt "#30466"
+msgid "Resume"
+msgstr "Pokračovat"
+
+msgctxt "#30467"
+msgid "My catalogue"
+msgstr "Můj katalog"
+
+msgctxt "#30468"
+msgid "Result details and versions"
+msgstr "Detail výsledku a verze"
+
+msgctxt "#30469"
+msgid "Results could not be loaded from %s."
+msgstr "Výsledky ze zdroje %s se nepodařilo načíst."
+
+msgctxt "#30470"
+msgid "Kodi library setup"
+msgstr "Propojit s knihovnou Kodi"
+
+msgctxt "#30471"
+msgid "Choose a folder and export the catalogue"
+msgstr "Vybrat složku a exportovat katalog"
+
+msgctxt "#30472"
+msgid "Instructions for adding sources"
+msgstr "Pokyny k přidání zdrojů"
+
+msgctxt "#30473"
+msgid "Open Kodi video sources"
+msgstr "Otevřít zdroje videí v Kodi"
+
+msgctxt "#30474"
+msgid "Export and scan into Kodi"
+msgstr "Exportovat a načíst do Kodi"
+
+msgctxt "#30475"
+msgid "Check Kodi library connection"
+msgstr "Ověřit propojení s Kodi"
+
+msgctxt "#30476"
+msgid "Import Kodi playback history now"
+msgstr "Načíst historii z Kodi teď"
+
+msgctxt "#30477"
+msgid "Enable shared playback history"
+msgstr "Zapnout společnou historii sledování"
+
+msgctxt "#30478"
+msgid "In Kodi, open Videos → Files → Add videos. Add %s as Movies and %s as TV shows. For the information provider, choose Local information only (NFO). Then choose Export and scan into Kodi and Check Kodi library connection."
+msgstr "V Kodi otevři Videa → Soubory → Přidat videa. Složku %s přidej jako Filmy a %s jako Seriály. Jako poskytovatele informací zvol místní informace (NFO). Potom vyber Exportovat a načíst do Kodi a Ověřit propojení s Kodi."
+
+msgctxt "#30479"
+msgid "Kodi library data could not be read."
+msgstr "Údaje z knihovny Kodi se nepodařilo načíst."
+
+msgctxt "#30480"
+msgid "Movies source — %s\nTV shows source — %s\nKodi has indexed %d of %d exported video links."
+msgstr "Zdroj filmů — %s\nZdroj seriálů — %s\nKodi načetlo %d z %d exportovaných odkazů na videa."
+
+msgctxt "#30481"
+msgid "found"
+msgstr "nalezen"
+
+msgctxt "#30482"
+msgid "missing"
+msgstr "chybí"
+
+msgctxt "#30483"
+msgid "Playback records imported from Kodi: %d"
+msgstr "Počet záznamů sledování převzatých z Kodi: %d"
+
+msgctxt "#30484"
+msgid "Share resume points and watched status with the Kodi library for exported videos?"
+msgstr "Sdílet rozkoukané pozice a stav zhlédnutí s knihovnou Kodi u exportovaných videí?"
+
+msgctxt "#30485"
+msgid "Share playback history with the Kodi library"
+msgstr "Sdílet historii sledování s knihovnou Kodi"
+
+msgctxt "#30486"
+msgid "Browse episodes on Přehraj.to"
+msgstr "Procházet díly na Přehraj.to"

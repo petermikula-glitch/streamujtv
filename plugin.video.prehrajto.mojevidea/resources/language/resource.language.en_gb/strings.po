@@ -1062,3 +1062,95 @@ msgstr ""
 msgctxt "#30463"
 msgid "Kodi library export failed. Check the export folder."
 msgstr ""
+
+msgctxt "#30464"
+msgid "Include online results"
+msgstr ""
+
+msgctxt "#30465"
+msgid "Play"
+msgstr ""
+
+msgctxt "#30466"
+msgid "Resume"
+msgstr ""
+
+msgctxt "#30467"
+msgid "My catalogue"
+msgstr ""
+
+msgctxt "#30468"
+msgid "Result details and versions"
+msgstr ""
+
+msgctxt "#30469"
+msgid "Results could not be loaded from %s."
+msgstr ""
+
+msgctxt "#30470"
+msgid "Kodi library setup"
+msgstr ""
+
+msgctxt "#30471"
+msgid "Choose a folder and export the catalogue"
+msgstr ""
+
+msgctxt "#30472"
+msgid "Instructions for adding sources"
+msgstr ""
+
+msgctxt "#30473"
+msgid "Open Kodi video sources"
+msgstr ""
+
+msgctxt "#30474"
+msgid "Export and scan into Kodi"
+msgstr ""
+
+msgctxt "#30475"
+msgid "Check Kodi library connection"
+msgstr ""
+
+msgctxt "#30476"
+msgid "Import Kodi playback history now"
+msgstr ""
+
+msgctxt "#30477"
+msgid "Enable shared playback history"
+msgstr ""
+
+msgctxt "#30478"
+msgid "In Kodi, open Videos → Files → Add videos. Add %s as Movies and %s as TV shows. For the information provider, choose Local information only (NFO). Then choose Export and scan into Kodi and Check Kodi library connection."
+msgstr ""
+
+msgctxt "#30479"
+msgid "Kodi library data could not be read."
+msgstr ""
+
+msgctxt "#30480"
+msgid "Movies source — %s\nTV shows source — %s\nKodi has indexed %d of %d exported video links."
+msgstr ""
+
+msgctxt "#30481"
+msgid "found"
+msgstr ""
+
+msgctxt "#30482"
+msgid "missing"
+msgstr ""
+
+msgctxt "#30483"
+msgid "Playback records imported from Kodi: %d"
+msgstr ""
+
+msgctxt "#30484"
+msgid "Share resume points and watched status with the Kodi library for exported videos?"
+msgstr ""
+
+msgctxt "#30485"
+msgid "Share playback history with the Kodi library"
+msgstr ""
+
+msgctxt "#30486"
+msgid "Browse episodes on Přehraj.to"
+msgstr ""

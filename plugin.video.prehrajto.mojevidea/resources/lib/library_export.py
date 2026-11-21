@@ -7,6 +7,7 @@ import uuid
 from collections import namedtuple
 from contextlib import closing
 from hashlib import sha256
+from urllib.parse import parse_qs, urlsplit
 from xml.sax.saxutils import escape
 
 import xbmcvfs
@@ -22,7 +23,32 @@ def _connect(state_file):
     conn.execute(
         "CREATE TABLE IF NOT EXISTS exports (folder TEXT PRIMARY KEY, names TEXT NOT NULL, "
         "files TEXT NOT NULL, generation INTEGER NOT NULL, scanned INTEGER NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS exported_streams (folder TEXT NOT NULL, relative TEXT NOT NULL, "
+                 "vid TEXT NOT NULL, PRIMARY KEY(folder, relative))")
     return conn
+
+
+def export_folder(folder):
+    path = xbmcvfs.translatePath(folder)
+    return os.path.realpath(path) if "://" not in path else path.rstrip("/")
+
+
+def exported_streams(state_file, folder):
+    root = export_folder(folder)
+    with closing(_connect(state_file)) as state:
+        rows = state.execute("SELECT relative, vid FROM exported_streams WHERE folder=?", (root,))
+        return {_join(root, *relative.split("/")): vid for relative, vid in rows}
+
+
+def read_stream_id(path, addon_id):
+    try:
+        url = urlsplit(_read(path).strip())
+        query = parse_qs(url.query)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if url.scheme == "plugin" and url.netloc == addon_id and query.get("action") == ["play"]:
+        return next(iter(query.get("vid", [])), None)
+    return None
 
 
 def _directory_name(meta, names, used):
@@ -122,9 +148,8 @@ def _replace_file(directory, path, content, existed):
 
 
 def export(lib, folder, base_url, state_file):
-    folder = xbmcvfs.translatePath(folder)
+    folder = export_folder(folder)
     local = "://" not in folder
-    folder = os.path.realpath(folder) if local else folder.rstrip("/")
     changed = protected = failed = 0
     with closing(_connect(state_file)) as state, state:
         state.execute("BEGIN IMMEDIATE")
@@ -133,6 +158,7 @@ def export(lib, folder, base_url, state_file):
         raw_names, raw_owned, generation, scanned = row or ("{}", "{}", 0, 0)
         names, owned = json.loads(raw_names), json.loads(raw_owned)
         files, movies, shows = _catalogue_files(lib, names, base_url)
+        links = {}
         for relative, content in files.items():
             directory, _, filename = relative.rpartition("/")
             directory = _join(folder, *directory.split("/"))
@@ -151,11 +177,16 @@ def export(lib, folder, base_url, state_file):
                     _replace_file(directory, path, content, exists)
                     changed += 1
                 owned[relative] = sha256(content.encode("utf-8")).hexdigest()
+                if relative.endswith(".strm"):
+                    links[relative] = parse_qs(urlsplit(content).query)["vid"][0]
             except (OSError, RuntimeError, ValueError):
                 failed += 1
         generation += int(changed > 0 or (row is None and bool(owned)))
         state.execute("INSERT OR REPLACE INTO exports VALUES (?, ?, ?, ?, ?)",
                       (folder, json.dumps(names), json.dumps(owned), generation, scanned))
+        state.execute("DELETE FROM exported_streams WHERE folder=?", (folder,))
+        state.executemany("INSERT INTO exported_streams VALUES (?, ?, ?)",
+                          ((folder, relative, vid) for relative, vid in links.items()))
     return ExportResult(movies, shows, changed, protected, failed, folder, generation, generation > scanned)
 
 
