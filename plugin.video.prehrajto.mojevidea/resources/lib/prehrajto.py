@@ -18,6 +18,7 @@ Modul nesmí importovat nic z Kodi, aby šel testovat mimo něj.
 """
 import base64
 import html
+import http.client
 import http.cookiejar
 import json
 import re
@@ -68,6 +69,14 @@ class PrehrajtoError(Exception):
 
 
 class LoginError(PrehrajtoError):
+    pass
+
+
+class VideoUnavailableError(PrehrajtoError):
+    pass
+
+
+class TemporaryError(PrehrajtoError):
     pass
 
 
@@ -166,6 +175,18 @@ def _quality_from_res(res):
     return "SD"
 
 
+def quality_token(value):
+    """Normalizuje kvalitu z názvu souboru, z katalogu nebo ze streamu."""
+    text = (value or "").strip()
+    if text.upper() in QUALITY_ORDER:
+        return text.upper()
+    for key, label in QUALITY_LABEL.items():
+        if text.casefold() == label.casefold():
+            return key
+    match = re.fullmatch(r"(\d{3,4})p?", text, re.I)
+    return _quality_from_res(match[1]) if match else ""
+
+
 def strip_comments(page):
     return re.sub(r"<!--.*?-->", "", page or "", flags=re.S)
 
@@ -238,13 +259,19 @@ def parse_pagination(page, current_url):
     return out
 
 
+def _source_variants(page):
+    found = {}
+    for url, resolution in SOURCE_RE.findall(page or ""):
+        quality = _quality_from_res(resolution)
+        previous = found.get(quality)
+        if previous is None or int(resolution) > previous[1]:
+            found[quality] = (html.unescape(url), int(resolution))
+    return [(quality, *found[quality]) for quality in QUALITY_ORDER if quality in found]
+
+
 def parse_sources(page):
     """Překódované verze ze stránky videa: [(kvalita, url)] od nejlepší."""
-    found = {}
-    for url, res in SOURCE_RE.findall(page or ""):
-        q = _quality_from_res(res)
-        found.setdefault(q, html.unescape(url))
-    return sorted(found.items(), key=lambda kv: QUALITY_ORDER.index(kv[0]))
+    return [(quality, url) for quality, url, _ in _source_variants(page)]
 
 
 def parse_tracks(page):
@@ -351,7 +378,7 @@ class PrehrajtoClient(object):
                 return self._request_once(url, data, headers, follow)
             except RateLimited as e:
                 if attempt >= retries:
-                    raise PrehrajtoError("Přehraj.to dočasně omezuje dotazy (HTTP 429), zkus to za chvíli")
+                    raise TemporaryError("Přehraj.to dočasně omezuje dotazy (HTTP 429), zkus to za chvíli")
                 wait = min(30, e.retry_after or 5 * (attempt + 1))
                 self.log("prehrajto: HTTP 429, čekám %s s" % wait)
                 self.sleep(wait)
@@ -380,14 +407,25 @@ class PrehrajtoClient(object):
                     retry_after = int(e.headers.get("Retry-After") or 0)
                 except (TypeError, ValueError):
                     retry_after = 0
-                raise RateLimited(retry_after)
-            raise PrehrajtoError("HTTP %s: %s" % (e.code, mask_secrets(url)))
-        except Exception as e:  # noqa: BLE001
-            raise PrehrajtoError("Přehraj.to je nedostupné: %s" % e)
+                e.close()
+                raise RateLimited(retry_after) from e
+            e.close()
+            message = "HTTP %s: %s" % (e.code, mask_secrets(url))
+            if e.code == 401:
+                raise LoginError(message) from e
+            if e.code in (404, 410):
+                raise VideoUnavailableError(message) from e
+            if e.code == 408 or e.code >= 500:
+                raise TemporaryError(message) from e
+            raise PrehrajtoError(message) from e
+        except (OSError, http.client.HTTPException) as e:
+            raise TemporaryError("Přehraj.to je nedostupné: %s" % e) from e
         try:
             text = resp.read().decode("utf-8", "replace")
             final = resp.geturl()
             status = getattr(resp, "status", 200)
+        except (OSError, http.client.HTTPException) as e:
+            raise TemporaryError("Odpověď Přehraj.to nelze načíst: %s" % e) from e
         finally:
             resp.close()
         return text, final, "", status
@@ -469,11 +507,16 @@ class PrehrajtoClient(object):
             finally:
                 resp.close()
         except urllib.error.HTTPError as e:
-            raise PrehrajtoError("API HTTP %s" % e.code)
-        except ValueError:
-            raise PrehrajtoError("API vrátilo neplatnou odpověď")
-        except Exception as e:  # noqa: BLE001
-            raise PrehrajtoError("API je nedostupné: %s" % e)
+            e.close()
+            if e.code == 401:
+                raise LoginError("Přihlášení k API Přehraj.to vypršelo") from e
+            if e.code in (408, 429) or e.code >= 500:
+                raise TemporaryError("API HTTP %s" % e.code) from e
+            raise PrehrajtoError("API HTTP %s" % e.code) from e
+        except ValueError as e:
+            raise TemporaryError("API vrátilo neplatnou odpověď") from e
+        except (OSError, http.client.HTTPException) as e:
+            raise TemporaryError("API je nedostupné: %s" % e) from e
 
     def check_user(self):
         """(stav, text platnosti) – stav CHECK_*."""
@@ -589,30 +632,36 @@ class PrehrajtoClient(object):
 
     # --- přehrání -----------------------------------------------------------
     def get_streams(self, ref):
-        vid, slug, h = split_ref(ref)
         streams = []
+        login_error = None
         message = ""
         subtitles = {}
         if self.has_credentials:
-            streams.append({"lang": "", "quality": "ORIG", "url": "orig:" + ref, "subtitles": {}})
             try:
                 self.login()
             except LoginError as e:
-                streams = []
+                login_error = e
                 message = str(e)
+            else:
+                streams.append({"lang": "", "quality": "ORIG", "url": "orig:" + ref, "subtitles": {}})
         try:
             page, _ = self._get(video_page_url(ref))
             subtitles = parse_tracks(page)
-            for quality, url in parse_sources(page):
-                streams.append({"lang": "", "quality": quality, "url": url, "subtitles": {}})
+            for quality, url, height in _source_variants(page):
+                streams.append({"lang": "", "quality": quality, "url": url,
+                                "resolution": "%sp" % height, "subtitles": {}})
+        except VideoUnavailableError:
+            raise
         except PrehrajtoError as e:
             if not streams:
                 raise
             message = message or str(e)
-        for s in streams:
-            s["subtitles"] = dict(subtitles)
+        for stream in streams:
+            stream["subtitles"] = dict(subtitles)
         if not streams:
-            raise PrehrajtoError(message or "Video nemá žádný přehratelný soubor")
+            if login_error:
+                raise login_error
+            raise VideoUnavailableError("Video nemá žádný přehratelný soubor")
         return streams, message
 
     def _original(self, ref):
@@ -622,16 +671,21 @@ class PrehrajtoClient(object):
                 vid = parse_page_video_id(self._get(video_page_url(ref))[0])
             except PrehrajtoError:
                 vid = ""
+        api_error = None
         if vid:
             try:
                 data = (self.api("videos/%s/download" % vid) or {}).get("data") or {}
                 if data.get("download_link"):
                     return data["download_link"]
             except PrehrajtoError as e:
+                if isinstance(e, (LoginError, TemporaryError)):
+                    api_error = e
                 self.log("prehrajto: API download selhal: %s" % e)
         _, _, location, status = self._request(video_page_url(ref) + "?do=download", follow=False)
         if location and "prehraj.to/" not in location.split("?")[0][:30]:
             return urllib.parse.urljoin(BASE, location)
+        if api_error:
+            raise api_error
         return ""
 
     def resolve(self, url):
@@ -640,19 +694,21 @@ class PrehrajtoClient(object):
             ref = url[5:]
             try:
                 link = self._original(ref)
+                original_error = None
             except PrehrajtoError as e:
                 self.log("prehrajto: originál není dostupný: %s" % e)
+                original_error = e
                 link = ""
             if link:
                 return link
             # bez premia originál nejde – nejlepší překódovaná verze
             page, _ = self._get(video_page_url(ref))
-            sources = parse_sources(page)
+            sources = _source_variants(page)
             if sources:
-                source = sources[0][1]
-                self.fallback_height = next(int(res) for raw_url, res in SOURCE_RE.findall(page)
-                              if html.unescape(raw_url) == source)
+                _, source, self.fallback_height = sources[0]
                 return source
+            if original_error:
+                raise original_error
             raise PrehrajtoError("Originální soubor vyžaduje Premium a jiná verze není k dispozici")
         if not url.startswith(("http://", "https://")):
             raise PrehrajtoError("neplatná adresa streamu")

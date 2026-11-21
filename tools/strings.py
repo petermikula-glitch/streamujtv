@@ -194,13 +194,6 @@ def esc(s):
 
 ADDONS = {
     "plugin.video.streamujtv": {"svc": "streamuj.tv", "name": "Streamuj.tv", "overrides": {}},
-    "plugin.video.prehrajto.mojevidea": {"svc": "Přehraj.to", "name": "Prehraj.to", "overrides": {
-        30001: ("E-mail", "E-mail"),
-        30006: ("Premium (filled by account check)", "Premium (vyplní ověření účtu)"),
-        30223: ("Premium is active, days remaining: %s", "Premium je aktivní, zbývá dní: %s"),
-        30224: ("The account has no active premium – only the transcoded versions will play.",
-                "Účet nemá aktivní premium – přehrají se jen překódované verze."),
-    }},
 }
 
 

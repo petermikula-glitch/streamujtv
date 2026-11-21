@@ -4,9 +4,11 @@
 * automatická synchronizace katalogu s účtem,
 * zapisování, kde se ve videu skončilo (seznam Rozkoukané, pokračování ve sledování).
 """
+import json
 import os
 import sys
 import time
+from hashlib import sha256
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "lib"))
 
@@ -29,25 +31,47 @@ def open_library():
                       prefer_ref=provider.prefer_ref)
 
 
+def take_pending_playback():
+    window = xbmcgui.Window(10000)
+    raw = window.getProperty(PLAYING_PROPERTY)
+    window.clearProperty(PLAYING_PROPERTY)
+    if raw:
+        try:
+            pending = json.loads(raw)
+            if pending["expires"] >= time.monotonic() and isinstance(pending["vid"], str):
+                return pending
+        except (ValueError, KeyError, TypeError):
+            pass
+    return None
+
+
 class PlaybackTracker(xbmc.Player):
     """Sleduje přehrávání videí spuštěných tímto doplňkem a ukládá pozici."""
 
     def __init__(self):
         xbmc.Player.__init__(self)
         self.vid = None
+        self.next_offer = None
         self.position = 0.0
         self.total = 0.0
 
     def onAVStarted(self):
-        window = xbmcgui.Window(10000)
-        vid = window.getProperty(PLAYING_PROPERTY)
-        window.clearProperty(PLAYING_PROPERTY)
-        self.vid = vid or None
+        self.next_offer = None
+        pending = take_pending_playback()
+        self.finish()
+        if not pending:
+            return
+        try:
+            path = self.getPlayingFile().split("|", 1)[0]
+        except RuntimeError:  # Kodi přehrávání mezitím ukončilo
+            return
+        if sha256(path.encode("utf-8")).hexdigest() != pending["path_hash"]:
+            return
+        self.vid = pending["vid"]
         self.position = 0.0
         self.total = 0.0
-        if self.vid:
-            self.update()
-            self.save(started=True)
+        self.update()
+        self.save(started=True)
 
     def update(self):
         if not self.vid:
@@ -79,10 +103,31 @@ class PlaybackTracker(xbmc.Player):
         self.finish()
 
     def onPlayBackEnded(self):
+        vid = self.vid
         self.finish(ended=True)
+        if vid and kodiutils.setting_bool("offer_next_episode"):
+            self.next_offer = vid
+
+    def offer_next_if_due(self):
+        vid, self.next_offer = self.next_offer, None
+        if not vid or self.isPlaying():
+            return
+        import plugin
+        try:
+            plugin.offer_next_episode(vid, self)
+        except Exception as e:  # Služba pokračuje i při chybě při čtení katalogu nebo otevření dialogu.
+            kodiutils.log_error("nabídku dalšího dílu nelze otevřít: %s" % e)
 
     def onPlayBackError(self):
+        pending = take_pending_playback()
         self.finish()
+        if pending:
+            import plugin
+            try:
+                plugin.retry_failed_playback(pending)
+            except Exception as e:  # Kodi musí službu nechat běžet i po chybě mezipaměti
+                kodiutils.log_error("opakování přehrávání selhalo: %s" % e)
+                kodiutils.notify(kodiutils._(30405), time_ms=8000)
 
 
 def sync_due():
@@ -125,6 +170,7 @@ def main():
     last_save = 0.0
     while not monitor.abortRequested():
         now = time.time()
+        player.offer_next_if_due()
         if player.vid:
             player.update()
             if now - last_save >= 30:  # průběžně, kdyby Kodi spadlo

@@ -13,10 +13,8 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 SOURCE = "plugin.video.streamujtv"
 TARGETS = ["plugin.video.prehrajto.mojevidea"]
 SHARED = [
-    "default.py", "service.py",
-    "resources/lib/catalog.py", "resources/lib/csfd.py", "resources/lib/db.py",
-    "resources/lib/exporter.py", "resources/lib/kodiutils.py", "resources/lib/nameparser.py",
-    "resources/lib/plugin.py", "resources/lib/tmdb.py", "LICENSE.txt",
+    "default.py", "LICENSE.txt", "resources/lib/csfd.py", "resources/lib/exporter.py",
+    "resources/lib/kodiutils.py", "resources/lib/nameparser.py",
 ]
 
 

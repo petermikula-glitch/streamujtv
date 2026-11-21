@@ -30,7 +30,7 @@ class Tmdb(object):
     def enabled(self):
         return bool(self.key)
 
-    def _get(self, path, **params):
+    def _get(self, path, *, timeout=TIMEOUT, **params):
         params["language"] = self.language
         headers = {"Accept": "application/json", "User-Agent": "Kodi addon"}
         if len(self.key) > 40:  # v4 token
@@ -40,7 +40,7 @@ class Tmdb(object):
         url = API + path + "?" + urllib.parse.urlencode(params)
         self.log("tmdb: GET %s" % path)
         try:
-            resp = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=TIMEOUT)
+            resp = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout)
             try:
                 return json.loads(resp.read().decode("utf-8"))
             finally:
@@ -113,6 +113,23 @@ class Tmdb(object):
             return s
         best = max(results[:10], key=score)
         return self.details(best["id"], want_series)
+
+    def season_episodes(self, tmdb_id, season):
+        data = self._get("/tv/%d/season/%d" % (tmdb_id, season), timeout=4)
+        episodes = {}
+        for episode in data.get("episodes") or []:
+            number = episode.get("episode_number")
+            if not isinstance(number, int) or number <= 0:
+                continue
+            still = episode.get("still_path") or ""
+            runtime = episode.get("runtime")
+            episodes[str(number)] = {
+                "title": episode.get("name") or "",
+                "plot": episode.get("overview") or "",
+                "duration": runtime * 60 if isinstance(runtime, int) and runtime > 0 else 0,
+                "still": IMG + "w500" + still if isinstance(still, str) and still.startswith("/") else "",
+            }
+        return episodes
 
     def details(self, tmdb_id, want_series=False):
         kind = "tv" if want_series else "movie"

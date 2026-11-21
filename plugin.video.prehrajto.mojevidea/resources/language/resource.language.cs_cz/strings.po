@@ -669,7 +669,7 @@ msgstr "Hledat pod původním názvem na Přehraj.to"
 
 msgctxt "#30360"
 msgid "Continue watching"
-msgstr "Pokračovat ve sledování"
+msgstr "Rozkoukané"
 
 msgctxt "#30361"
 msgid "My videos"
@@ -681,7 +681,7 @@ msgstr "Objevovat"
 
 msgctxt "#30363"
 msgid "Play from library"
-msgstr "Přehrát z knihovny"
+msgstr "Přehrát z katalogu"
 
 msgctxt "#30364"
 msgid "Open series in library"
@@ -790,3 +790,275 @@ msgstr "Moje filmy"
 msgctxt "#30394"
 msgid "Sort and filter movies"
 msgstr "Řazení a filtry filmů"
+
+msgctxt "#30395"
+msgid "Choose another version"
+msgstr "Vybrat jinou verzi"
+
+msgctxt "#30396"
+msgid "Choose stream"
+msgstr "Vybrat stream"
+
+msgctxt "#30397"
+msgid "Uploaded file"
+msgstr "Nahraný soubor"
+
+msgctxt "#30398"
+msgid "Original (Premium)"
+msgstr "Originál (Premium)"
+
+msgctxt "#30399"
+msgid "Transcoded"
+msgstr "Překódovaná verze"
+
+msgctxt "#30400"
+msgid "Subtitles: %s"
+msgstr "Titulky: %s"
+
+msgctxt "#30401"
+msgid "Refreshing the playback link…"
+msgstr "Obnovuji odkaz k přehrávání…"
+
+msgctxt "#30402"
+msgid "Your Přehraj.to sign-in is invalid or has expired. Check your account settings."
+msgstr "Přihlášení k Přehraj.to neplatí nebo vypršelo. Zkontroluj údaje v nastavení."
+
+msgctxt "#30403"
+msgid "This video is unavailable on Přehraj.to."
+msgstr "Toto video je na Přehraj.to nedostupné."
+
+msgctxt "#30404"
+msgid "Přehraj.to is temporarily unavailable. Try again in a moment."
+msgstr "Přehraj.to je dočasně nedostupné. Zkus to za chvíli."
+
+msgctxt "#30405"
+msgid "Kodi could not start this video."
+msgstr "Kodi se nepodařilo spustit toto video."
+
+msgctxt "#30406"
+msgid "My TV shows"
+msgstr "Moje seriály"
+
+msgctxt "#30407"
+msgid "Search"
+msgstr "Hledat"
+
+msgctxt "#30408"
+msgid "Search history"
+msgstr "Historie hledání"
+
+msgctxt "#30409"
+msgid "Manage item"
+msgstr "Spravovat položku"
+
+msgctxt "#30410"
+msgid "Mark as watched"
+msgstr "Označit jako zhlédnuté"
+
+msgctxt "#30411"
+msgid "Mark as unwatched"
+msgstr "Označit jako nezhlédnuté"
+
+msgctxt "#30412"
+msgid "Mark entire season as watched"
+msgstr "Označit celou sérii jako zhlédnutou"
+
+msgctxt "#30413"
+msgid "Hide from Continue watching"
+msgstr "Skrýt z Rozkoukaných"
+
+msgctxt "#30414"
+msgid "Hidden from Continue watching"
+msgstr "Skryté z Rozkoukaných"
+
+msgctxt "#30415"
+msgid "Show again: %s"
+msgstr "Znovu zobrazit: %s"
+
+msgctxt "#30416"
+msgid "Mark all available episodes in this season as watched?"
+msgstr "Označit všechny dostupné díly této série jako zhlédnuté?"
+
+msgctxt "#30417"
+msgid "Offer the next episode after playback ends"
+msgstr "Nabídnout další díl po skončení přehrávání"
+
+msgctxt "#30418"
+msgid "Play next episode?"
+msgstr "Přehrát další díl?"
+
+msgctxt "#30419"
+msgid "Play"
+msgstr "Přehrát"
+
+msgctxt "#30420"
+msgid "More videos and history"
+msgstr "Další videa a historie"
+
+msgctxt "#30421"
+msgid "Discover"
+msgstr "Objevovat"
+
+msgctxt "#30422"
+msgid "Sort and filter TV shows"
+msgstr "Řazení a filtry seriálů"
+
+msgctxt "#30424"
+msgid "Episode details"
+msgstr "Detail epizody"
+
+msgctxt "#30425"
+msgid "No episode synopsis is available."
+msgstr "Popis epizody není k dispozici."
+
+msgctxt "#30426"
+msgid "%d min"
+msgstr "%d min"
+
+msgctxt "#30427"
+msgid "Filter by language, quality and watched status"
+msgstr "Filtrovat podle jazyka, kvality a zhlédnutí"
+
+msgctxt "#30428"
+msgid "Any"
+msgstr "Bez omezení"
+
+msgctxt "#30429"
+msgid "Czech subtitles"
+msgstr "České titulky"
+
+msgctxt "#30430"
+msgid "Unwatched"
+msgstr "Nezhlédnuté"
+
+msgctxt "#30431"
+msgid "Watched"
+msgstr "Zhlédnuté"
+
+msgctxt "#30432"
+msgid "Watched status"
+msgstr "Stav zhlédnutí"
+
+msgctxt "#30433"
+msgid "New episodes (%d)"
+msgstr "Nové díly (%d)"
+
+msgctxt "#30434"
+msgid "Last added episodes (%d)"
+msgstr "Naposledy přidané díly (%d)"
+
+msgctxt "#30435"
+msgid "None of these episodes are available in the catalogue."
+msgstr "Žádný z těchto dílů už není v katalogu."
+
+msgctxt "#30436"
+msgid "Ready to play"
+msgstr "Připravené k přehrání"
+
+msgctxt "#30437"
+msgid "All saved titles"
+msgstr "Všechny uložené tituly"
+
+msgctxt "#30438"
+msgid "You do not have a matching video in your catalogue yet."
+msgstr "V katalogu zatím není žádný odpovídající titul."
+
+msgctxt "#30439"
+msgid "Save this filter"
+msgstr "Uložit tento filtr"
+
+msgctxt "#30440"
+msgid "Filter name"
+msgstr "Název filtru"
+
+msgctxt "#30441"
+msgid "Delete saved filter"
+msgstr "Smazat uložený filtr"
+
+msgctxt "#30442"
+msgid "Filter saved in My Movies."
+msgstr "Filtr je uložený v sekci Moje filmy."
+
+msgctxt "#30443"
+msgid "A filter with this name already exists."
+msgstr "Filtr s tímto názvem už existuje."
+
+msgctxt "#30444"
+msgid "Delete the filter “%s”?"
+msgstr "Smazat filtr „%s“?"
+
+msgctxt "#30445"
+msgid "Assign episodes in bulk"
+msgstr "Hromadně přiřadit díly"
+
+msgctxt "#30446"
+msgid "Select files to assign to one season"
+msgstr "Vyber soubory pro stejnou sérii"
+
+msgctxt "#30447"
+msgid "Confirm assignment"
+msgstr "Potvrdit přiřazení"
+
+msgctxt "#30448"
+msgid "Fill in the missing episode numbers below"
+msgstr "Doplň čísla chybějících dílů níže"
+
+msgctxt "#30449"
+msgid "Episode number for %s"
+msgstr "Číslo dílu pro %s"
+
+msgctxt "#30450"
+msgid "Slovak subtitles"
+msgstr "Slovenské titulky"
+
+msgctxt "#30451"
+msgid "The selected files changed. Open batch assignment again."
+msgstr "Vybrané soubory se změnily. Otevři hromadné přiřazení znovu."
+
+msgctxt "#30452"
+msgid "Episode files assigned: %d"
+msgstr "Počet přiřazených souborů: %d"
+
+msgctxt "#30453"
+msgid "Search filenames or leave blank for all files"
+msgstr "Hledej v názvech souborů, prázdný dotaz zobrazí všechny"
+
+msgctxt "#30454"
+msgid "Resume from another version"
+msgstr "Pokračovat z jiné verze"
+
+msgctxt "#30455"
+msgid "Resume from another version?"
+msgstr "Pokračovat z jiné verze?"
+
+msgctxt "#30456"
+msgid "The previous version lasts %s and this version lasts %s. They may be different cuts. Continue from %s?"
+msgstr "Předchozí verze trvá %s a tahle %s. Může jít o jiný střih. Pokračovat od %s?"
+
+msgctxt "#30457"
+msgid "The length of this version is unknown. Continue from %s?"
+msgstr "Délka této verze není známá. Pokračovat od %s?"
+
+msgctxt "#30458"
+msgid "There is no saved position to transfer to this version."
+msgstr "Pro tuto verzi není k dispozici pozice z jiného souboru."
+
+msgctxt "#30459"
+msgid "Export to the Kodi library after synchronization"
+msgstr "Exportovat do knihovny Kodi po synchronizaci"
+
+msgctxt "#30460"
+msgid "Scan the Kodi library after an automatic export"
+msgstr "Spustit aktualizaci knihovny Kodi po automatickém exportu"
+
+msgctxt "#30461"
+msgid "Kodi export could not update %d files. Check the export folder."
+msgstr "Při exportu se nepodařilo zapsat %d souborů. Zkontroluj složku exportu."
+
+msgctxt "#30462"
+msgid "Files with custom content kept: %d"
+msgstr "Počet zachovaných souborů s vlastními úpravami: %d"
+
+msgctxt "#30463"
+msgid "Kodi library export failed. Check the export folder."
+msgstr "Export do knihovny Kodi se nezdařil. Zkontroluj složku exportu."

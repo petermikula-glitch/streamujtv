@@ -37,7 +37,7 @@ def sync_account(client, lib, include_favorites=False, include_playlists=False, 
     for v in videos:
         if lib.upsert_video(v["id"], v["title"] or v["id"], "account", _parsed(v["title"] or v["id"]),
                             duration=v.get("duration", 0), thumb=v.get("thumb", ""), size=v.get("size", ""),
-                            quality=v.get("quality", "")):
+                            quality=v.get("quality", ""), track_episode=True):
             stats["new"] += 1
     stats["total"] = len(videos)
     stats["incomplete"] = not getattr(client, "listing_complete", True)

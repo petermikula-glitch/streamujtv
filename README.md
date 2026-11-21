@@ -47,13 +47,40 @@ rozdíly jsou v sekci [Přehraj.to](#přehrajto--rozdíly).
 
 ### Vyhledávání na Přehraj.to a záloha
 
-V doplňku Přehraj.to otevřete **Vyhledávání → Hledat na celém Přehraj.to**.
+V doplňku Přehraj.to otevřete **Hledat** a zadejte dotaz. Pod výsledky z vlastního katalogu
+vyberte **Hledat na celém Přehraj.to** nebo **Hledat v TMDB**.
 Výsledky odpovídají tomu, co služba vrátí pro daný dotaz a přihlášený účet.
 Video můžete přehrát rovnou nebo ho přes kontextovou nabídku přidat do vlastního katalogu.
 
 V **Nástroje → Zálohovat katalog** uložíte katalog, kolekce, ruční úpravy a historii
 do souboru JSON. **Obnovit katalog** po potvrzení nahradí aktuální data zálohou
 ze stejného doplňku. Záloha neobsahuje přihlášení, cookies ani mezipaměť přehrávacích odkazů.
+
+V doplňku Přehraj.to nabízí kontextová nabídka v **Rozkoukaných** volbu
+**Skrýt z Rozkoukaných**. Skryté položky lze v této sekci znovu zobrazit.
+Kontextová nabídka série umožňuje označit všechny její dostupné díly za zhlédnuté.
+V nastavení **Přehrávání** lze zapnout **Nabídnout další díl po skončení přehrávání**.
+
+V **Moje filmy** lze podle jazyka, kvality a zhlédnutí sestavit filtr a uložit ho
+pod vlastním názvem. **Objevovat → Chci vidět → Připravené k přehrání** ukáže
+tituly, pro které už doplněk našel video ve vlastním katalogu.
+V **Moje seriály** se po synchronizaci objeví počet nových dílů. Při otevření
+seriálu se počet vynuluje a poslední dávka zůstane dostupná v seznamu dílů.
+Pokud má seriál přiřazené TMDB ID a je nastavený API klíč, doplněk načte názvy,
+délky a náhledy epizod. Popis díje je v kontextové nabídce **Detail epizody**.
+**Nástroje → Hromadně přiřadit díly** umožní zkontrolovat a opravit čísla vybraných
+dílů před jejich společným přiřazením k seriálu a sérii.
+
+Při výběru jiné verze stejného filmu či dílu nabídne Kodi pokračování od
+uložené pozice. Stejnou volbu najdete v kontextové nabídce **Pokračovat z jiné
+verze**. Rozdílnou nebo neznámou délku doplněk před pokračováním ověří dotazem.
+
+V **Nastavení → Knihovna Kodi** vyberte cílovou složku a zapněte
+**Exportovat do knihovny Kodi po synchronizaci**. Volba **Spustit aktualizaci
+knihovny Kodi po automatickém exportu** načte nové soubory do nastavených
+zdrojů Kodi. Přidejte podsložky `Filmy` a `Serialy` ve správci zdrojů
+Kodi jako obsah typu Filmy a Seriály. Export zachovává ručně upravené soubory
+v cílové složce.
 
 ## Instalace
 
@@ -132,10 +159,9 @@ Heslo se do logu Kodi nikdy nezapisuje (ani jeho hash).
 
 ## Vývoj
 
-Kanonická verze sdíleného kódu (katalog, ČSFD/TMDB, obrazovky, služba) je v
-`plugin.video.streamujtv`; do ostatních doplňků ji kopíruje `tools/sync_shared.py`
-(test hlídá, že se kopie nerozešly). Specifický je jen klient služby (`streamuj.py`,
-`prehrajto.py`) a tenká vrstva `provider.py`.
+Sdílené soubory uvedené v `tools/sync_shared.py` se kopírují z `plugin.video.streamujtv`.
+Každý doplněk má vlastní router, službu přehrávání, katalog, databázi a klienty
+pro svou službu a TMDB. Překlady Přehraj.to se upravují v jeho souborech `strings.po`.
 
 ```bash
 python3 -m pytest tests                  # testy streamuj.tv + sdíleného kódu (náhrada Kodi API)
@@ -144,7 +170,7 @@ STREAMUJ_LIVE=1 python3 -m pytest tests -k live            # živý test API str
 PREHRAJTO_LIVE=1 python3 -m pytest tests_prehrajto -k live  # živý test přihlášení Přehraj.to
 python3 tools/sync_shared.py             # po úpravě sdíleného kódu
 # nová verze doplňku: zvyšte version v addon.xml, spusťte build_zip.py a pushněte do main
-python3 tools/strings.py                 # po úpravě textů vygeneruje strings.po (cs/en) pro oba doplňky
+python3 tools/strings.py                 # vygeneruje strings.po (cs/en) pro Streamuj.tv
 python3 tools/build_zip.py               # sestaví Kodi repozitář do repo/ (ZIPy + addons.xml)
 ```
 

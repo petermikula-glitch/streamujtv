@@ -790,3 +790,275 @@ msgstr ""
 msgctxt "#30394"
 msgid "Sort and filter movies"
 msgstr ""
+
+msgctxt "#30395"
+msgid "Choose another version"
+msgstr ""
+
+msgctxt "#30396"
+msgid "Choose stream"
+msgstr ""
+
+msgctxt "#30397"
+msgid "Uploaded file"
+msgstr ""
+
+msgctxt "#30398"
+msgid "Original (Premium)"
+msgstr ""
+
+msgctxt "#30399"
+msgid "Transcoded"
+msgstr ""
+
+msgctxt "#30400"
+msgid "Subtitles: %s"
+msgstr ""
+
+msgctxt "#30401"
+msgid "Refreshing the playback link…"
+msgstr ""
+
+msgctxt "#30402"
+msgid "Your Přehraj.to sign-in is invalid or has expired. Check your account settings."
+msgstr ""
+
+msgctxt "#30403"
+msgid "This video is unavailable on Přehraj.to."
+msgstr ""
+
+msgctxt "#30404"
+msgid "Přehraj.to is temporarily unavailable. Try again in a moment."
+msgstr ""
+
+msgctxt "#30405"
+msgid "Kodi could not start this video."
+msgstr ""
+
+msgctxt "#30406"
+msgid "My TV shows"
+msgstr ""
+
+msgctxt "#30407"
+msgid "Search"
+msgstr ""
+
+msgctxt "#30408"
+msgid "Search history"
+msgstr ""
+
+msgctxt "#30409"
+msgid "Manage item"
+msgstr ""
+
+msgctxt "#30410"
+msgid "Mark as watched"
+msgstr ""
+
+msgctxt "#30411"
+msgid "Mark as unwatched"
+msgstr ""
+
+msgctxt "#30412"
+msgid "Mark entire season as watched"
+msgstr ""
+
+msgctxt "#30413"
+msgid "Hide from Continue watching"
+msgstr ""
+
+msgctxt "#30414"
+msgid "Hidden from Continue watching"
+msgstr ""
+
+msgctxt "#30415"
+msgid "Show again: %s"
+msgstr ""
+
+msgctxt "#30416"
+msgid "Mark all available episodes in this season as watched?"
+msgstr ""
+
+msgctxt "#30417"
+msgid "Offer the next episode after playback ends"
+msgstr ""
+
+msgctxt "#30418"
+msgid "Play next episode?"
+msgstr ""
+
+msgctxt "#30419"
+msgid "Play"
+msgstr ""
+
+msgctxt "#30420"
+msgid "More videos and history"
+msgstr ""
+
+msgctxt "#30421"
+msgid "Discover"
+msgstr ""
+
+msgctxt "#30422"
+msgid "Sort and filter TV shows"
+msgstr ""
+
+msgctxt "#30424"
+msgid "Episode details"
+msgstr ""
+
+msgctxt "#30425"
+msgid "No episode synopsis is available."
+msgstr ""
+
+msgctxt "#30426"
+msgid "%d min"
+msgstr ""
+
+msgctxt "#30427"
+msgid "Filter by language, quality and watched status"
+msgstr ""
+
+msgctxt "#30428"
+msgid "Any"
+msgstr ""
+
+msgctxt "#30429"
+msgid "Czech subtitles"
+msgstr ""
+
+msgctxt "#30430"
+msgid "Unwatched"
+msgstr ""
+
+msgctxt "#30431"
+msgid "Watched"
+msgstr ""
+
+msgctxt "#30432"
+msgid "Watched status"
+msgstr ""
+
+msgctxt "#30433"
+msgid "New episodes (%d)"
+msgstr ""
+
+msgctxt "#30434"
+msgid "Last added episodes (%d)"
+msgstr ""
+
+msgctxt "#30435"
+msgid "None of these episodes are available in the catalogue."
+msgstr ""
+
+msgctxt "#30436"
+msgid "Ready to play"
+msgstr ""
+
+msgctxt "#30437"
+msgid "All saved titles"
+msgstr ""
+
+msgctxt "#30438"
+msgid "You do not have a matching video in your catalogue yet."
+msgstr ""
+
+msgctxt "#30439"
+msgid "Save this filter"
+msgstr ""
+
+msgctxt "#30440"
+msgid "Filter name"
+msgstr ""
+
+msgctxt "#30441"
+msgid "Delete saved filter"
+msgstr ""
+
+msgctxt "#30442"
+msgid "Filter saved in My Movies."
+msgstr ""
+
+msgctxt "#30443"
+msgid "A filter with this name already exists."
+msgstr ""
+
+msgctxt "#30444"
+msgid "Delete the filter “%s”?"
+msgstr ""
+
+msgctxt "#30445"
+msgid "Assign episodes in bulk"
+msgstr ""
+
+msgctxt "#30446"
+msgid "Select files to assign to one season"
+msgstr ""
+
+msgctxt "#30447"
+msgid "Confirm assignment"
+msgstr ""
+
+msgctxt "#30448"
+msgid "Fill in the missing episode numbers below"
+msgstr ""
+
+msgctxt "#30449"
+msgid "Episode number for %s"
+msgstr ""
+
+msgctxt "#30450"
+msgid "Slovak subtitles"
+msgstr ""
+
+msgctxt "#30451"
+msgid "The selected files changed. Open batch assignment again."
+msgstr ""
+
+msgctxt "#30452"
+msgid "Episode files assigned: %d"
+msgstr ""
+
+msgctxt "#30453"
+msgid "Search filenames or leave blank for all files"
+msgstr ""
+
+msgctxt "#30454"
+msgid "Resume from another version"
+msgstr ""
+
+msgctxt "#30455"
+msgid "Resume from another version?"
+msgstr ""
+
+msgctxt "#30456"
+msgid "The previous version lasts %s and this version lasts %s. They may be different cuts. Continue from %s?"
+msgstr ""
+
+msgctxt "#30457"
+msgid "The length of this version is unknown. Continue from %s?"
+msgstr ""
+
+msgctxt "#30458"
+msgid "There is no saved position to transfer to this version."
+msgstr ""
+
+msgctxt "#30459"
+msgid "Export to the Kodi library after synchronization"
+msgstr ""
+
+msgctxt "#30460"
+msgid "Scan the Kodi library after an automatic export"
+msgstr ""
+
+msgctxt "#30461"
+msgid "Kodi export could not update %d files. Check the export folder."
+msgstr ""
+
+msgctxt "#30462"
+msgid "Files with custom content kept: %d"
+msgstr ""
+
+msgctxt "#30463"
+msgid "Kodi library export failed. Check the export folder."
+msgstr ""

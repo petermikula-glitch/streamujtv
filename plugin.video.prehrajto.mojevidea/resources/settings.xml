@@ -129,6 +129,11 @@
                     <default>false</default>
                     <control type="toggle"/>
                 </setting>
+                <setting id="offer_next_episode" type="boolean" label="30417" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="subtitles" type="boolean" label="30034" help="">
                     <level>0</level>
                     <default>true</default>
@@ -148,6 +153,19 @@
                     <control type="button" format="path">
                         <heading>30041</heading>
                     </control>
+                </setting>
+                <setting id="library_auto_export" type="boolean" label="30459" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="library_auto_scan" type="boolean" label="30460" help="">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable" setting="library_auto_export">true</dependency>
+                    </dependencies>
+                    <control type="toggle"/>
                 </setting>
             </group>
         </category>
