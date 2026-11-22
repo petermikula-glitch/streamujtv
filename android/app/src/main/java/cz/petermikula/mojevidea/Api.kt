@@ -3,6 +3,7 @@ package cz.petermikula.mojevidea
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import org.json.JSONObject
@@ -18,6 +19,7 @@ class ApiResult(val data: JSONObject?, val error: String?) {
  * Všechna volání běží mimo hlavní vlákno; výsledek se vrací na hlavním vlákně.
  */
 object Api {
+    private const val TAG = "MojeVidea"
     private val pool = Executors.newFixedThreadPool(4)
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var ready = false
@@ -54,9 +56,12 @@ object Api {
             if (json.optBoolean("ok")) {
                 ApiResult(json.optJSONObject("data") ?: JSONObject(), null)
             } else {
-                ApiResult(null, json.optString("error", "Neznámá chyba"))
+                val message = json.optString("error", "Neznámá chyba")
+                Log.w(TAG, "$action: $message")  // dohledatelné přes adb logcat -s MojeVidea
+                ApiResult(null, message)
             }
         } catch (error: Throwable) {
+            Log.e(TAG, action, error)
             ApiResult(null, "Chyba aplikace: ${error.message ?: error.javaClass.simpleName}")
         }
     }

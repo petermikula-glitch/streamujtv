@@ -9,6 +9,7 @@ import androidx.leanback.widget.HeaderItem
 import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.ListRowPresenter
 import androidx.leanback.widget.OnItemViewClickedListener
+import androidx.leanback.widget.OnItemViewSelectedListener
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,6 +28,7 @@ class MainFragment : BrowseSupportFragment() {
     private var loadedOnce = false
     private var shown = ""
     private var shapes = emptyList<Boolean>()
+    private var backdrop: Backdrop? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,6 +42,20 @@ class MainFragment : BrowseSupportFragment() {
         setOnSearchClickedListener {
             startActivity(Intent(requireContext(), SearchActivity::class.java))
         }
+        onItemViewSelectedListener = OnItemViewSelectedListener { _, item, _, _ ->
+            backdrop?.show((item as? Card)?.image.orEmpty())
+        }
+    }
+
+    override fun onActivityCreated(savedInstanceState: Bundle?) {
+        @Suppress("DEPRECATION")
+        super.onActivityCreated(savedInstanceState)
+        backdrop = Backdrop(requireActivity())
+    }
+
+    override fun onDestroy() {
+        backdrop?.release()
+        super.onDestroy()
     }
 
     override fun onResume() {

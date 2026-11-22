@@ -35,6 +35,8 @@ class PlayerActivity : FragmentActivity() {
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
     private lateinit var message: TextView
+    private lateinit var spinner: View
+    private lateinit var heading: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var call = ""
     private var params = JSONObject()
@@ -55,6 +57,14 @@ class PlayerActivity : FragmentActivity() {
         setContentView(R.layout.activity_player)
         playerView = findViewById(R.id.player_view)
         message = findViewById(R.id.player_message)
+        spinner = findViewById(R.id.player_spinner)
+        heading = findViewById(R.id.player_title)
+        // název videa se ukazuje spolu s ovládáním
+        playerView.setControllerVisibilityListener(
+            PlayerView.ControllerVisibilityListener { visibility ->
+                heading.visibility = if (heading.text.isNullOrEmpty()) View.GONE else visibility
+            }
+        )
         call = intent.getStringExtra(Navigator.EXTRA_CALL).orEmpty()
         params = JSONObject(intent.getStringExtra(Navigator.EXTRA_PARAMS) ?: "{}")
         resolve()
@@ -63,6 +73,7 @@ class PlayerActivity : FragmentActivity() {
     private fun resolve() {
         message.text = "Připravuji přehrávání…"
         message.visibility = View.VISIBLE
+        spinner.visibility = View.VISIBLE
         Api.call(call, params) { result ->
             if (isFinishing || isDestroyed) return@call
             val data = result.data
@@ -76,6 +87,7 @@ class PlayerActivity : FragmentActivity() {
 
     private fun play(stream: JSONObject) {
         track = stream.optString("track")
+        heading.text = stream.optString("title")
         live = stream.optBoolean("live")
         val headers = HashMap<String, String>()
         stream.optJSONObject("headers")?.let { json ->
@@ -123,6 +135,7 @@ class PlayerActivity : FragmentActivity() {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) {
                     message.visibility = View.GONE
+                    spinner.visibility = View.GONE
                     if (!started) {
                         started = true
                         saveProgress(ended = false, first = true)
@@ -198,6 +211,8 @@ class PlayerActivity : FragmentActivity() {
         release()
         playerView.hideController()
         playerView.useController = false
+        spinner.visibility = View.GONE
+        heading.visibility = View.GONE
         message.text = "$text\n\nZpět se vrátíte tlačítkem Zpět."
         message.visibility = View.VISIBLE
     }

@@ -3,6 +3,7 @@ package cz.petermikula.mojevidea
 import android.os.Bundle
 import android.text.InputType
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.leanback.app.GuidedStepSupportFragment
 import androidx.leanback.widget.GuidanceStylist
@@ -35,7 +36,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
             "Vyplňte e-mail a heslo k Přehraj.to a zvolte Uložit a ověřit. Klíč TMDB je nepovinný – " +
                 "doplní plakáty a hodnocení, když ČSFD neodpovídá. iVysílání přihlášení nepotřebuje.",
             getString(R.string.app_name),
-            null,
+            ContextCompat.getDrawable(requireContext(), R.mipmap.ic_launcher),
         )
     }
 

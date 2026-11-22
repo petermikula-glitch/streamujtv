@@ -14,12 +14,45 @@
         app:show_buffering="when_playing"
         app:show_subtitle_button="true" />
 
+    <!-- název videa: ukazuje se spolu s ovládáním -->
     <TextView
-        android:id="@+id/player_message"
+        android:id="@+id/player_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="@drawable/player_title_scrim"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:paddingStart="48dp"
+        android:paddingTop="27dp"
+        android:paddingEnd="48dp"
+        android:paddingBottom="40dp"
+        android:textColor="@color/text_primary"
+        android:textSize="22sp"
+        android:visibility="gone" />
+
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:padding="24dp"
-        android:textColor="@android:color/white"
-        android:textSize="20sp" />
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <ProgressBar
+            android:id="@+id/player_spinner"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginBottom="16dp"
+            android:indeterminateTint="@color/accent" />
+
+        <TextView
+            android:id="@+id/player_message"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:maxWidth="640dp"
+            android:textColor="@color/text_primary"
+            android:textSize="20sp" />
+    </LinearLayout>
 </FrameLayout>

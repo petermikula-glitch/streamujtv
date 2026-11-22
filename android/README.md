@@ -57,6 +57,27 @@ gradle assembleDebug -PsigningKeystore=/cesta/klic.keystore -PsigningPassword=�
 2. V *Nastavení → Aplikace → Zabezpečení a omezení → Neznámé zdroje* mu povolte instalaci.
 3. Otevřete soubor APK z USB disku (nebo ho stáhněte Downloaderem) a potvrďte instalaci.
 
+## Vzhled a vlastní grafika
+
+Barvy jsou v `res/values/colors.xml` (tmavě modré pozadí, jantarový akcent), motivy obrazovek
+v `res/values/styles.xml`. Karty bez obrázku (kategorie, nástroje) kreslí `TileDrawable`: barevný
+přechod, velká ikona a název. Pozadí obrazovky se mění podle vybrané karty (`Backdrop`).
+
+Grafiku lze vyměnit bez zásahu do kódu – stačí soubor se správným názvem:
+
+| Co | Soubor | Rozměr |
+| --- | --- | --- |
+| Ikona aplikace | `res/mipmap-xhdpi/ic_launcher.png` | 192 × 192 px (podklad 512 × 512) |
+| Banner v nabídce Android TV | `res/drawable-xhdpi/banner.png` | 320 × 180 px |
+| Ikona dlaždice | `res/drawable/ic_tile_<název>.xml` (vektor) nebo `.png` | bílá na průhledném pozadí |
+| Ilustrace dlaždice (nepovinná) | `res/drawable-xhdpi/tile_<název>.png` | 400 × 224 px, bez textu |
+
+Názvy ikon: `live`, `series`, `movies`, `docs`, `news`, `sport`, `kids`, `fun`, `past`, `culture`,
+`advice`, `nature`, `society`, `spirit`, `archive`, `folder`, `all`, `search`, `sync`, `settings`,
+`login`, `enrich`, `history`, `favorites`, `rating`, `year`. Kterou ikonu karta dostane, určuje
+`app_api.py` (pole `icon`). Existuje-li ilustrace `tile_<název>`, použije se místo přechodu s ikonou
+a název se vykreslí přes její ztmavenou spodní část. Výchozí ikony jsou Material Icons (Apache 2.0).
+
 ## Přehrávač a formáty
 
 Přehrávač je Media3/ExoPlayer. Video dekóduje čip zařízení (H.264, HEVC, VP9, AV1 – podle toho, co

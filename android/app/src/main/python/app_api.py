@@ -121,9 +121,18 @@ def _target(kind, call=None, params=None, title=None):
     return target
 
 
-def _card(title, target, subtitle="", image="", progress=0, wide=False, watched=False):
+def _card(title, target, subtitle="", image="", progress=0, wide=False, watched=False, icon=""):
+    """Karta; ``icon`` je název ikony dlaždice pro karty bez obrázku (složky, nástroje)."""
     return {"title": title or "", "subtitle": subtitle or "", "image": image or "", "progress": int(progress or 0),
-            "wide": bool(wide), "watched": bool(watched), "target": target}
+            "wide": bool(wide), "watched": bool(watched), "icon": icon or "", "target": target}
+
+
+# Ikony hlavních kategorií iVysílání (podle názvu v nabídce ČT); neznámá kategorie dostane obecnou.
+IVYS_ICONS = {
+    "Seriály": "series", "Filmy": "movies", "Dokumenty": "docs", "Zpravodajství": "news", "Sport": "sport",
+    "Pro děti": "kids", "Zábava": "fun", "Historie": "past", "Kultura": "culture", "Rady a recepty": "advice",
+    "Příroda": "nature", "Společnost": "society", "Spiritualita": "spirit", "Archiv": "archive",
+}
 
 
 def _display_title(meta):
@@ -218,7 +227,8 @@ def home(params):
         total = lib.count_videos()
         if not total and not settings.get("username"):
             rows.append({"title": "Začínáme", "items": [
-                _card("Přihlásit se k Přehraj.to", _target("settings"), "E-mail a heslo, pak Synchronizovat")]})
+                _card("Přihlásit se k Přehraj.to", _target("settings"), "E-mail a heslo, pak Synchronizovat",
+                      icon="login")]})
         progress = _in_progress(lib, state)
         if progress:
             rows.append({"title": "Rozkoukané", "items": progress})
@@ -227,41 +237,48 @@ def home(params):
             versions = lib.videos_grouped([m["key"] for m in movies if (m.get("video_count") or 1) > 1])
             cards = [_movie_card(meta, state, versions) for meta in movies]
             cards.append(_card("Všechny filmy", _target("list", "movies", {"order": "title"}, "Filmy"),
-                               "%d filmů" % lib.count_movies()))
+                               "%d filmů" % lib.count_movies(), icon="movies"))
             rows.append({"title": "Nově přidané filmy", "items": cards})
         shows = lib.shows(order="added", limit=HOME_ROW)
         if shows:
             cards = [_show_card(meta) for meta in shows]
-            cards.append(_card("Všechny seriály", _target("list", "shows", {"order": "title"}, "Seriály")))
+            cards.append(_card("Všechny seriály", _target("list", "shows", {"order": "title"}, "Seriály"),
+                               icon="series"))
             rows.append({"title": "Seriály", "items": cards})
         if total:
             rows.append({"title": "Moje videa", "items": [
-                _card("Filmy podle názvu", _target("list", "movies", {"order": "title"}, "Filmy")),
-                _card("Filmy podle hodnocení", _target("list", "movies", {"order": "rating"}, "Nejlépe hodnocené filmy")),
-                _card("Filmy podle roku", _target("list", "movies", {"order": "year"}, "Filmy podle roku")),
-                _card("Seriály podle názvu", _target("list", "shows", {"order": "title"}, "Seriály")),
-                _card("Naposledy přehrané", _target("list", "played", {}, "Naposledy přehrané")),
+                _card("Filmy podle názvu", _target("list", "movies", {"order": "title"}, "Filmy"), icon="movies"),
+                _card("Filmy podle hodnocení", _target("list", "movies", {"order": "rating"}, "Nejlépe hodnocené filmy"),
+                      icon="rating"),
+                _card("Filmy podle roku", _target("list", "movies", {"order": "year"}, "Filmy podle roku"),
+                      icon="year"),
+                _card("Seriály podle názvu", _target("list", "shows", {"order": "title"}, "Seriály"), icon="series"),
+                _card("Naposledy přehrané", _target("list", "played", {}, "Naposledy přehrané"), icon="history"),
             ]})
         favorites = len(lib.ivys_favorites())
-    television = [_card("Živé vysílání", _target("list", "ivys_live", {}, "Živé vysílání"), "ČT1, ČT2, ČT24, ČT sport…")]
+    television = [_card("Živé vysílání", _target("list", "ivys_live", {}, "Živé vysílání"), "ČT1, ČT2, ČT24, ČT sport…",
+                        icon="live")]
     if favorites:
         television.append(_card("Moje pořady", _target("list", "ivys_favorites", {}, "Moje pořady"),
-                                "%d pořadů" % favorites))
+                                "%d pořadů" % favorites, icon="favorites"))
     try:
         # krátký limit: hlavní obrazovka nesmí bez připojení čekat desítky sekund
         for category in _cached("ivys:menu", TTL["menu"], lambda: _ivys(timeout=4).menu()):
             television.append(_card(category["title"], _target(
-                "list", "ivys_category", {"cid": category["id"]}, category["title"]), "iVysílání"))
+                "list", "ivys_category", {"cid": category["id"]}, category["title"]), "iVysílání",
+                icon=IVYS_ICONS.get(category["title"], "folder")))
     except ivysilani.IvysilaniError:
         pass  # bez připojení zůstane aspoň živé vysílání a katalog
     rows.append({"title": "iVysílání České televize", "items": television})
     last = settings.get("last_sync")
     rows.append({"title": "Nástroje", "items": [
-        _card("Hledat", _target("search"), "Katalog i iVysílání"),
+        _card("Hledat", _target("search"), "Katalog i iVysílání", icon="search"),
         _card("Synchronizovat s účtem", _target("command", "sync", {}),
-              "Naposledy: %s" % time.strftime("%d.%m. %H:%M", time.localtime(last)) if last else "Zatím neproběhla"),
-        _card("Doplnit hodnocení a plakáty", _target("command", "enrich", {}), "ČSFD, záložně TMDB"),
-        _card("Nastavení a přihlášení", _target("settings"), settings.get("username") or "Nepřihlášeno"),
+              "Naposledy: %s" % time.strftime("%d.%m. %H:%M", time.localtime(last)) if last else "Zatím neproběhla",
+              icon="sync"),
+        _card("Doplnit hodnocení a plakáty", _target("command", "enrich", {}), "ČSFD, záložně TMDB", icon="enrich"),
+        _card("Nastavení a přihlášení", _target("settings"), settings.get("username") or "Nepřihlášeno",
+              icon="settings"),
     ]})
     return {"rows": rows}
 
@@ -600,7 +617,7 @@ def ivys_live(params):
         if channel.get("next_title"):
             parts.append("pak %s %s" % (_clock(channel.get("next_starts")), channel["next_title"]))
         cards.append(_card(title, _target("play", "ivys_play", {"channel": channel["channel"]}), " · ".join(parts),
-                           channel.get("image"), wide=True))
+                           channel.get("image"), wide=True, icon="live"))
     return {"items": cards, "next": None}
 
 
@@ -609,10 +626,12 @@ def ivys_category(params):
     category = _ivys_call(lambda: _cached("ivys:category:" + cid, TTL["category"], lambda: _ivys().category(cid)))
     menu = _ivys_call(lambda: _cached("ivys:menu", TTL["menu"], lambda: _ivys().menu()))
     cards = [_card("Všechny pořady", _target("list", "ivys_listing", {"cid": cid}, category["title"] or "Všechny pořady"),
-                   "Úplný výpis kategorie")]
-    for child in next((item.get("children") or [] for item in menu if item["id"] == cid), []):
+                   "Úplný výpis kategorie", icon="all")]
+    parent = next((item for item in menu if item["id"] == cid), {})
+    icon = IVYS_ICONS.get(parent.get("title"), "folder")  # podkategorie nesou ikonu své kategorie
+    for child in parent.get("children") or []:
         cards.append(_card(child["title"], _target("list", "ivys_listing", {"cid": child["id"]}, child["title"]),
-                           "Podkategorie"))
+                           "Podkategorie", icon=icon))
     seen = set()
     for block in category["blocks"]:
         for item in block["shows"]:
@@ -640,14 +659,15 @@ def ivys_show(params):
         state = _ivys_state(lib)
     favorite = show_id in state["favorites"]
     toggle = _card("Odebrat z Mých pořadů" if favorite else "Přidat do Mých pořadů",
-                   _target("command", "ivys_favorite", {"id": show_id, "remove": favorite}))
+                   _target("command", "ivys_favorite", {"id": show_id, "remove": favorite}), icon="favorites")
     if programme["seasons"] and not season:
         cards = [_card(item["title"] or programme["title"],
                        _target("list", "ivys_show", {"id": show_id, "season": item["id"]},
-                               "%s – %s" % (programme["title"], item["title"])), wide=True)
+                               "%s – %s" % (programme["title"], item["title"])), wide=True, icon="series")
                  for item in programme["seasons"]]
         cards.append(_card("Všechny díly", _target("list", "ivys_show", {"id": show_id, "season": "all"},
-                                                   programme["title"]), "%d dílů" % programme["episode_count"], wide=True))
+                                                   programme["title"]), "%d dílů" % programme["episode_count"], wide=True,
+                           icon="all"))
         return {"title": programme["title"], "items": cards + [toggle], "next": None}
     offset = _offset(params)
     season_id = season if season not in ("", "all") else None

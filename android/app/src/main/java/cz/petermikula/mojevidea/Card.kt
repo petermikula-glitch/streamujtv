@@ -14,13 +14,15 @@ class Card(
     val progress: Int,
     val wide: Boolean,
     val watched: Boolean,
+    val icon: String,
     val target: Target,
 ) {
     /** Totožnost karty (kam vede) – nezávisle na tom, jak je zrovna vykreslená. */
     val key: String get() = target.type + "|" + target.call + "|" + target.params + "|" + title
 
     fun sameLook(other: Card): Boolean = title == other.title && subtitle == other.subtitle &&
-        image == other.image && progress == other.progress && wide == other.wide && watched == other.watched
+        image == other.image && progress == other.progress && wide == other.wide && watched == other.watched &&
+        icon == other.icon
 
     companion object {
         /** Při obnově výpisu se překreslí jen změněné karty a výběr zůstane na místě. */
@@ -41,6 +43,7 @@ class Card(
                 progress = json.optInt("progress"),
                 wide = json.optBoolean("wide"),
                 watched = json.optBoolean("watched"),
+                icon = json.optString("icon"),
                 target = Target(
                     type = target.optString("type"),
                     call = target.optString("call"),

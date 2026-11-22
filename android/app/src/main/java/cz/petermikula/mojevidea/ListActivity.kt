@@ -1,7 +1,13 @@
 package cz.petermikula.mojevidea
 
 import android.os.Bundle
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.leanback.app.VerticalGridSupportFragment
 import androidx.leanback.widget.ArrayObjectAdapter
@@ -30,6 +36,7 @@ class ListFragment : VerticalGridSupportFragment() {
     private var params = JSONObject()
     private var next: JSONObject? = null
     private var loading = false
+    private var backdrop: Backdrop? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,8 +52,20 @@ class ListFragment : VerticalGridSupportFragment() {
         setOnItemViewSelectedListener(OnItemViewSelectedListener { _, item, _, _ ->
             val index = cards.indexOf(item)
             if (index >= cards.size() - 10) loadNext()
+            backdrop?.show((item as? Card)?.image.orEmpty())
         })
         reload()
+    }
+
+    override fun onActivityCreated(savedInstanceState: Bundle?) {
+        @Suppress("DEPRECATION")
+        super.onActivityCreated(savedInstanceState)
+        backdrop = Backdrop(requireActivity())
+    }
+
+    override fun onDestroy() {
+        backdrop?.release()
+        super.onDestroy()
     }
 
     private var resumed = false
@@ -66,7 +85,12 @@ class ListFragment : VerticalGridSupportFragment() {
             if (!isAdded) return@call
             val data = result.data
             if (data == null) {
-                if (!quiet) Toast.makeText(requireContext(), result.error, Toast.LENGTH_LONG).show()
+                // prázdná obrazovka s chybou musí říct, co se stalo; přes plný výpis stačí krátké upozornění
+                if (cards.size() == 0) {
+                    showMessage((result.error ?: "Výpis se nepodařilo načíst.") + "\n\nZkuste to znovu tlačítkem Zpět.")
+                } else if (!quiet) {
+                    Toast.makeText(requireContext(), result.error, Toast.LENGTH_LONG).show()
+                }
                 return@call
             }
             data.optString("title").takeIf { it.isNotEmpty() && title.isNullOrEmpty() }?.let { title = it }
@@ -74,10 +98,32 @@ class ListFragment : VerticalGridSupportFragment() {
             applyShape(list)
             cards.setItems(list, Card.DIFF)
             next = data.optJSONObject("next")
-            if (cards.size() == 0 && !quiet) {
-                Toast.makeText(requireContext(), "Nic tu není.", Toast.LENGTH_LONG).show()
-            }
+            showMessage(if (cards.size() == 0) "Nic tu není." else "")
         }
+    }
+
+    private var message: TextView? = null
+
+    /** Text uprostřed obrazovky (prázdný výpis, chyba); prázdný text ho skryje. */
+    private fun showMessage(text: String) {
+        val root = view as? ViewGroup ?: return
+        val label = message ?: TextView(requireContext()).apply {
+            gravity = Gravity.CENTER
+            textSize = 20f
+            setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
+            val side = (96 * resources.displayMetrics.density).toInt()
+            setPadding(side, 0, side, 0)
+            root.addView(this, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+            message = this
+        }
+        label.text = text
+        label.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    override fun onDestroyView() {
+        message = null
+        super.onDestroyView()
     }
 
     /** Plakáty: 5 sloupců; náhledy na šířku: 4 sloupce. Určí se podle první stránky. */

@@ -1,5 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Společné barvy všech obrazovek (Leanback). -->
+    <style name="AppTheme" parent="@style/Theme.Leanback">
+        <item name="android:windowBackground">@drawable/app_background</item>
+        <item name="android:colorBackground">@color/bg_solid</item>
+        <item name="defaultBrandColor">@color/brand</item>
+        <item name="defaultBrandColorDark">@color/panel_dark</item>
+        <item name="defaultSearchColor">@color/accent</item>
+        <item name="defaultSearchBrightColor">@color/accent_bright</item>
+        <item name="defaultSearchIconColor">@color/on_accent</item>
+    </style>
+
+    <style name="AppTheme.Browse" parent="@style/Theme.Leanback.Browse">
+        <item name="android:windowBackground">@drawable/app_background</item>
+        <item name="android:colorBackground">@color/bg_solid</item>
+        <item name="defaultBrandColor">@color/brand</item>
+        <item name="defaultBrandColorDark">@color/panel_dark</item>
+        <item name="defaultSearchColor">@color/accent</item>
+        <item name="defaultSearchBrightColor">@color/accent_bright</item>
+        <item name="defaultSearchIconColor">@color/on_accent</item>
+    </style>
+
+    <style name="AppTheme.Grid" parent="@style/Theme.Leanback.VerticalGrid">
+        <item name="android:windowBackground">@drawable/app_background</item>
+        <item name="android:colorBackground">@color/bg_solid</item>
+        <item name="defaultBrandColor">@color/brand</item>
+    </style>
+
+    <style name="AppTheme.GuidedStep" parent="@style/Theme.Leanback.GuidedStep">
+        <item name="android:windowBackground">@drawable/app_background</item>
+        <item name="android:colorBackground">@color/bg_solid</item>
+        <item name="guidedStepBackground">@color/bg_solid</item>
+        <item name="guidedActionsBackground">@color/panel</item>
+        <item name="guidedActionsBackgroundDark">@color/panel_dark</item>
+    </style>
+
     <style name="PlayerTheme" parent="@style/Theme.Leanback">
         <item name="android:windowBackground">@android:color/black</item>
     </style>

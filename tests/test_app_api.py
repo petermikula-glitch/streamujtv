@@ -65,9 +65,10 @@ def test_catalogue_rows_lists_and_search(api):
     assert _titles(rows["Rozkoukané"]) == ["Pelíšky"] and rows["Rozkoukané"][0]["progress"] == 20
     film = rows["Nově přidané filmy"][0]
     assert film == {"title": "Pelíšky", "subtitle": "1999 · 91 % · CZ dabing, EN", "image": "https://img/pelisky.jpg",
-                    "progress": 20, "wide": False, "watched": False,
+                    "progress": 20, "wide": False, "watched": False, "icon": "",
                     "target": {"type": "play", "call": "play", "params": {"vid": REF}}}  # česká verze ve vyšší kvalitě
     assert rows["Nově přidané filmy"][-1]["target"]["call"] == "movies"
+    assert rows["Nově přidané filmy"][-1]["icon"] == "movies"  # dlaždice bez obrázku nese ikonu
     assert rows["Seriály"][0]["target"] == {"type": "list", "call": "show", "params": {"key": "show:archa"},
                                             "title": "Archa"}
 
