@@ -15,10 +15,11 @@ import androidx.leanback.widget.ListRowPresenter
 import androidx.leanback.widget.OnItemViewClickedListener
 import org.json.JSONObject
 
-/** Hledání: textové pole nahoře, pod ním řady výsledků z katalogu a z iVysílání. */
+/** Hledání: výsledky z místního katalogu, iVysílání a Přehraj.to. */
 class SearchActivity : FragmentActivity() {
     private val rows = ArrayObjectAdapter(ListRowPresenter())
     private lateinit var message: TextView
+    private var latestSearch = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,9 +48,10 @@ class SearchActivity : FragmentActivity() {
 
     private fun search(query: String) {
         if (query.isEmpty()) return
+        val searchId = ++latestSearch
         message.text = "Hledám…"
         Api.call("search", JSONObject().put("q", query)) { result ->
-            if (isFinishing || isDestroyed) return@call
+            if (isFinishing || isDestroyed || searchId != latestSearch) return@call
             val data = result.data
             if (data == null) {
                 message.text = result.error
@@ -67,7 +69,9 @@ class SearchActivity : FragmentActivity() {
                 fresh.add(ListRow(HeaderItem(index.toLong(), row.optString("title")), cards))
             }
             rows.setItems(fresh, null)
-            message.text = if (fresh.isEmpty()) "Nic jsem nenašel." else ""
+            message.text = data.optString("notice").ifEmpty {
+                if (fresh.isEmpty()) "Nic jsem nenašel." else ""
+            }
             if (fresh.isNotEmpty()) findViewById<android.view.View>(R.id.search_rows).requestFocus()
         }
     }

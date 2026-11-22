@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import time
 
 import pytest
 
@@ -20,6 +21,8 @@ def api(tmp_path, monkeypatch):
     app_api.configure(str(tmp_path))
     service = FakeService()
     monkeypatch.setattr(ivysilani.urllib.request, "build_opener", lambda *handlers: service)
+    monkeypatch.setattr(app_api.provider, "make_client",
+                        lambda *args, **kwargs: Fake({"/hledej/": ("<html></html>", None, "", 200)}))
 
     def call(action, **params):
         result = json.loads(app_api.call(action, json.dumps(params)))
@@ -87,6 +90,79 @@ def test_catalogue_rows_lists_and_search(api):
     assert _titles(found["Seriály v katalogu"]) == ["Archa"]
     assert "Pořady v iVysílání" in found and found["Díly v iVysílání"][0]["target"]["call"] == "ivys_play"
     assert api("search", q="  ") == {"rows": []}
+
+
+def test_web_search_reuses_playback_history_and_downloads(api, monkeypatch):
+    from conftest import fixture
+
+    query = "/hledej/Pel%C3%AD%C5%A1ky"
+    page_two = query + "?videoListing-page=2"
+    listing = fixture("uploads_synthetic.html")
+    first_page = listing.replace("/profil/nahrana-videa?videoListing-page=2", page_two)
+    episode = "7654321:hra-o-trune-s01e02-cz-tit:aa11bb22cc33dd44"
+    client = Fake({page_two: (listing, None, "", 200),
+                   query: (first_page, None, "", 200),
+                   "/profil": ("ok", None, "", 200)})
+    monkeypatch.setattr(app_api.provider, "make_client", lambda *args, **kwargs: client)
+    api("settings_set", username="a@b.cz", password="heslo")
+    _fill()
+    with app_api._library() as lib:
+        lib.record_play(REF, 1200, 6000)
+    # Skutečný klient a parser Přehraj.to, jen HTML a přehrávací URL jsou testovací.
+    monkeypatch.setattr(client, "get_streams", lambda vid: ([{"quality": "1080p", "url": "https://cdn.x/video.mp4"}], ""))
+    monkeypatch.setattr(client, "resolve", lambda url: url)
+
+    rows = {row["title"]: row["items"] for row in api("search", q=" Pelíšky ")["rows"]}
+    assert _titles(rows["Filmy v katalogu"]) == ["Pelíšky"]
+    assert rows["Díly v iVysílání"]
+    known, online, more = rows["Videa na Přehraj.to"]
+    assert known["progress"] == 20 and known["target"]["params"]["vid"] == REF
+    assert online["title"] == "Hra o trůny S01E02 CZ tit"
+    assert online["target"]["params"]["vid"] == episode
+    assert any(url.endswith(query + "?vp-page=1") for url, _, _ in client.calls)
+    assert more["target"]["call"] == "prehrajto_search"
+    second = api(more["target"]["call"], **more["target"]["params"])
+    assert second["items"] and second["next"] is None and client.calls[-1][0].endswith(page_two)
+    with app_api._library() as lib:
+        assert lib.find_video(episode) is None
+
+    target = online["target"]
+    stream = api(target["call"], **target["params"])
+    assert stream["track"] == episode and stream["url"] == "https://cdn.x/video.mp4"
+    api("progress_save", track=episode, position=300, total=1200)
+    assert api("play", vid=episode)["position"] == 300
+    home = {row["title"]: row["items"] for row in api("home")["rows"]}
+    assert any(card["target"]["params"]["vid"] == episode and card["progress"] == 25
+               for card in home["Rozkoukané"])
+    assert episode in [card["target"]["params"]["vid"] for card in api("played")["items"]]
+    assert _titles(api("shows")["items"]) == ["Archa"]
+
+    download = next(item["target"] for item in online["menu"] if item["target"]["type"] == "download")
+    assert api(download["call"], **download["params"])["start"]
+    assert api("downloads")["items"][0]["target"]["params"]["vid"] == episode
+
+    with app_api._library() as lib:
+        lib.apply_account_snapshot([{"id": episode, "title": online["title"]}], time.time_ns(), True, False)
+        assert lib.get_video(episode)["source"] == "account"
+    assert "Hra o trůny" in _titles(api("shows")["items"])
+    assert api("play", vid=episode)["position"] == 300
+
+
+@pytest.mark.parametrize("error, detail", [
+    (app_api.provider.LoginError("test"), "přihlášení"),
+    (app_api.provider.TemporaryError("test"), "Zkuste to znovu"),
+])
+def test_web_search_failure_keeps_other_sources(api, monkeypatch, error, detail):
+    _fill()
+
+    def unavailable(*args):
+        raise error
+
+    monkeypatch.setattr(app_api.provider, "search_catalog", unavailable)
+    result = api("search", q="archa")
+    assert "Přehraj.to" in result["notice"] and detail in result["notice"]
+    assert [row["title"] for row in result["rows"]] == [
+        "Seriály v katalogu", "Pořady v iVysílání", "Díly v iVysílání"]
 
 
 def test_long_listings_are_paged(api):
