@@ -60,23 +60,32 @@ gradle assembleDebug -PsigningKeystore=/cesta/klic.keystore -PsigningPassword=�
 ## Vzhled a vlastní grafika
 
 Barvy jsou v `res/values/colors.xml` (tmavě modré pozadí, jantarový akcent), motivy obrazovek
-v `res/values/styles.xml`. Karty bez obrázku (kategorie, nástroje) kreslí `TileDrawable`: barevný
-přechod, velká ikona a název. Pozadí obrazovky se mění podle vybrané karty (`Backdrop`).
+v `res/values/styles.xml`. Karty bez obrázku (kategorie, nástroje) kreslí `TileDrawable`, pozadí
+obrazovky se mění podle vybrané karty (`Backdrop`).
 
 Grafiku lze vyměnit bez zásahu do kódu – stačí soubor se správným názvem:
 
 | Co | Soubor | Rozměr |
 | --- | --- | --- |
 | Ikona aplikace | `res/mipmap-xhdpi/ic_launcher.png` | 192 × 192 px (podklad 512 × 512) |
-| Banner v nabídce Android TV | `res/drawable-xhdpi/banner.png` | 320 × 180 px |
-| Ikona dlaždice | `res/drawable/ic_tile_<název>.xml` (vektor) nebo `.png` | bílá na průhledném pozadí |
-| Ilustrace dlaždice (nepovinná) | `res/drawable-xhdpi/tile_<název>.png` | 400 × 224 px, bez textu |
+| Banner v nabídce Android TV | `res/drawable-xhdpi/banner.png`, `drawable-xxxhdpi` | 320 × 180 a 640 × 360 px |
+| Logo na hlavní obrazovce | `res/drawable-nodpi/logo.png` | průhledné, výška 160 px |
+| Pozadí obrazovek | `res/drawable-nodpi/app_background_image.webp` | 1920 × 1080 px |
+| Ilustrace dlaždice | `res/drawable-nodpi/tile_<název>.webp` | 480 × 270 px, bez textu, motiv vpravo |
+| Ikona dlaždice | `res/drawable/ic_tile_<název>.xml` | obrysová, bílá, výřez 24 × 24 |
 
-Názvy ikon: `live`, `series`, `movies`, `docs`, `news`, `sport`, `kids`, `fun`, `past`, `culture`,
-`advice`, `nature`, `society`, `spirit`, `archive`, `folder`, `all`, `search`, `sync`, `settings`,
-`login`, `enrich`, `history`, `favorites`, `rating`, `year`. Kterou ikonu karta dostane, určuje
-`app_api.py` (pole `icon`). Existuje-li ilustrace `tile_<název>`, použije se místo přechodu s ikonou
-a název se vykreslí přes její ztmavenou spodní část. Výchozí ikony jsou Material Icons (Apache 2.0).
+Kterou dlaždici karta dostane, určuje `app_api.py` polem `icon`. Existuje-li ilustrace
+`tile_<název>`, vyplní dlaždici a název se vykreslí přes její ztmavený okraj; jinak se kreslí tmavě
+modrý přechod se zlatou obrysovou ikonou `ic_tile_<název>`. Zápis `ikona:barva` (např.
+`folder:movies`) vezme ikonu jedné položky a odstín druhé – tak vypadají podkategorie.
+
+- Ilustrace mají: `live`, `series`, `movies`, `docs`, `news`, `sport`, `kids`, `fun`, `past`,
+  `culture`, `advice`, `nature`, `society`, `spirit`, `archive`.
+- Ikony mají: `folder`, `all`, `search`, `sync`, `settings`, `login`, `enrich`, `history`,
+  `favorites`, `rating`, `year`, `download`.
+
+Podklady (PNG 800 × 450, SVG) převádí do těchto souborů `tools/import_graphics.py`: ilustrace zmenší do WebP,
+z obrysových SVG udělá vektorové obrázky Androidu (`rect` a `circle` převede na cesty).
 
 ## Stahování na disk
 

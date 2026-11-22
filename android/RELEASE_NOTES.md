@@ -1,1 +1,1 @@
-Stahování filmů a dílů na USB disk (podržte OK na filmu), přehrávání stažených souborů bez internetu, automatické aktualizace z GitHubu a nový vzhled.
+Nová grafika: ilustrované dlaždice kategorií, obrysové ikony, logo, pozadí, ikona a banner aplikace.

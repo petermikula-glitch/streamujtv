@@ -20,10 +20,12 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Dlaždice pro kartu bez obrázku (složky, kategorie, nástroje): barevný přechod, velká ikona a název.
+ * Dlaždice pro kartu bez obrázku (složky, kategorie, nástroje).
  *
- * Ikona je obrázek `ic_tile_<název>`. Existuje-li obrázek `tile_<název>` (vlastní ilustrace bez textu),
- * použije se místo přechodu s ikonou a název se vykreslí přes něj.
+ * Název `icon` určuje vzhled: existuje-li ilustrace `tile_<název>` (obrázek bez textu), vyplní dlaždici
+ * a název se vykreslí přes její ztmavený okraj. Jinak se kreslí barevný přechod s velkou obrysovou
+ * ikonou `ic_tile_<název>`. Zápis `ikona:barva` (např. `folder:movies`) vezme ikonu jedné položky
+ * a odstín druhé – tak vypadají podkategorie: složka v barvě své kategorie.
  */
 class TileDrawable(context: Context, private val title: String, icon: String) : Drawable() {
     private companion object {
@@ -33,10 +35,12 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
             "news" to 0xFF0369A1, "sport" to 0xFF15803D, "kids" to 0xFFDB2777, "fun" to 0xFFD97706,
             "past" to 0xFF92400E, "culture" to 0xFF9333EA, "advice" to 0xFFB45309, "nature" to 0xFF4D7C0F,
             "society" to 0xFF475569, "spirit" to 0xFFA16207, "archive" to 0xFF57534E,
-            "login" to 0xFFC98A00, "search" to 0xFF0E7490, "sync" to 0xFF1D4ED8, "enrich" to 0xFF6D28D9,
+            "login" to 0xFF1D4ED8, "search" to 0xFF0E7490, "sync" to 0xFF1D4ED8, "enrich" to 0xFF6D28D9,
             "settings" to 0xFF475569, "all" to 0xFF4338CA, "history" to 0xFF0F766E, "favorites" to 0xFFBE123C,
             "rating" to 0xFFB7791F, "year" to 0xFF1E40AF, "folder" to 0xFF334155, "download" to 0xFF047857,
         )
+
+        const val NAVY = 0xFF101A2E.toInt()
 
         fun mix(color: Int, target: Int, amount: Float): Int {
             fun channel(shift: Int): Int {
@@ -49,7 +53,8 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
     }
 
     private val density = context.resources.displayMetrics.density
-    private val name = icon.ifEmpty { "folder" }
+    private val name = icon.substringBefore(':').ifEmpty { "folder" }
+    private val tint = icon.substringAfter(':', name).ifEmpty { name }
     private val base: Int
     private val glyph: Drawable?
     private val art: Drawable?
@@ -70,21 +75,23 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
         // aby mřížka stejných dlaždic nepůsobila jednolitě
         val seed = title.hashCode() and 0x7fffffff
         val hsv = FloatArray(3)
-        Color.colorToHSV((COLORS[name] ?: COLORS.getValue("folder")).toInt(), hsv)
+        Color.colorToHSV((COLORS[tint] ?: COLORS.getValue("folder")).toInt(), hsv)
         hsv[0] = (hsv[0] + (seed % 5 - 2) * 9f + 360f) % 360f
-        base = mix(Color.HSVToColor(hsv), Color.BLACK, (seed / 5 % 3) * 0.08f)
+        // tmavě modrý základ s nádechem barvy kategorie – ladí s ilustracemi (tmavá modrá a zlatá)
+        base = mix(mix(Color.HSVToColor(hsv), NAVY, 0.66f), Color.BLACK, (seed / 5 % 3) * 0.06f)
         val artId = resources.getIdentifier("tile_$name", "drawable", packageName)
         art = if (artId != 0) ContextCompat.getDrawable(context, artId)?.mutate() else null
         val glyphId = resources.getIdentifier("ic_tile_$name", "drawable", packageName)
             .takeIf { it != 0 } ?: R.drawable.ic_tile_folder
         glyph = if (art == null) ContextCompat.getDrawable(context, glyphId)?.mutate() else null
-        glyph?.alpha = 60
+        glyph?.setTint(ContextCompat.getColor(context, R.color.accent))  // zlatá obrysová ikona
+        glyph?.alpha = 235
     }
 
     override fun onBoundsChange(bounds: Rect) {
         fill.shader = LinearGradient(
             bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat(),
-            mix(base, Color.WHITE, 0.10f), mix(base, Color.BLACK, 0.58f), Shader.TileMode.CLAMP,
+            mix(base, Color.WHITE, 0.08f), mix(base, Color.BLACK, 0.50f), Shader.TileMode.CLAMP,
         )
         // ztmavení spodní části, aby byl název čitelný i přes ilustraci
         shade.shader = LinearGradient(
@@ -104,7 +111,8 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
             val scale = max(area.width() / width.toFloat(), area.height() / height.toFloat())
             val w = (width * scale).toInt()
             val h = (height * scale).toInt()
-            val left = area.left + (area.width() - w) / 2
+            // motiv ilustrace je v pravé polovině: při ořezu na užší tvar zůstává vidět pravá část
+            val left = area.left + ((area.width() - w) * 0.85f).toInt()
             val top = area.top + (area.height() - h) / 2
             art.setBounds(left, top, left + w, top + h)
             art.draw(canvas)
@@ -112,10 +120,10 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
         } else {
             canvas.drawRect(area, fill)
             glyph?.let {
-                // velká poloprůhledná ikona vpravo, zčásti přes okraj
-                val size = min(area.width() * 0.66f, area.height() * 1.05f).toInt()
-                val left = area.right - (size * 0.86f).toInt()
-                val top = area.top + ((area.height() - size) * 0.36f).toInt()
+                // obrysová ikona v pravém horním rohu; název má vlevo dole volné místo
+                val size = min(area.width() * 0.34f, area.height() * 0.58f).toInt()
+                val left = area.right - (padding * 1.4f).toInt() - size
+                val top = area.top + (padding * 1.2f).toInt()
                 it.setBounds(left, top, left + size, top + size)
                 it.draw(canvas)
             }

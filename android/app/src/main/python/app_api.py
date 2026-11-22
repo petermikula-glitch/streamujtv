@@ -711,7 +711,8 @@ def ivys_category(params):
     cards = [_card("Všechny pořady", _target("list", "ivys_listing", {"cid": cid}, category["title"] or "Všechny pořady"),
                    "Úplný výpis kategorie", icon="all")]
     parent = next((item for item in menu if item["id"] == cid), {})
-    icon = IVYS_ICONS.get(parent.get("title"), "folder")  # podkategorie nesou ikonu své kategorie
+    # podkategorie: složka v barvě své kategorie (ilustraci má jen hlavní dlaždice)
+    icon = "folder:" + IVYS_ICONS.get(parent.get("title"), "folder")
     for child in parent.get("children") or []:
         cards.append(_card(child["title"], _target("list", "ivys_listing", {"cid": child["id"]}, child["title"]),
                            "Podkategorie", icon=icon))

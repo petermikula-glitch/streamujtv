@@ -35,6 +35,7 @@ class MainFragment : BrowseSupportFragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         title = getString(R.string.app_name)
+        badgeDrawable = androidx.core.content.ContextCompat.getDrawable(requireContext(), R.drawable.logo)
         headersState = HEADERS_ENABLED
         isHeadersTransitionOnBackEnabled = true
         adapter = rows

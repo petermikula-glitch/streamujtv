@@ -1,23 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pozadí obrazovek: svislý přechod a jemná záře v pravém horním rohu. -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item>
-        <shape>
-            <gradient
-                android:angle="270"
-                android:endColor="@color/bg_bottom"
-                android:startColor="@color/bg_top" />
-        </shape>
-    </item>
-    <item>
-        <shape>
-            <gradient
-                android:centerX="0.88"
-                android:centerY="0.0"
-                android:endColor="#001E3A7A"
-                android:gradientRadius="65%p"
-                android:startColor="#551E3A7A"
-                android:type="radial" />
-        </shape>
-    </item>
-</layer-list>
+<!-- Pozadí obrazovek: obrázek 1920 × 1080 (drawable-nodpi/app_background_image). -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:gravity="fill"
+    android:src="@drawable/app_background_image" />
