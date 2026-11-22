@@ -11,6 +11,13 @@ on:
       - 'plugin.video.prehrajto.mojevidea/resources/lib/**'
       - 'tests/**'
       - '.github/workflows/android.yml'
+  # pull request se jen sestaví a otestuje; vydává se výhradně z větve main
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'plugin.video.prehrajto.mojevidea/resources/lib/**'
+      - 'tests/**'
+      - '.github/workflows/android.yml'
   workflow_dispatch:
 
 permissions:
