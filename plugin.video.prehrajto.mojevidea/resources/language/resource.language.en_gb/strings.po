@@ -1522,3 +1522,47 @@ msgstr ""
 msgctxt "#30586"
 msgid "Search iVysílání: %s"
 msgstr ""
+
+msgctxt "#30587"
+msgid "My shows"
+msgstr ""
+
+msgctxt "#30588"
+msgid "Add to My shows"
+msgstr ""
+
+msgctxt "#30589"
+msgid "Remove from My shows"
+msgstr ""
+
+msgctxt "#30590"
+msgid "new episodes: %d"
+msgstr ""
+
+msgctxt "#30591"
+msgid "All shows in the category"
+msgstr ""
+
+msgctxt "#30592"
+msgid "Play with time shift"
+msgstr ""
+
+msgctxt "#30593"
+msgid "then %s %s"
+msgstr ""
+
+msgctxt "#30594"
+msgid "Open in iVysílání: %s"
+msgstr ""
+
+msgctxt "#30595"
+msgid "Remove from in-progress"
+msgstr ""
+
+msgctxt "#30596"
+msgid "Added to My shows"
+msgstr ""
+
+msgctxt "#30597"
+msgid "Removed from My shows"
+msgstr ""

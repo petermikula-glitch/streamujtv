@@ -12,8 +12,11 @@ Chráněný obsah (DRM) doplněk nepřehrává: o stream žádá s ``canPlayDrm=
 
 Modul nesmí importovat nic z Kodi, aby šel testovat mimo něj.
 """
+import calendar
 import http.client
 import json
+import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -25,6 +28,8 @@ LIVE = API + "/video/v1/playlist-live/v1/stream-data/channel/%s"
 USER_AGENT = "Kodi add-on plugin.video.prehrajto.mojevidea (iVysilani)"
 TIMEOUT = 20
 PAGE = 40  # tolik položek na dotaz web povoluje
+LISTING_PAGE = 80  # úplný výpis kategorie stránkuje web po osmdesáti
+CHANNEL_RE = re.compile(r"CH_\d{1,3}$")
 
 # kanály živého vysílání (ověřeno 2026-11)
 LIVE_CHANNELS = (("CH_1", "ČT1"), ("CH_2", "ČT2"), ("CH_24", "ČT24"), ("CH_4", "ČT sport"),
@@ -35,6 +40,13 @@ Q_CATEGORY = (
     "query GetCategoryL1Blocks($categoryId:String!){category(categoryId:$categoryId){id title categoryId "
     "categoryBlocks{title categoryId slug hasMoreItems cards{show{id slug title isPlayable showType year "
     "shortDescription images{card(width:480 height:270) poster(width:480)}}}}}}")
+Q_LISTING = (
+    "query CategoryProgrammes($categoryId:String!$limit:PaginationAmount!$offset:Int!){category(categoryId:$categoryId)"
+    "{id title categoryId programmeFind(limit:$limit offset:$offset){totalCount items{id slug title isPlayable "
+    "showType year shortDescription images{card(width:480 height:270) poster(width:480)}}}}}")
+Q_LIVE = (
+    "query LiveBroadcastFind{liveBroadcastFind{id slug current{id idec sidp title description startsAt endsAt "
+    "assignedToChannel{channelName} previewImage(width:480)} next{id title startsAt endsAt}}}")
 Q_SEARCH_SHOWS = (
     "query SearchShows($limit:PaginationAmount!$offset:Int!$search:String!$onlyPlayable:Boolean){"
     "searchShows(limit:$limit offset:$offset keyword:$search onlyPlayable:$onlyPlayable){totalCount "
@@ -82,6 +94,14 @@ def _int(value):
     try:
         return int(value or 0)
     except (TypeError, ValueError):
+        return 0
+
+
+def _timestamp(value):
+    """ISO čas z rozhraní (UTC) → unixový čas, 0 když chybí."""
+    try:
+        return calendar.timegm(time.strptime(_text(value)[:19], "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
         return 0
 
 
@@ -165,13 +185,48 @@ class Client(object):
 
     # --- katalog ----------------------------------------------------------
     def menu(self):
-        """Hlavní kategorie, které mají vlastní stránku s bloky pořadů."""
-        items = []
-        for entry in self.graphql("CategoryMenu", Q_MENU).get("menu") or []:
+        """Hlavní kategorie s podkategoriemi: [{"id", "title", "children": [{"id", "title"}]}]."""
+        def node(entry):
             ids = entry.get("categoryId") if isinstance(entry, dict) else None
             if isinstance(ids, list) and ids and _text(entry.get("title")):
-                items.append({"id": str(ids[-1]), "title": _text(entry["title"])})
+                return {"id": str(ids[-1]), "title": _text(entry["title"])}
+            return None
+
+        items = []
+        for entry in self.graphql("CategoryMenu", Q_MENU).get("menu") or []:
+            item = node(entry)
+            if item:
+                item["children"] = [child for child in map(node, entry.get("children") or []) if child]
+                items.append(item)
         return items
+
+    def category_listing(self, category_id, offset=0, limit=LISTING_PAGE):
+        """Úplný výpis kategorie nebo podkategorie: {"title", "total", "shows"}."""
+        category = self.graphql("CategoryProgrammes", Q_LISTING, {
+            "categoryId": str(category_id), "limit": limit, "offset": offset}).get("category") or {}
+        found = category.get("programmeFind") or {}
+        shows = [_show_card(show) for show in found.get("items") or [] if isinstance(show, dict)]
+        return {"title": _text(category.get("title")), "total": _int(found.get("totalCount")),
+                "shows": [show for show in shows if show["id"] and show["title"]]}
+
+    def live_now(self):
+        """Co právě běží: [{"channel", "name", "title", "description", "starts", "ends", "image",
+        "next_title", "next_starts"}] – včetně mimořádných přenosů, které web právě nabízí."""
+        channels = []
+        for entry in self.graphql("LiveBroadcastFind", Q_LIVE).get("liveBroadcastFind") or []:
+            if not isinstance(entry, dict) or not CHANNEL_RE.match(_text(entry.get("id"))):
+                continue
+            current = entry.get("current") if isinstance(entry.get("current"), dict) else {}
+            following = entry.get("next") if isinstance(entry.get("next"), dict) else {}
+            name = _text((current.get("assignedToChannel") or {}).get("channelName")) \
+                or dict(LIVE_CHANNELS).get(entry["id"], "")
+            channels.append({"channel": entry["id"], "name": name, "title": _text(current.get("title")),
+                             "description": _text(current.get("description")),
+                             "starts": _timestamp(current.get("startsAt")), "ends": _timestamp(current.get("endsAt")),
+                             "image": _text(current.get("previewImage")),
+                             "next_title": _text(following.get("title")),
+                             "next_starts": _timestamp(following.get("startsAt"))})
+        return channels
 
     def category(self, category_id):
         """{"title", "blocks": [{"title", "shows": [...]}]} – pořady, které web v kategorii nabízí."""
@@ -268,15 +323,23 @@ class Client(object):
             for item in (track.get("files") or []) if isinstance(track, dict) else []:
                 if isinstance(item, dict) and item.get("format") == "vtt" and _text(item.get("url")):
                     subtitles.append(_text(item["url"]))
+        playability = data.get("playability") if isinstance(data.get("playability"), dict) else {}
         return {"url": _text(stream["url"]), "subtitles": subtitles,
-                "duration": _int(stream.get("duration") or data.get("duration")), "title": _text(data.get("title"))}
+                "duration": _int(stream.get("duration") or data.get("duration")), "title": _text(data.get("title")),
+                "show_title": _text(data.get("showTitle")),
+                # rozhraní za název dílu přidává pořadové číslo ("… | 14")
+                "episode_title": re.sub(r"\s*\|\s*\d+\s*$", "", _text(data.get("episodeTitle"))),
+                "show_id": _text(str(playability.get("sidp") or "")), "image": _text(data.get("previewImageUrl"))}
 
-    def live(self, channel):
-        if channel not in dict(LIVE_CHANNELS):
+    def live(self, channel, timeshift=False):
+        """Živý stream kanálu; ``timeshift`` = varianta, ve které lze přetáčet zpět."""
+        if not CHANNEL_RE.match(str(channel)):
             raise IvysilaniError("neznámý kanál")
         data = self._request(LIVE % channel + self._stream_query())
         urls = data.get("streamUrls") if isinstance(data.get("streamUrls"), dict) else {}
-        if urls.get("isBlocked") or not _text(urls.get("main")):
+        url = _text(urls.get("timeshift")) if timeshift else ""
+        url = url or _text(urls.get("main"))
+        if urls.get("isBlocked") or not url:
             raise NotPlayable(_playability_message(data) or "Živé vysílání tohoto kanálu teď není dostupné.")
-        return {"url": _text(urls["main"]), "subtitles": [], "duration": 0,
-                "title": _text(data.get("title")) or dict(LIVE_CHANNELS)[channel]}
+        return {"url": url, "subtitles": [], "duration": 0,
+                "title": _text(data.get("title")) or dict(LIVE_CHANNELS).get(channel, channel)}

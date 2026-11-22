@@ -140,9 +140,17 @@ verze stejného filmu nebo epizody ve vlastním katalogu.
 V hlavní nabídce je sekce **iVysílání** s volně dostupnými pořady České televize. Nepotřebuje
 přihlášení a s katalogem vašich videí z Přehraj.to se nemíchá.
 
-- **Živé vysílání** – ČT1, ČT2, ČT24, ČT sport, ČT :D, ČT art a ČT3.
-- **Kategorie** (Seriály, Filmy, Dokumenty…) – pořady, které web iVysílání v dané kategorii právě
-  nabízí. Filmy se přehrají rovnou, seriály a pořady se otevřou po řadách a dílech (40 na stránku).
+- **Živé vysílání** – ČT1, ČT2, ČT24, ČT sport, ČT :D, ČT art a ČT3 a mimořádné přenosy, které web
+  právě nabízí. U kanálu je vidět, co právě běží a co následuje. Kontextová nabídka nabízí
+  **Přehrát s časovým posunem** (varianta streamu, ve které lze přetáčet zpět).
+- **Kategorie** (Seriály, Filmy, Dokumenty…) – nahoře **Všechny pořady v kategorii** a podkategorie
+  (Krimi, Komedie…) s úplným výpisem po 80 pořadech, pod nimi výběr, který web právě nabízí.
+  Filmy se přehrají rovnou, seriály a pořady se otevřou po řadách a dílech (40 na stránku).
+- **Rozkoukané** – služba doplňku si u pořadů z iVysílání pamatuje pozici a dokoukání. Rozkoukané
+  díly jsou v sekci iVysílání i ve společných **Rozkoukaných** doplňku a Kodi u nich nabídne
+  pokračování. Položku odeberete přes kontextovou nabídku.
+- **Moje pořady** – pořad přidáte přes kontextovou nabídku **Přidat do Mých pořadů**. Seznam
+  ukazuje, kolik dílů přibylo od poslední návštěvy pořadu.
 - **Hledat v iVysílání** – najde pořady i jednotlivé díly. Stejné hledání nabídne i poslední položka
   ve výsledcích běžného **Hledat**.
 - **Přehrávání** v HLS s titulky, pokud je pořad má. Je-li nainstalovaný InputStream Adaptive,
@@ -153,9 +161,9 @@ Omezení:
 - **Chráněný obsah (DRM) doplněk nepřehrává.** Když Česká televize stream nevydá (práva pro území,
   vypršelá licence, chráněný zahraniční pořad), zobrazí se její vysvětlení.
 - Část pořadů je dostupná jen z českých IP adres.
-- Kategorie ukazují výběr, který nabízí web, ne úplný seznam všech pořadů – ke všemu ostatnímu
-  vede hledání.
-- Pozici v pořadech z iVysílání si pamatuje Kodi samo; do Rozkoukaných doplňku se nezapisují.
+- Živé vysílání se do Rozkoukaných nezapisuje.
+- V detailu titulu z TMDB je odkaz **Otevřít v iVysílání**, když tam je pořad stejného názvu,
+  jinak **Hledat v iVysílání**.
 - Doplněk není oficiálním produktem České televize. Používá stejné veřejné rozhraní jako web
   iVysílání; když ho ČT změní, může sekce přestat fungovat, dokud se doplněk neupraví.
 

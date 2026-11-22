@@ -1522,3 +1522,47 @@ msgstr "Přehrávat přes InputStream Adaptive, je-li nainstalovaný"
 msgctxt "#30586"
 msgid "Search iVysílání: %s"
 msgstr "Hledat v iVysílání: %s"
+
+msgctxt "#30587"
+msgid "My shows"
+msgstr "Moje pořady"
+
+msgctxt "#30588"
+msgid "Add to My shows"
+msgstr "Přidat do Mých pořadů"
+
+msgctxt "#30589"
+msgid "Remove from My shows"
+msgstr "Odebrat z Mých pořadů"
+
+msgctxt "#30590"
+msgid "new episodes: %d"
+msgstr "nové díly: %d"
+
+msgctxt "#30591"
+msgid "All shows in the category"
+msgstr "Všechny pořady v kategorii"
+
+msgctxt "#30592"
+msgid "Play with time shift"
+msgstr "Přehrát s časovým posunem"
+
+msgctxt "#30593"
+msgid "then %s %s"
+msgstr "pak %s %s"
+
+msgctxt "#30594"
+msgid "Open in iVysílání: %s"
+msgstr "Otevřít v iVysílání: %s"
+
+msgctxt "#30595"
+msgid "Remove from in-progress"
+msgstr "Odebrat z rozkoukaných"
+
+msgctxt "#30596"
+msgid "Added to My shows"
+msgstr "Přidáno do Mých pořadů"
+
+msgctxt "#30597"
+msgid "Removed from My shows"
+msgstr "Odebráno z Mých pořadů"

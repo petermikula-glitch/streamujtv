@@ -20,6 +20,11 @@ ROUTES = {
     "ivys_menu": "views_ivysilani.ivys_menu",
     "ivys_live": "views_ivysilani.ivys_live",
     "ivys_category": "views_ivysilani.ivys_category",
+    "ivys_listing": "views_ivysilani.ivys_listing",
+    "ivys_progress": "views_ivysilani.ivys_progress",
+    "ivys_history_remove": "views_ivysilani.ivys_history_remove",
+    "ivys_favorites": "views_ivysilani.ivys_favorites",
+    "ivys_favorite": "views_ivysilani.ivys_favorite",
     "ivys_show": "views_ivysilani.ivys_show",
     "ivys_search": "views_ivysilani.ivys_search",
     "ivys_play": "views_ivysilani.ivys_play",
@@ -149,10 +154,10 @@ def run(argv=None):
     query = argv[2][1:] if len(argv) > 2 and argv[2].startswith("?") else (argv[2] if len(argv) > 2 else "")
     params = dict(urllib.parse.parse_qsl(query))
     action = params.pop("action", "root")
-    if action == "play" and params.get("retry") != "1" and len(argv) > 3:
+    if action in ("play", "ivys_play") and params.get("retry") != "1" and len(argv) > 3:
         if argv[3] == "resume:false":
             params["restart"] = "1"
-        elif argv[3] == "resume:true" and params.get("offer_transfer") == "1":
+        elif action == "play" and argv[3] == "resume:true" and params.get("offer_transfer") == "1":
             params["resume_requested"] = "1"
     log("route %s %s" % (action, params))
     target = ROUTES.get(action)

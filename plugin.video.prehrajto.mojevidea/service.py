@@ -23,6 +23,7 @@ STARTUP_DELAY = 60      # s po startu Kodi, než se poprvé zkusí synchronizace
 TICK = 5                # s – jak často se zapisuje pozice přehrávání
 SYNC_CHECK_EVERY = 300  # s
 WATCHED_SHARE = 0.92    # od tohoto podílu délky se video počítá jako dokoukané (jako v katalogu)
+IVYSILANI = "ivys:"     # tak začíná označení pořadu z iVysílání (místo ID videa z katalogu)
 PLAYING_PROPERTY = kodiutils.ADDON_ID + ".playing"
 
 
@@ -105,7 +106,10 @@ class PlaybackTracker(xbmc.Player):
             return
         try:
             with open_library() as lib:
-                lib.record_play(self.vid, self.position, self.total, started=started)
+                if self.vid.startswith(IVYSILANI):
+                    lib.ivys_record_play(self.vid[len(IVYSILANI):], self.position, self.total)
+                else:
+                    lib.record_play(self.vid, self.position, self.total, started=started)
         except Exception as e:  # noqa: BLE001 – služba nesmí spadnout
             kodiutils.log_error("historii přehrávání nelze uložit: %s" % e)
 
@@ -119,7 +123,7 @@ class PlaybackTracker(xbmc.Player):
                 self.position = self.total
                 completed = True
             self.save()
-            if kodiutils.setting_bool("library_share_history"):
+            if kodiutils.setting_bool("library_share_history") and not self.vid.startswith(IVYSILANI):
                 self.kodi_updates.add(self.vid)
         self.vid = None
         self.path_hash = None
@@ -137,7 +141,7 @@ class PlaybackTracker(xbmc.Player):
     def onPlayBackEnded(self):
         vid = self.vid
         completed = self.finish(ended=True)
-        if vid and completed and any(kodiutils.setting_bool(key)
+        if vid and completed and not vid.startswith(IVYSILANI) and any(kodiutils.setting_bool(key)
                                      for key in ("offer_next_episode", "offer_next_movie")):
             self.next_offer = vid
 
@@ -158,6 +162,8 @@ class PlaybackTracker(xbmc.Player):
         pending = take_pending_playback()
         vid, replacement = self.vid, self.replacement
         self.finish()
+        if IVYSILANI in ((pending or {}).get("vid", "")[:len(IVYSILANI)], (vid or "")[:len(IVYSILANI)]):
+            return  # pořad z iVysílání: žádná záložní verze ani odkaz v mezipaměti k obnovení
         if pending or vid:
             import plugin
             try:

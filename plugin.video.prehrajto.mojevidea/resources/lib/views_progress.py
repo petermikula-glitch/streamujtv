@@ -4,13 +4,14 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
-from kodiutils import notify
+from kodiutils import notify, setting_bool
 import ui
 from ui import (_, add_action, add_dir, add_video, _display_title, end, _episode_metadata_key, open_library,
                 _PLAYBACK, PLAYING_PROPERTY, url_for, _version_score)
 
 views_catalog = ui.LazyModule("views_catalog")
 views_edit = ui.LazyModule("views_edit")
+views_ivysilani = ui.LazyModule("views_ivysilani")
 views_kodi = ui.LazyModule("views_kodi")
 
 
@@ -136,9 +137,10 @@ def in_progress(params):
             label = "%s · %s" % (title, progress)
         add_video(video, meta, label=label, mediatype="episode" if is_episode else "movie",
                   progress=progress, progress_key=video["meta_key"], episode_data=episode_data)
+    streamed = views_ivysilani.add_progress_items(20) if setting_bool("ivysilani_enabled") else 0
     if hidden:
         add_dir(_(30414), "progress_hidden", "DefaultVideoDeleted.png")
-    elif not entries:
+    elif not entries and not streamed:
         notify(_(30367))
     end("videos", cache=False)
 
@@ -241,3 +243,4 @@ def history_clear(params):
     if ui.yesno(_(30238)):
         with open_library() as lib:
             lib.remove_history()
+            lib.ivys_remove_history()

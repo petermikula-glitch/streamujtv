@@ -6,11 +6,11 @@ import time
 
 from nameparser import movie_key, normalize, parse, show_key, title_key
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 BACKUP_VERSION = 1
 MAX_SQL_KEYS = 500  # SQLite před 3.32 dovolí nejvýš 999 parametrů v jednom dotazu
 OPTIONAL_BACKUP_TABLES = ("watchlist", "watched_marks", "progress_hidden", "saved_movie_filters",
-                          "episode_additions", "episode_visits")
+                          "episode_additions", "episode_visits", "ivys_history", "ivys_favorites")
 BACKUP_TABLES = ("videos", "meta", "collections", "collection_items", "history", "search_history",
                  *OPTIONAL_BACKUP_TABLES)
 
@@ -136,6 +136,25 @@ CREATE TABLE IF NOT EXISTS episode_visits (
 CREATE TABLE IF NOT EXISTS settings_kv (
     k TEXT PRIMARY KEY,
     v TEXT
+);
+CREATE TABLE IF NOT EXISTS ivys_history (
+    idec TEXT PRIMARY KEY,         -- číslo dílu v iVysílání
+    show_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    show_title TEXT NOT NULL DEFAULT '',
+    image TEXT NOT NULL DEFAULT '',
+    position REAL NOT NULL DEFAULT 0,
+    total REAL NOT NULL DEFAULT 0,
+    last_played INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_ivys_history_played ON ivys_history(last_played);
+CREATE TABLE IF NOT EXISTS ivys_favorites (
+    show_id TEXT PRIMARY KEY,      -- číslo pořadu v iVysílání
+    title TEXT NOT NULL DEFAULT '',
+    image TEXT NOT NULL DEFAULT '',
+    poster TEXT NOT NULL DEFAULT '',
+    added INTEGER NOT NULL DEFAULT 0,
+    seen_count INTEGER NOT NULL DEFAULT 0  -- kolik dílů měl pořad při poslední návštěvě
 );
 CREATE TABLE IF NOT EXISTS cache (
     key TEXT PRIMARY KEY,          -- např. tmdb:/movie/123?… nebo search:online:<hash>
@@ -1174,6 +1193,72 @@ class Library(object):
         else:
             self.conn.execute("DELETE FROM history")
         self.conn.commit()
+
+    # --- iVysílání: historie a oblíbené pořady ------------------------------
+    def ivys_touch(self, idec, show_id="", title="", show_title="", image="", now=None):
+        """Zapíše, co se právě začalo přehrávat (název, pořad, obrázek); pozici nemění."""
+        now = int(now or time.time())
+        with self.conn:
+            self.conn.execute("INSERT OR IGNORE INTO ivys_history(idec, last_played) VALUES (?, ?)", (idec, now))
+            self.conn.execute(
+                "UPDATE ivys_history SET last_played=?, show_id=COALESCE(NULLIF(?, ''), show_id), "
+                "title=COALESCE(NULLIF(?, ''), title), show_title=COALESCE(NULLIF(?, ''), show_title), "
+                "image=COALESCE(NULLIF(?, ''), image) WHERE idec=?",
+                (now, show_id or "", title or "", show_title or "", image or "", idec))
+
+    def ivys_record_play(self, idec, position=0.0, total=0.0, now=None):
+        now = int(now or time.time())
+        with self.conn:
+            self.conn.execute("INSERT OR IGNORE INTO ivys_history(idec, last_played) VALUES (?, ?)", (idec, now))
+            self.conn.execute("UPDATE ivys_history SET last_played=?, position=?, "
+                              "total=COALESCE(NULLIF(?, 0), total) WHERE idec=?", (now, position, total, idec))
+
+    def ivys_states(self):
+        """({idec: (pozice, délka)} rozkoukaných, {idec} dokoukaných)."""
+        resume, watched = {}, set()
+        for idec, position, total in self.conn.execute("SELECT idec, position, total FROM ivys_history WHERE total > 0"):
+            if position >= total * IN_PROGRESS_MAX:
+                watched.add(idec)
+            elif position >= IN_PROGRESS_MIN:
+                resume[idec] = (position, total)
+        return resume, watched
+
+    def ivys_progress(self, limit=50):
+        """Rozkoukané díly z iVysílání, naposledy přehrané první."""
+        rows = self.conn.execute(
+            "SELECT * FROM ivys_history WHERE total > 0 AND position >= ? AND position < total * ? "
+            "ORDER BY last_played DESC, idec LIMIT ?", (IN_PROGRESS_MIN, IN_PROGRESS_MAX, int(limit))).fetchall()
+        return [dict(row) for row in rows]
+
+    def ivys_remove_history(self, idec=None):
+        with self.conn:
+            if idec:
+                self.conn.execute("DELETE FROM ivys_history WHERE idec=?", (idec,))
+            else:
+                self.conn.execute("DELETE FROM ivys_history")
+
+    def ivys_favorites(self):
+        return [dict(row) for row in self.conn.execute(
+            "SELECT * FROM ivys_favorites ORDER BY title COLLATE NOCASE, show_id")]
+
+    def ivys_is_favorite(self, show_id):
+        return bool(self.conn.execute("SELECT 1 FROM ivys_favorites WHERE show_id=?", (show_id,)).fetchone())
+
+    def ivys_favorite_add(self, show_id, title, image="", poster="", seen_count=0, now=None):
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO ivys_favorites(show_id, title, image, poster, added, seen_count) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (show_id, title, image or "", poster or "", int(now or time.time()), int(seen_count or 0)))
+
+    def ivys_favorite_remove(self, show_id):
+        with self.conn:
+            self.conn.execute("DELETE FROM ivys_favorites WHERE show_id=?", (show_id,))
+
+    def ivys_favorite_seen(self, show_id, count):
+        """Uživatel pořad otevřel – díly do tohoto počtu už nejsou nové."""
+        with self.conn:
+            self.conn.execute("UPDATE ivys_favorites SET seen_count=? WHERE show_id=?", (int(count or 0), show_id))
 
     # --- historie hledání ----------------------------------------------------
     def add_search(self, query, keep=20):

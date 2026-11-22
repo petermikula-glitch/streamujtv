@@ -10,7 +10,7 @@ import xbmc
 import xbmcgui
 
 import search_results
-from kodiutils import notify, setting_int
+from kodiutils import notify, setting_bool, setting_int
 from nameparser import parse
 from search_results import normalize
 import ui
@@ -21,6 +21,7 @@ from ui import (_, _account_scope, add_action, add_dir, _add_item, _add_movies, 
                 _run_action, _search_client, SEARCH_COUNTRIES, _set_info, url_for, _version_label,
                 _version_score)
 
+views_ivysilani = ui.LazyModule("views_ivysilani")
 views_progress = ui.LazyModule("views_progress")
 views_search = ui.LazyModule("views_search")
 _tmdb = ui.LazyModule("tmdb")
@@ -567,6 +568,12 @@ def tmdb_title(params):
     if detail["orig_title"] and detail["orig_title"] != title:
         args = {"series": 1, "title": title, "original": detail["orig_title"], "year": detail["year"]} if want_series else {}
         add_option(_(30359), "provider_search", q=detail["orig_title"], **args)
+    if title and setting_bool("ivysilani_enabled"):
+        streamed = views_ivysilani.find_show(title)
+        if streamed:  # pořad stejného názvu je volně v iVysílání
+            add_option(_(30594) % streamed["title"], "ivys_show", id=streamed["id"])
+        else:
+            add_option(_(30586) % title, "ivys_search", q=title)
     add_action(_(30376 if saved else 30375), "watchlist_change", kind=kind, tmdb_id=tmdb_id,
                remove=int(saved), title=title, year=detail["year"], poster=detail["poster"])
     end("tvshows" if want_series else "movies", cache=False)
