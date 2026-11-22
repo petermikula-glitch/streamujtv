@@ -521,6 +521,7 @@ class PlayerActivity : FragmentActivity() {
     override fun onStop() {
         super.onStop()
         saveProgress(ended = false)
+        WatchNext.sync(this, delayMs = 1500)  // až se uloží pozice
         if (isFinishing) release()
     }
 

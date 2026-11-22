@@ -116,4 +116,6 @@ dependencies {
     // Verze musí odpovídat verzi Media3.
     implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.8.0+1")
     implementation("com.github.bumptech.glide:glide:4.16.0")
+    // řada „Pokračovat ve sledování“ na domovské obrazovce Android TV
+    implementation("androidx.tvprovider:tvprovider:1.0.0")
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ztmavení levé části úvodního panelu, aby byl text čitelný přes obrázek. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient android:angle="0" android:centerColor="#B30B1220" android:centerX="0.45"
+        android:endColor="#000B1220" android:startColor="#F00B1220" />
+</shape>
