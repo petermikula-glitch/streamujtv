@@ -1,1 +1,1 @@
-V nabídce Nástroje → Hledat se nově zobrazují výsledky z online katalogu Přehraj.to. Najdete je v řadě „Videa na Přehraj.to“.
+Nová postranní nabídka se sekcemi Přehraj.to, iVysílání a Nástroje. V sekci Přehraj.to přibyly Oblíbené (podržte OK na filmu) a Objevuj: filmy a seriály podle roku, žánru a československé, s vyhledáním verzí na Přehraj.to. iVysílání zkouší přehrát i chráněné zahraniční pořady.
