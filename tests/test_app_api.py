@@ -73,7 +73,8 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
                                                     "params": {"cid": "3976"}, "title": "Seriály"}
     tools = _section(api, "tools")["Nástroje"]
     assert [item["target"]["type"] for item in tools] == ["search", "list", "command", "command", "settings",
-                                                          "diagnostics"]
+                                                          "list", "diagnostics"]
+    assert tools[5]["title"] == "Profil: Hlavní profil" and tools[5]["image"] == "res:avatar_clapper"
     assert tools[1]["target"]["call"] == "downloads"
 
 
@@ -98,7 +99,7 @@ def test_catalogue_rows_lists_and_search(api):
     listing = api("movies", order="title")
     assert _titles(listing["items"]) == ["Pelíšky"] and listing["next"] is None
     episodes = api("show", key="show:archa")
-    assert episodes["title"] == "Archa" and _titles(episodes["items"]) == ["1×01", "1×02", "1×03"]
+    assert episodes["title"] == "Archa" and _titles(episodes["items"]) == ["1×01", "1×02", "1×03", "Stáhnout 1. řadu"]
     assert episodes["items"][0]["target"]["params"] == {"vid": "11:archa:%016x" % 11}
     assert api("show", key="show:neni") == {"ok": False, "error": "Seriál v katalogu není."}
     assert _titles(api("played")["items"]) == ["Pelíšky"]
@@ -683,7 +684,7 @@ def test_title_page_offers_the_series_similar_titles_cast_and_csfd(api, monkeypa
     assert (actor["title"], actor["subtitle"]) == ("Miroslav Donutil", "Šebek")
     assert actor["image"] == "https://image.tmdb.org/t/p/w185/d.jpg" and second["image"] == "" and second["wide"]
     assert actor["target"] == {"type": "list", "call": "discover", "params": {"kind": "movie", "cast": "5"},
-                               "title": "Filmy – Miroslav Donutil"}
+                               "title": "Filmy – Miroslav Donutil", "poster": True}
     films = api("discover", **actor["target"]["params"])                     # filmy s hercem
     assert "Dědictví" in _titles(films["items"]) and calls[-1][1]["with_cast"] == "5"
     alone = api("discover_title", kind="movie", id=5, title="Neznámý film", year=2001)
@@ -787,7 +788,7 @@ def test_series_page_seasons_episodes_and_continue(api, monkeypatch):
     assert seasons["title"] == "Řady" and _titles(seasons["items"]) == ["1. řada"]
     assert seasons["items"][0]["subtitle"] == "8 dílů" and seasons["items"][0]["target"]["call"] == "discover_season"
     episodes = api("discover_season", **seasons["items"][0]["target"]["params"])["items"]
-    assert _titles(episodes) == ["1×01 · Pilot", "1×02 · Druhý"] and episodes[1]["wide"] is True
+    assert _titles(episodes) == ["1×01 · Pilot", "1×02 · Druhý", "Stáhnout celou řadu"] and episodes[1]["wide"] is True
     versions = api("discover_episode", **episodes[1]["target"]["params"])["items"]
     assert _titles(versions) == ["CZ dabing"] and asked[-1] == ("Archa S01E02", 1)
     assert versions[0]["target"]["params"]["choice"] == "tv:77:1:2"
@@ -998,3 +999,157 @@ def test_protected_ivysilani_programme_uses_device_widevine(api, monkeypatch):
     result = api("ivys_play", idec="123")
     assert (result["dash"], result["hls"], result["drm"]) == (True, False, {"license": ""})
     assert result["diagnostic"] == "{streams[{url}]}; adresa: token, streamType, drmOnly=true"
+
+
+def test_profiles_keep_progress_favourites_and_preferences_apart(api, monkeypatch):
+    _fill(3)
+    first = "11:archa:%016x" % 11
+    api("progress_save", track=REF, position=1500, total=6000, started=True)
+    api("settings_set", prefer_language="subs")
+    with app_api._library() as lib:
+        meta = lib.get_meta("movie:pelisky|1999")
+    card = api("movies")["items"][0]
+    toggle = next(item for item in card["menu"] if item["title"] == "Přidat do oblíbených")
+    api(toggle["target"]["call"], **toggle["target"]["params"])
+    home = api("home")
+    assert home["profile"] == {"name": "Hlavní profil", "avatar": "clapper", "count": 1}
+    listed = api("profiles")
+    assert listed["title"] == "Kdo se dívá?" and _titles(listed["items"]) == ["Hlavní profil", "Přidat profil"]
+    assert listed["items"][0]["subtitle"] == "Právě se dívá" and listed["items"][0]["image"] == "res:avatar_clapper"
+    avatars = api("profile_avatars", new=1)["items"]
+    assert _titles(avatars) == ["Klapka", "Popcorn", "Koruna", "Sova", "Kočka", "Raketa"]
+    assert avatars[0]["subtitle"] == "Už ho někdo má" and avatars[3]["target"]["params"] == {"avatar": "owl"}
+    added = api(avatars[3]["target"]["call"], **avatars[3]["target"]["params"])
+    assert "Sova" in added["message"] and added["close"] is True
+    owl = api("profiles")["items"][1]
+    assert (owl["title"], owl["subtitle"], owl["image"]) == ("Sova", "Přepnout", "res:avatar_owl")
+    assert [item["title"] for item in owl["menu"]] == ["Přejmenovat", "Změnit obrázek", "Smazat profil"]
+    rename = owl["menu"][0]["target"]
+    assert rename["type"] == "input" and rename["params"]["value"] == "Sova"
+    api(rename["call"], id=rename["params"]["id"], text="  Jana  ")
+    assert "prázdné" in api(rename["call"], id=rename["params"]["id"], text=" ")["error"]
+
+    switched = api(owl["target"]["call"], **owl["target"]["params"])        # druhý profil začíná načisto
+    assert switched == {"message": "", "close": True, "toast": "Dívá se: Jana"}
+    assert api("home")["profile"] == {"name": "Jana", "avatar": "owl", "count": 2}
+    rows = _section(api, "prehrajto")
+    assert "Rozkoukané" not in rows and rows["Oblíbené"][0]["icon"] == "favorites"   # jen nápověda, nic oblíbeného
+    assert api("settings_get")["prefer_language"] == "dub"
+    assert "smazat nejde" in api("profile_delete", id=owl["target"]["params"]["id"])["error"]
+    api("progress_save", track=first, position=300, total=1200, started=True)
+    api("settings_set", prefer_quality="720")
+    assert _section(api, "prehrajto")["Rozkoukané"][0]["target"]["params"] == {"vid": first}
+
+    main = api("profiles")["items"][0]
+    api(main["target"]["call"], **main["target"]["params"])                 # zpět: původní stav je na místě
+    rows = _section(api, "prehrajto")
+    assert [item["target"]["params"] for item in rows["Rozkoukané"]] == [{"vid": REF}]
+    assert _titles(rows["Oblíbené"]) == ["Pelíšky"]
+    settings = api("settings_get")
+    assert (settings["prefer_language"], settings["prefer_quality"]) == ("subs", "best")
+    assert meta["key"] and len(api("movies")["items"]) == 1                  # katalog je společný
+
+    api(main["target"]["call"], **owl["target"]["params"])                  # a druhý profil má své
+    assert _section(api, "prehrajto")["Rozkoukané"][0]["target"]["params"] == {"vid": first}
+    assert api("settings_get")["prefer_quality"] == "720"
+    api(main["target"]["call"], **main["target"]["params"])
+    assert "smazaný" in api("profile_delete", id=owl["target"]["params"]["id"])["message"]
+    assert _titles(api("profiles")["items"]) == ["Hlavní profil", "Přidat profil"]
+    assert "neexistuje" in api("profile_switch", id="p9")["error"]
+
+
+def test_hero_and_watch_next_follow_the_last_unfinished_video(api):
+    _fill(2)
+    sections = {section["id"]: section for section in api("home")["sections"]}
+    assert "hero" not in sections["prehrajto"] and "hero" not in sections["ivysilani"]
+    assert api("watch_next") == {"items": []}
+    with app_api._library() as lib:
+        lib.update_meta("movie:pelisky|1999", {"status": "ok", "title": "Pelíšky", "year": 1999,
+                                               "poster": "https://img/p.jpg", "fanart": "https://img/f.jpg"})
+        lib.record_play(REF, 1500, 6000, now=1000)
+        lib.record_play("11:archa:%016x" % 11, 300, 1200, now=2000)
+        lib.ivys_touch("777", "9", "Díl 3", "Vyprávěj", "https://img/v.jpg", now=3000)
+        lib.ivys_record_play("777", 600, 3000, now=3000)
+    sections = {section["id"]: section for section in api("home")["sections"]}
+    hero = sections["prehrajto"]["hero"]                                     # naposledy přehrané rozkoukané video
+    assert (hero["title"], hero["label"], hero["progress"]) == ("Archa 1×01", "Pokračovat", 25)
+    assert hero["subtitle"] == "CZ dabing · zbývá 15 min" and hero["image"] == ""
+    assert hero["target"] == {"type": "play", "call": "play", "params": {"vid": "11:archa:%016x" % 11}}
+    television = sections["ivysilani"]["hero"]
+    assert (television["title"], television["subtitle"]) == ("Vyprávěj · Díl 3", "iVysílání · zbývá 40 min")
+    assert television["image"] == "https://img/v.jpg" and "hero" not in sections["tools"]
+
+    items = api("watch_next")["items"]                                       # pro domovskou obrazovku televize
+    assert [(item["id"], item["title"], item["call"]) for item in items] == [
+        ("ivys:777", "Vyprávěj · Díl 3", "ivys_play"), ("11:archa:%016x" % 11, "Archa 1×01", "play"),
+        (REF, "Pelíšky", "play")]
+    assert (items[2]["position"], items[2]["duration"], items[2]["image"], items[2]["episode"]) == (
+        1500, 6000, "https://img/f.jpg", False)
+    assert items[0]["params"] == {"idec": "777"} and items[1]["episode"] is True
+
+
+def test_audio_and_subtitle_choice_is_remembered_per_series(api, monkeypatch):
+    _fill(2)
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/v.mp4", {}))
+    api("settings_set", username="a@b.cz", password="heslo")
+    first, second = ["%d:archa:%016x" % (10 + n, 10 + n) for n in (1, 2)]
+    tracks = api("play", vid=first)["tracks"]
+    assert tracks == {"key": "show:archa", "audio": "", "subs": ""}
+    assert api("track_prefs", key=tracks["key"], audio="en", subs="cs") == {"saved": True}
+    assert api("play", vid=second)["tracks"] == {"key": "show:archa", "audio": "en", "subs": "cs"}   # další díl
+    assert api("play", vid=REF)["tracks"]["audio"] == ""                     # jiný titul má vlastní volbu
+    assert api("track_prefs", key="", audio="en") == {"saved": False}
+    assert api("play", vid=second, choice="tv:77:1:2")["tracks"]["key"] == "tv:77"   # seriál z Objevuj
+
+
+def test_whole_season_is_queued_and_watched_downloads_can_be_removed(api, tmp_path, monkeypatch):
+    _fill(3)
+    season = api("show", key="show:archa")["items"][-1]
+    assert (season["title"], season["subtitle"]) == ("Stáhnout 1. řadu", "3 dílů na disk")
+    assert season["target"] == {"type": "download", "call": "download_season", "params": {"key": "show:archa", "season": 1}}
+    assert api("download_season", **season["target"]["params"]) == {
+        "message": "Zařazeno ke stažení: 3 dílů (1. řada).", "start": True}
+    assert len(api("downloads")["items"]) == 3
+    assert "už jsou stažené" in api("download_season", **season["target"]["params"])["message"]
+    assert "žádné díly" in api("download_season", key="show:archa", season=4)["error"]
+
+    first = "11:archa:%016x" % 11
+    disk = tmp_path / "usb"
+    disk.mkdir()
+    _link(first, "https://cdn.x/archa1.mkv?sig=1")
+    job = api("download_next", dir=str(disk))
+    assert job["vid"] == first
+    (disk / os.path.basename(job["path"])).write_bytes(b"x" * 10)
+    api("download_finish", vid=first, size=10, subtitles=[])
+    assert api("settings_get")["delete_watched"] is False
+    api("progress_save", track=first, position=1190, total=1200, ended=True)
+    assert os.path.exists(job["path"])                                       # bez volby v Nastavení se nic nemaže
+    assert api("settings_set", delete_watched=True)["delete_watched"] is True
+    api("progress_save", track=first, position=600, total=1200)
+    assert os.path.exists(job["path"])                                       # rozkoukaný soubor zůstává
+    api("progress_save", track=first, position=1190, total=1200, ended=True)
+    assert not os.path.exists(job["path"]) and len(api("downloads")["items"]) == 2
+
+    api("settings_set", tmdb_key="k" * 32)                                   # řada seriálu z Objevuj
+    _catalogue_search(monkeypatch, {"Krakonoš S01E01": [_web(81, "Krakonos S01E01 CZ")],
+                                    "Krakonoš S01E02": [_web(82, "Krakonos S01E02 trailer")],
+                                    "Krakonoš S01E03": [_web(83, "Krakonos S01E03 CZ"), _web(84, "Krakonos S01E03 EN")]})
+    _fake_tmdb(monkeypatch, {"/tv/88/season/1": {"episodes": [{"episode_number": n, "name": "Díl"} for n in (1, 2, 3)]}})
+    listing = api("discover_season", kind="tv", id=88, title="Krakonoš", season=1)["items"]
+    whole = listing[-1]
+    assert whole["title"] == "Stáhnout celou řadu" and whole["target"]["type"] == "command"
+    result = api(whole["target"]["call"], **whole["target"]["params"])
+    assert result == {"message": "Zařazeno ke stažení: 2 dílů. 1 dílů jsem na Přehraj.to nenašel.", "start": True}
+    queued = [entry["vid"] for entry in app_api._downloads().values()]
+    assert _web(81, "")["id"] in queued and _web(83, "")["id"] in queued and _web(84, "")["id"] not in queued
+
+
+def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):
+    assert api("home")["welcome"] is True
+    api("settings_set", onboarded=True)
+    assert api("home")["welcome"] is False
+    tiles = _section(api, "prehrajto")
+    assert tiles["Objevuj filmy"][0]["target"]["poster"] is True              # výpis plakátů
+    assert "poster" not in tiles["Objevuj filmy"][3]["target"]               # Podle roku: dlaždice
+    assert "poster" not in _section(api, "tools")["Nástroje"][1]["target"]
+

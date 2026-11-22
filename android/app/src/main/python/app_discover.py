@@ -25,6 +25,7 @@ AVAILABLE_TTL = 7 * 24 * 3600
 CHECK_BATCH = 20                 # kolik titulů ověří jedno „Ověřit dostupnost“
 FAVORITES_EVERY = 12 * 3600      # hlídání oblíbených nejvýš jednou za tuto dobu
 FAVORITES_BATCH = 6              # a nejvýš tolika titulů najednou
+SEASON_DOWNLOAD_MAX = 40         # nejvýš tolik dílů při stažení celé řady
 # seriálové žánry TMDB bez vlastní ilustrace: nejbližší filmová, nebo dlaždice z iVysílání
 GENRE_ART = {10759: "genre_28", 10765: "genre_878", 10768: "genre_10752", 10762: "kids", 10763: "news"}
 TITLE_PREFIX = "title:"          # název a plakát titulu z Objevuj (pro další díl a pokračování)
@@ -435,7 +436,9 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice=""):
             continue  # tentýž soubor nahraný vícekrát
         seen.add(same)
         versions.append({"video": video, "result": result,
-                         "short": bool(runtime and video["duration"] and video["duration"] < runtime * 60 * 0.6),
+                         # ukázka nebo část: výrazně kratší než film, nebo se tak soubor sám jmenuje (trailer…)
+                         "short": bool(runtime and video["duration"] and video["duration"] < runtime * 60 * 0.6)
+                         or search_results.is_preview(video["raw_title"], names),
                          "cam": bool(api.CAM_RE.search(video["raw_title"])), "bad": video["id"] in bad,
                          "chosen": bool(chosen) and video["id"] == chosen})
     versions.sort(key=lambda version: (version["short"], not version["chosen"]) +
@@ -639,7 +642,43 @@ def discover_season(params):
             "%s %s" % (params.get("title") or "", label)), (episode.get("plot") or "")[:120],
             episode.get("still") or "", api._percent(state["resume"].get(vid)) if vid else 0, wide=True,
             watched=bool(vid) and vid in state["watched"], icon="series"))
+    if cards:
+        cards.append(api._card("Stáhnout celou řadu", api._target("command", "discover_download_season", params),
+                               "Vyhledá a zařadí všechny díly", icon="download"))
     return {"items": cards, "next": None, "empty": "TMDB u této řady neuvádí žádné díly."}
+
+
+def discover_download_season(params):
+    """Stáhne celou řadu seriálu z Objevuj: ke každému dílu vyhledá nejlepší verzi a zařadí ji do fronty."""
+    def work():
+        season, tmdb_id = int(params.get("season") or 0), int(params.get("id") or 0)
+        episodes = _tmdb().season_episodes(tmdb_id, season)
+        with api._library() as lib:
+            state = api._state(lib)
+        numbers = sorted(episodes, key=int)[:SEASON_DOWNLOAD_MAX]
+        added, missing = 0, 0
+        for index, number in enumerate(numbers, 1):
+            api._STATE["progress"] = "Hledám díly: %d/%d" % (index, len(numbers))
+            choice = "tv:%s:%s:%s" % (tmdb_id, season, number)
+            try:
+                versions = _find_versions(_names(params), 0, (season, int(number)), state, pages=1, choice=choice)
+            except api.ApiError:
+                missing += 1
+                continue
+            good = [version for version in versions if not version["short"]]
+            if not good:
+                missing += 1
+                continue
+            vid = good[0]["video"]["id"]
+            entry = state["downloads"].get(vid) or {}
+            if entry.get("state") in ("queued", "downloading") or api._saved(state, vid):
+                continue
+            api.download_add({"vid": vid, "web_result": good[0]["result"]})
+            added += 1
+        note = " %d dílů jsem na Přehraj.to nenašel." % missing if missing else ""
+        return {"message": "Zařazeno ke stažení: %d dílů.%s" % (added, note), "start": bool(added)}
+
+    return api._exclusive(work)
 
 
 def _remember_title(lib, kind, params):
@@ -875,4 +914,5 @@ ACTIONS = {
     "discover_czechoslovak": discover_czechoslovak, "discover_title": discover_title,
     "discover_season": discover_season, "discover_episode": discover_episode, "discover_check": discover_check,
     "play_next": play_next, "title_csfd": title_csfd, "favorites_check": favorites_check,
+    "discover_download_season": discover_download_season,
 }

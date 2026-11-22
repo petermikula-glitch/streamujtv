@@ -148,6 +148,9 @@ def _cached(key, ttl, load):
 # Karty
 # ---------------------------------------------------------------------------
 
+POSTER_LISTS = ("discover", "favorites", "movies", "shows", "profiles", "profile_avatars")
+
+
 def _target(kind, call=None, params=None, title=None):
     target = {"type": kind}
     if call:
@@ -155,6 +158,8 @@ def _target(kind, call=None, params=None, title=None):
         target["params"] = params or {}
     if title:
         target["title"] = title
+    if kind == "list" and call in POSTER_LISTS:
+        target["poster"] = True   # výpis plakátů: aplikace rovnou připraví mřížku správného tvaru
     return target
 
 
@@ -408,6 +413,9 @@ def home(params):
         state = _state(lib)
         prehrajto = _prehrajto_rows(lib, state, settings)
         television = _ivysilani_rows(lib)
+        heroes = {name: app_extras.hero(lib, state, name) for name in ("prehrajto", "ivysilani")}
+        empty = not lib.count_videos(visible_only=True)
+    profile = app_extras.current()
     last = settings.get("last_sync")
     tools = [{"title": "Nástroje", "items": [
         _card("Hledat", _target("search"), "Moje videa, iVysílání a Přehraj.to", icon="search"),
@@ -419,13 +427,22 @@ def home(params):
         _card("Doplnit hodnocení a plakáty", _target("command", "enrich", {}), "ČSFD, záložně TMDB", icon="enrich"),
         _card("Nastavení a přihlášení", _target("settings"), settings.get("username") or "Nepřihlášeno",
               icon="settings"),
+        _card("Profil: %s" % profile["name"], _target("list", "profiles", {}, "Kdo se dívá?"),
+              "Přepnout nebo přidat profil", "res:avatar_" + profile["avatar"], wide=True),
         _card("Diagnostika", _target("diagnostics"), "Stav účtu, připojení a poslední chyby",
               icon="settings:history"),
     ]}]
     # "pending": ve frontě něco čeká – aplikace po startu znovu spustí službu stahování
-    return {"sections": [{"id": "prehrajto", "title": "Přehraj.to", "icon": "section_prehrajto", "rows": prehrajto},
-                         {"id": "ivysilani", "title": "iVysílání", "icon": "section_ivysilani", "rows": television},
-                         {"id": "tools", "title": "Nástroje", "icon": "section_tools", "rows": tools}],
+    sections = [{"id": "prehrajto", "title": "Přehraj.to", "icon": "section_prehrajto", "rows": prehrajto},
+                {"id": "ivysilani", "title": "iVysílání", "icon": "section_ivysilani", "rows": television},
+                {"id": "tools", "title": "Nástroje", "icon": "section_tools", "rows": tools}]
+    for section in sections:
+        if heroes.get(section["id"]):
+            section["hero"] = heroes[section["id"]]   # velký panel s naposledy rozkoukaným videem
+    return {"sections": sections,
+            "profile": {"name": profile["name"], "avatar": profile["avatar"], "count": profile["count"]},
+            # první spuštění bez účtu a katalogu: aplikace nabídne průvodce
+            "welcome": bool(empty and not settings.get("username") and not settings.get("onboarded")),
             "pending": any(entry.get("state") in ("queued", "downloading")
                            for entry in state["downloads"].values())}
 
@@ -577,6 +594,10 @@ def show(params):
                            video.get("thumb") or meta.get("poster"), _percent(point),
                            wide=True, watched=video["id"] in state["watched"],
                            menu=_video_menu(state, {"vid": video["id"]}, point), icon="series"))
+    for season, count in sorted(app_extras.season_counts(best.values()).items()):
+        cards.append(_card("Stáhnout %d. řadu" % season, _target("download", "download_season",
+                                                                {"key": key, "season": season}),
+                           "%d dílů na disk" % count, icon="download"))
     return {"title": title, "items": cards, "next": None}
 
 
@@ -746,10 +767,14 @@ def play(params):
         vid = video["id"]
         meta = lib.get_meta(video["meta_key"]) or {}
         point = lib.resume_points([vid]).get(vid)
-        if params.get("choice"):
+        choice = str(params.get("choice") or "")
+        if choice:
             # verze spuštěná ze stránky titulu: příště bude první a u dílu seriálu nese stav zhlédnutí
-            lib.set_kv(CHOICE_PREFIX + str(params["choice"]), vid)
-            app_discover.remember_series(lib, str(params["choice"]))
+            lib.set_kv(CHOICE_PREFIX + choice, vid)
+            app_discover.remember_series(lib, choice)
+        # zvuk a titulky se pamatují pro celý seriál (u filmu pro film)
+        tracks = app_extras.tracks(lib, ":".join(choice.split(":")[:2]) if choice.startswith("tv:")
+                                   else video["meta_key"])
     title = _video_title(video, meta)
     position = point[0] if point and not params.get("restart") else 0
     entry = _downloads().get(vid)
@@ -758,11 +783,11 @@ def play(params):
         # stažený soubor: hraje z disku, bez internetu i bez přihlášení
         return {"url": entry["path"], "local": True, "headers": {},
                 "subtitles": [name for name in entry.get("subtitles") or [] if os.path.exists(name)],
-                "position": position, "title": title, "track": vid, "live": False, "hls": False}
+                "position": position, "title": title, "track": vid, "live": False, "hls": False, "tracks": tracks}
     url, subtitles = _stream_link(vid, bool(params.get("fresh")))
     return {"url": url, "local": False, "headers": {"User-Agent": provider.USER_AGENT},
             "subtitles": list(subtitles.values()), "position": position, "title": title,
-            "track": vid, "live": False, "hls": False}
+            "track": vid, "live": False, "hls": False, "tracks": tracks}
 
 
 def _video_title(video, meta):
@@ -812,6 +837,10 @@ def progress_save(params):
             lib.ivys_record_play(track[len(IVYS):], position, total)
         else:
             lib.record_play(track, position, total, started=bool(params.get("started")))
+    if position >= total and not track.startswith(IVYS) and _settings().get("delete_watched"):
+        entry = _downloads().get(track)
+        if entry and entry.get("state") == "done":
+            download_remove({"vid": track})   # dokoukaný stažený soubor uvolní místo na disku
     return {"saved": True}
 
 
@@ -843,6 +872,7 @@ def settings_get(params):
     return {"username": settings.get("username", ""), "has_password": bool(settings.get("password")),
             "tmdb_key": settings.get("tmdb_key", ""), "download_dir": settings.get("download_dir", ""),
             "prefer_language": prefs["language"], "prefer_quality": prefs["quality"],
+            "delete_watched": bool(settings.get("delete_watched")),
             "languages": [{"id": key, "title": title} for key, title in LANGUAGE_CHOICES],
             "qualities": [{"id": key, "title": title} for key, title in QUALITY_CHOICES]}
 
@@ -852,6 +882,9 @@ def settings_set(params):
     for key in ("username", "password", "tmdb_key", "download_dir", "prefer_language", "prefer_quality"):
         if key in params and params[key] is not None:
             settings[key] = str(params[key]).strip()
+    for key in ("delete_watched", "onboarded"):   # přepínače
+        if key in params and params[key] is not None:
+            settings[key] = bool(params[key])
     _save_settings(settings)
     return settings_get({})
 
@@ -1108,11 +1141,12 @@ def ivys_play(params):
         lib.ivys_touch(idec, stream["show_id"], stream["episode_title"] or stream["title"], stream["show_title"],
                        stream["image"])
         point = lib.ivys_states()[0].get(idec)
+        tracks = app_extras.tracks(lib, IVYS + stream["show_id"] if stream["show_id"] else "")
     title = " · ".join(part for part in (stream["show_title"], stream["episode_title"]) if part) or stream["title"]
     return {"url": stream["url"], "headers": {}, "subtitles": stream["subtitles"],
             "position": point[0] if point and not params.get("restart") else 0, "title": title,
             "track": IVYS + idec, "live": False, "hls": not stream.get("dash"), "dash": bool(stream.get("dash")),
-            "drm": stream.get("drm"),
+            "drm": stream.get("drm"), "tracks": tracks,
             # chráněný pořad: když se nepřehraje, přehrávač ukáže, co rozhraní vrátilo (jen názvy polí)
             "diagnostic": (stream.get("shape") or "") if stream.get("dash") else ""}
 
@@ -1404,8 +1438,10 @@ def update_check(params):
 # ---------------------------------------------------------------------------
 
 import app_discover  # noqa: E402 – až po definicích výše: modul používá pomocné funkce odsud
+import app_extras  # noqa: E402
 
 ACTIONS = dict(app_discover.ACTIONS)
+ACTIONS.update(app_extras.ACTIONS)
 ACTIONS.update({
     "downloads": downloads, "download_add": download_add, "download_next": download_next,
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,
