@@ -110,6 +110,7 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-exoplayer-hls:1.8.0")
+    implementation("androidx.media3:media3-exoplayer-dash:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")
     // Softwarové dekodéry zvuku (DTS, TrueHD, AC-3…) pro soubory, které zařízení samo nepřehraje.
     // Verze musí odpovídat verzi Media3.

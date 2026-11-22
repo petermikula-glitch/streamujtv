@@ -7,8 +7,10 @@
   HLS streamu a titulky; živé vysílání ``…/playlist-live/v1/stream-data/channel/<kanál>``.
   Ověřeno proti živému webu 2026-11.
 
-Chráněný obsah (DRM) doplněk nepřehrává: o stream žádá s ``canPlayDrm=false`` a když ho
-Česká televize odmítne vydat (práva, území), předá uživateli její vysvětlení.
+Chráněný obsah (DRM) doplněk pro Kodi nepřehrává: o stream žádá s ``canPlayDrm=false`` a když ho
+Česká televize odmítne vydat (práva, území), předá uživateli její vysvětlení. Aplikace pro Android TV
+může požádat i o chráněný stream (``vod(idec, drm=True)``) a přehrát ho vestavěným Widevine zařízení –
+výhradně s adresou licence, kterou rozhraní samo vrátí. Územní omezení se neobchází.
 
 Modul nesmí importovat nic z Kodi, aby šel testovat mimo něj.
 """
@@ -128,6 +130,68 @@ def _playability_message(payload):
         for key in ("additionalText", "textLong", "textShort"):
             if _text(labels.get(key)):
                 return _text(labels[key])
+    return ""
+
+
+def drm_license(payload):
+    """Adresa licenčního serveru Widevine, pokud ji odpověď rozhraní obsahuje.
+
+    Tvar odpovědi u chráněných pořadů není zdokumentovaný, proto se hledá obecně: objekt, který se
+    hlásí k Widevine (názvem pole nebo hodnotou), a v něm adresa https pod polem pro licenci.
+    """
+    def address(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                name = str(key).lower()
+                if isinstance(value, str) and value.startswith("https://") and (
+                        "licen" in name or name in ("laurl", "la_url", "serverurl", "server_url", "url")):
+                    return value
+            for value in node.values():
+                found = address(value)
+                if found:
+                    return found
+        elif isinstance(node, list):
+            for value in node:
+                found = address(value)
+                if found:
+                    return found
+        return ""
+
+    def walk(node):
+        if isinstance(node, dict):
+            marked = any("widevine" in str(key).lower() for key in node) or any(
+                isinstance(value, str) and "widevine" in value.lower() for value in node.values())
+            if marked:
+                widevine = [value for key, value in node.items() if "widevine" in str(key).lower()]
+                found = address(widevine) or address({k: v for k, v in node.items()
+                                                      if str(k).lower() not in ("url", "subtitles")})
+                if found:
+                    return found
+            for key, value in node.items():
+                if str(key).lower() == "subtitles":
+                    continue
+                found = walk(value)
+                if found:
+                    return found
+        elif isinstance(node, list):
+            for value in node:
+                found = walk(value)
+                if found:
+                    return found
+        return ""
+
+    found = walk(payload)
+    return {"license": found} if found else None
+
+
+def response_shape(payload, depth=0):
+    """Jen názvy polí odpovědi (bez hodnot) – pro diagnostiku, když se chráněný pořad nepřehraje."""
+    if isinstance(payload, dict) and depth < 7:
+        return "{%s}" % ", ".join(
+            "%s%s" % (key, response_shape(value, depth + 1) if isinstance(value, (dict, list)) else "")
+            for key, value in sorted(payload.items()) if key not in ("subtitles", "chapters", "audioTracks"))
+    if isinstance(payload, list) and payload and depth < 7:
+        return "[%s]" % response_shape(payload[0], depth + 1)
     return ""
 
 
@@ -305,14 +369,19 @@ class Client(object):
 
     # --- přehrání ---------------------------------------------------------
     @staticmethod
-    def _stream_query():
-        return "?" + urllib.parse.urlencode({"canPlayDrm": "false", "quality": "web", "streamType": "hls"})
+    def _stream_query(drm=False):
+        return "?" + urllib.parse.urlencode({"canPlayDrm": "true" if drm else "false", "quality": "web",
+                                             "streamType": "dash" if drm else "hls"})
 
-    def vod(self, idec):
-        """{"url", "subtitles": [adresy .vtt], "duration", "title"} nebo NotPlayable."""
+    def vod(self, idec, drm=False):
+        """{"url", "subtitles": [adresy .vtt], "duration", "title"} nebo NotPlayable.
+
+        ``drm=True`` žádá o stream DASH i pro chráněné pořady; výsledek pak nese navíc ``"dash": True``,
+        ``"drm"`` (``{"license": adresa}`` nebo ``None``) a ``"shape"`` – názvy polí odpovědi pro diagnostiku.
+        """
         if not str(idec).isdigit():
             raise IvysilaniError("neplatné číslo pořadu")
-        data = self._request(VOD % idec + self._stream_query())
+        data = self._request(VOD % idec + self._stream_query(drm))
         streams = [s for s in data.get("streams") or [] if isinstance(s, dict) and _text(s.get("url"))]
         if not streams:
             raise NotPlayable(_playability_message(data) or "Tento pořad nelze v doplňku přehrát "
@@ -324,12 +393,14 @@ class Client(object):
                 if isinstance(item, dict) and item.get("format") == "vtt" and _text(item.get("url")):
                     subtitles.append(_text(item["url"]))
         playability = data.get("playability") if isinstance(data.get("playability"), dict) else {}
-        return {"url": _text(stream["url"]), "subtitles": subtitles,
+        protection = {"dash": True, "drm": drm_license(stream) or drm_license(data),
+                      "shape": response_shape(data)} if drm else {}
+        return dict(protection, **{"url": _text(stream["url"]), "subtitles": subtitles,
                 "duration": _int(stream.get("duration") or data.get("duration")), "title": _text(data.get("title")),
                 "show_title": _text(data.get("showTitle")),
                 # rozhraní za název dílu přidává pořadové číslo ("… | 14")
                 "episode_title": re.sub(r"\s*\|\s*\d+\s*$", "", _text(data.get("episodeTitle"))),
-                "show_id": _text(str(playability.get("sidp") or "")), "image": _text(data.get("previewImageUrl"))}
+                "show_id": _text(str(playability.get("sidp") or "")), "image": _text(data.get("previewImageUrl"))})
 
     def live(self, channel, timeshift=False):
         """Živý stream kanálu; ``timeshift`` = varianta, ve které lze přetáčet zpět."""

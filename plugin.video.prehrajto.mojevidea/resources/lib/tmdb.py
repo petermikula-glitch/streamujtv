@@ -134,6 +134,30 @@ class Tmdb(object):
             data = self._get("/%s/%s" % (kind, category), **params)
         return data.get("results") or [], min(data.get("total_pages") or 0, 500)
 
+    def discover(self, kind, page=1, **filters):
+        """Výběr titulů podle filtrů TMDB (např. ``with_origin_country="CZ|SK"``), podle oblíbenosti.
+
+        Na rozdíl od ``browse`` filtry nepřekládá a platí stejně pro filmy i seriály.
+        """
+        params = {"page": page, "sort_by": "popularity.desc", "include_adult": "false"}
+        params.update({key: value for key, value in filters.items() if value not in ("", None)})
+        data = self._get("/discover/" + kind, **params)
+        return data.get("results") or [], min(data.get("total_pages") or 0, 500)
+
+    def seasons(self, tmdb_id):
+        """Řady seriálu bez speciálů: [{"number", "title", "episodes", "poster"}]."""
+        data = self._get("/tv/%d" % int(tmdb_id))
+        seasons = []
+        for season in data.get("seasons") or []:
+            number = season.get("season_number") if isinstance(season, dict) else None
+            if not isinstance(number, int) or number <= 0:
+                continue
+            poster = season.get("poster_path") or ""
+            seasons.append({"number": number, "title": season.get("name") or "%d. řada" % number,
+                            "episodes": season.get("episode_count") or 0,
+                            "poster": IMG + "w500" + poster if isinstance(poster, str) and poster.startswith("/") else ""})
+        return seasons
+
     def search_titles(self, query, page=1):
         data = self._get("/search/multi", query=query, include_adult="false", page=page)
         return ([item for item in data.get("results") or [] if item.get("media_type") in ("movie", "tv")],

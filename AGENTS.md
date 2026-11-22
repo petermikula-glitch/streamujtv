@@ -83,7 +83,11 @@ Do repozitáře nepatří přihlašovací údaje, tokeny ani soukromá data vlas
 
 - **Přehraj.to:** jen vlastní účet uživatele a to, co mu web sám nabízí.
 - **iVysílání ČT:** poctivá hlavička `User-Agent`, žádné předstírání původu požadavku
-  (`Origin`/`Referer`), žádný obsah chráněný DRM, žádné obcházení omezení a žádné stahování pořadů.
+  (`Origin`/`Referer`), žádné obcházení omezení (ani územního) a žádné stahování pořadů.
+- **Chráněné pořady (DRM):** doplněk pro Kodi je nepřehrává. Aplikace pro Android TV je smí přehrát
+  jen vestavěným Widevine zařízení a jen s adresou licence, kterou rozhraní ČT samo vrátí
+  (rozhodnutí vlastníka). Do kódu nepatří tokeny ani adresy opsané z oficiálního přehrávače,
+  ukládání chráněného obsahu ani jakékoli odstraňování ochrany.
 
 ## Zvyklosti
 

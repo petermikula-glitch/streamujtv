@@ -547,3 +547,20 @@ def test_tmdb_detail_links_to_the_same_show_in_ivysilani(plugin, service, monkey
     plugin.tmdb_title({"kind": "tv", "tmdb_id": "2"})
     linked = [(item.label, url) for url, item, _folder in xbmcplugin.ITEMS if "ivys" in url]
     assert linked == [("Hledat v iVysílání: Neznámý seriál", plugin.url_for("ivys_search", q="Neznámý seriál"))]
+
+
+def test_protected_stream_request_and_licence_detection():
+    assert "canPlayDrm=false" in ivysilani.Client._stream_query() and "streamType=hls" in ivysilani.Client._stream_query()
+    protected = ivysilani.Client._stream_query(True)
+    assert "canPlayDrm=true" in protected and "streamType=dash" in protected
+    # adresa licence se bere jen z odpovědi rozhraní a jen pro Widevine
+    listed = {"url": "https://cdn/x.mpd", "drm": [{"type": "fairplay", "laUrl": "https://fp/lic"},
+                                                  {"type": "widevine", "laUrl": "https://wv/lic?t=1"}]}
+    assert ivysilani.drm_license(listed) == {"license": "https://wv/lic?t=1"}
+    named = {"url": "https://cdn/x.mpd", "protection": {"playready": {"licenseUrl": "https://pr/lic"},
+                                                        "widevine": {"licenseUrl": "https://wv2/lic"}}}
+    assert ivysilani.drm_license(named) == {"license": "https://wv2/lic"}
+    plain = {"url": "https://cdn/x.mpd", "subtitles": [{"files": [{"url": "https://s/1.vtt"}]}]}
+    assert ivysilani.drm_license(plain) is None
+    shape = ivysilani.response_shape({"streams": [dict(listed, subtitles=[])], "title": "t"})
+    assert shape == "{streams[{drm[{laUrl, type}], url}], title}"            # jen názvy polí, žádné hodnoty

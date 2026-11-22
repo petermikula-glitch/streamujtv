@@ -89,6 +89,34 @@ modrý přechod se zlatou obrysovou ikonou `ic_tile_<název>`. Zápis `ikona:bar
 Podklady (PNG 800 × 450, SVG) převádí do těchto souborů `tools/import_graphics.py`: ilustrace zmenší do WebP,
 z obrysových SVG udělá vektorové obrázky Androidu (`rect` a `circle` převede na cesty).
 
+## Sekce hlavní obrazovky
+
+Postranní nabídka má tři sekce; každá je stránka s vlastními řadami (`home` v `app_api.py` vrací
+`sections` → `rows` → karty, v aplikaci `MainFragment` a `SectionFragment`):
+
+- **Přehraj.to** – Rozkoukané, Oblíbené, Objevuj filmy, Objevuj seriály, Stažené na disku a Moje videa
+  (to, co je nahrané na účtu).
+- **iVysílání** – živé kanály, rozkoukané pořady, Moje pořady a kategorie; nic jiného.
+- **Nástroje** – hledání, stahování, synchronizace, metadata, nastavení.
+
+**Objevuj** (`app_discover.py`): Přehraj.to nemá katalog podle roku ani žánru, jen hledání podle názvu
+souboru. Seznamy titulů proto dodává TMDB (novinky, populární, nejlépe hodnocené, podle roku, podle
+žánru, československé – země původu `CZ|SK|XC`), a teprve u vybraného titulu se na Přehraj.to hledají
+jeho verze; u seriálu přes řady a díly. Potřebuje klíč TMDB v Nastavení. Dostupnost se ověřuje až po
+otevření titulu, ne u celého seznamu.
+
+**Oblíbené** jsou jen v aplikaci (`favorites.json`): film či seriál z katalogu, nebo titul z Objevuj.
+Přidávají se z nabídky karty (podržení OK).
+
+## Chráněné pořady iVysílání
+
+Zahraniční pořady vydává ČT jen s ochranou DRM. Aplikace nejdřív žádá o běžný stream; když ho ČT
+nevydá, požádá o chráněný (`vod(idec, drm=True)`: DASH) a přehraje ho vestavěným Widevine zařízení
+(Media3, `DrmConfiguration`). Adresu licence bere výhradně z odpovědi rozhraní (`drm_license`);
+když v ní není, přehrávač při chybě ukáže názvy polí odpovědi, aby šlo podporu doladit. Územní
+omezení se neobchází a chráněný obsah se neukládá. **Tvar odpovědi u chráněných pořadů nebylo možné
+ověřit mimo Česko** – rozhoduje zkouška na zařízení v ČR.
+
 ## Stahování na disk
 
 Podržení tlačítka OK (nebo tlačítko Menu) na filmu či dílu z Přehraj.to otevře nabídku se „Stáhnout

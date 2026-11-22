@@ -104,8 +104,23 @@ def _client(allow_anonymous=False):
     return provider.make_client(settings["username"], settings["password"], cookie_file=_path("cookies.lwp"))
 
 
+class _TmdbCache(object):
+    """Odpovědi TMDB v mezipaměti katalogu: seznamy v Objevuj se při návratu nenačítají znovu."""
+
+    @staticmethod
+    def get(key):
+        with _library() as lib:
+            return lib.cache_get(key)
+
+    @staticmethod
+    def put(key, data, ttl):
+        with _library() as lib:
+            lib.cache_put(key, data, ttl)
+            lib.cache_trim("tmdb:", 300)
+
+
 def _tmdb():
-    return Tmdb(_settings().get("tmdb_key", ""))
+    return Tmdb(_settings().get("tmdb_key", ""), cache=_TmdbCache())
 
 
 def _ivys(timeout=None):
@@ -197,17 +212,26 @@ def _movie_card(meta, state, versions=None):
         vid = saved
     return _card(_display_title(meta), _target("play", "play", {"vid": vid}), _mark(state, vid, subtitle),
                  meta.get("poster") or meta.get("thumb"), _percent(point), wide=not meta.get("poster"),
-                 watched=any(i in state["watched"] for i in ids), menu=_video_menu(state, {"vid": vid}, point),
-                 icon="movies")
+                 watched=any(i in state["watched"] for i in ids),
+                 menu=_video_menu(state, {"vid": vid}, point) + _favorite_menu(state, meta), icon="movies")
 
 
-def _show_card(meta):
+def _favorite_menu(state, meta):
+    """Položka nabídky pro oblíbené (film nebo seriál z katalogu)."""
+    if "favorites" not in state or not meta.get("key"):
+        return []
+    return [app_discover.favorite_item(state["favorites"], app_discover.meta_favorite(meta))]
+
+
+def _show_card(meta, state=None):
     count = meta.get("video_count") or 0
     rating = "%d %%" % meta["rating"] if meta.get("rating") else ""
     subtitle = " · ".join(part for part in (rating, "%d dílů" % count if count else "") if part)
     title = _display_title(meta)
-    return _card(title, _target("list", "show", {"key": meta["key"]}, title), subtitle,
-                 meta.get("poster") or meta.get("thumb"), wide=not meta.get("poster"), icon="series")
+    target = _target("list", "show", {"key": meta["key"]}, title)
+    menu = [{"title": "Otevřít", "target": target}] + _favorite_menu(state, meta) if state else None
+    return _card(title, target, subtitle, meta.get("poster") or meta.get("thumb"), wide=not meta.get("poster"),
+                 icon="series", menu=menu)
 
 
 def _video_card(video, meta, state, prefix="", web_result=None):
@@ -231,7 +255,8 @@ def _video_card(video, meta, state, prefix="", web_result=None):
 
 
 def _state(lib):
-    return {"resume": lib.resume_points(), "watched": lib.watched(), "downloads": _downloads()}
+    return {"resume": lib.resume_points(), "watched": lib.watched(), "downloads": _downloads(),
+            "favorites": app_discover.load_favorites()}
 
 
 def _saved(state, vid):
@@ -269,11 +294,15 @@ def _video_menu(state, params, point=None):
 # ---------------------------------------------------------------------------
 
 def _in_progress(lib, state, limit=HOME_ROW):
-    cards = []
+    """Rozkoukaná videa z Přehraj.to."""
     videos = lib.history_videos(in_progress=True, limit=limit, include_search=True)
     metas = lib.get_metas(video["meta_key"] for video in videos)
-    for video in videos:
-        cards.append(_video_card(video, metas.get(video["meta_key"]), state))
+    return [_video_card(video, metas.get(video["meta_key"]), state) for video in videos]
+
+
+def _ivys_in_progress(lib, limit=HOME_ROW):
+    """Rozkoukané pořady z iVysílání."""
+    cards = []
     for row in lib.ivys_progress(limit):
         point = (row["position"], row["total"])
         label = "%s · %s" % (row["show_title"], row["title"]) if row["show_title"] and row["title"] else \
@@ -284,65 +313,18 @@ def _in_progress(lib, state, limit=HOME_ROW):
 
 
 def home(params):
+    """Hlavní obrazovka: sekce postranní nabídky, každá se svými řadami karet.
+
+    ``{"sections": [{"id", "title", "rows": [{"title", "items"}]}], "pending"}``. Sekce Přehraj.to
+    a iVysílání obsahují jen to, co se týká dané služby; Nástroje jsou společné.
+    """
     settings = _settings()
-    rows = []
     with _library() as lib:
         state = _state(lib)
-        total = lib.count_videos(visible_only=True)
-        if not total and not settings.get("username"):
-            rows.append({"title": "Začínáme", "items": [
-                _card("Přihlásit se k Přehraj.to", _target("settings"), "E-mail a heslo, pak Synchronizovat",
-                      icon="login")]})
-        progress = _in_progress(lib, state)
-        if progress:
-            rows.append({"title": "Rozkoukané", "items": progress})
-        saved = _download_cards(lib, state, HOME_ROW)
-        if saved:
-            rows.append({"title": "Stažené na disku", "items": saved})
-        movies = lib.movies(order="added", limit=HOME_ROW)
-        if movies:
-            versions = lib.videos_grouped([m["key"] for m in movies if (m.get("video_count") or 1) > 1])
-            cards = [_movie_card(meta, state, versions) for meta in movies]
-            cards.append(_card("Všechny filmy", _target("list", "movies", {"order": "title"}, "Filmy"),
-                               "%d filmů" % lib.count_movies(), icon="movies"))
-            rows.append({"title": "Nově přidané filmy", "items": cards})
-        shows = lib.shows(order="added", limit=HOME_ROW)
-        if shows:
-            cards = [_show_card(meta) for meta in shows]
-            cards.append(_card("Všechny seriály", _target("list", "shows", {"order": "title"}, "Seriály"),
-                               icon="series"))
-            rows.append({"title": "Seriály", "items": cards})
-        library_cards = []
-        if total:
-            library_cards = [
-                _card("Filmy podle názvu", _target("list", "movies", {"order": "title"}, "Filmy"), icon="movies"),
-                _card("Filmy podle hodnocení", _target("list", "movies", {"order": "rating"}, "Nejlépe hodnocené filmy"),
-                      icon="rating"),
-                _card("Filmy podle roku", _target("list", "movies", {"order": "year"}, "Filmy podle roku"),
-                      icon="year"),
-                _card("Seriály podle názvu", _target("list", "shows", {"order": "title"}, "Seriály"), icon="series"),
-            ]
-        if total or lib.history_videos(limit=1, include_search=True):
-            library_cards.append(
-                _card("Naposledy přehrané", _target("list", "played", {}, "Naposledy přehrané"), icon="history"))
-            rows.append({"title": "Moje videa", "items": library_cards})
-        favorites = len(lib.ivys_favorites())
-    television = [_card("Živé vysílání", _target("list", "ivys_live", {}, "Živé vysílání"), "ČT1, ČT2, ČT24, ČT sport…",
-                        icon="live")]
-    if favorites:
-        television.append(_card("Moje pořady", _target("list", "ivys_favorites", {}, "Moje pořady"),
-                                "%d pořadů" % favorites, icon="favorites"))
-    try:
-        # krátký limit: hlavní obrazovka nesmí bez připojení čekat desítky sekund
-        for category in _cached("ivys:menu", TTL["menu"], lambda: _ivys(timeout=4).menu()):
-            television.append(_card(category["title"], _target(
-                "list", "ivys_category", {"cid": category["id"]}, category["title"]), "iVysílání",
-                icon=IVYS_ICONS.get(category["title"], "folder")))
-    except ivysilani.IvysilaniError:
-        pass  # bez připojení zůstane aspoň živé vysílání a katalog
-    rows.append({"title": "iVysílání České televize", "items": television})
+        prehrajto = _prehrajto_rows(lib, state, settings)
+        television = _ivysilani_rows(lib)
     last = settings.get("last_sync")
-    rows.append({"title": "Nástroje", "items": [
+    tools = [{"title": "Nástroje", "items": [
         _card("Hledat", _target("search"), "Moje videa, iVysílání a Přehraj.to", icon="search"),
         _card("Stahování", _target("list", "downloads", {}, "Stahování"), _downloads_summary(state["downloads"]),
               icon="download"),
@@ -352,10 +334,92 @@ def home(params):
         _card("Doplnit hodnocení a plakáty", _target("command", "enrich", {}), "ČSFD, záložně TMDB", icon="enrich"),
         _card("Nastavení a přihlášení", _target("settings"), settings.get("username") or "Nepřihlášeno",
               icon="settings"),
-    ]})
+    ]}]
     # "pending": ve frontě něco čeká – aplikace po startu znovu spustí službu stahování
-    return {"rows": rows, "pending": any(entry.get("state") in ("queued", "downloading")
-                                         for entry in state["downloads"].values())}
+    return {"sections": [{"id": "prehrajto", "title": "Přehraj.to", "rows": prehrajto},
+                         {"id": "ivysilani", "title": "iVysílání", "rows": television},
+                         {"id": "tools", "title": "Nástroje", "rows": tools}],
+            "pending": any(entry.get("state") in ("queued", "downloading")
+                           for entry in state["downloads"].values())}
+
+
+def _prehrajto_rows(lib, state, settings):
+    rows = []
+    total = lib.count_videos(visible_only=True)
+    if not total and not settings.get("username"):
+        rows.append({"title": "Začínáme", "items": [
+            _card("Přihlásit se k Přehraj.to", _target("settings"), "E-mail a heslo, pak Synchronizovat",
+                  icon="login")]})
+    progress = _in_progress(lib, state)
+    if progress:
+        rows.append({"title": "Rozkoukané", "items": progress})
+    favorites = app_discover.favorite_cards(lib, state, HOME_ROW)
+    if len(state["favorites"]) > HOME_ROW:
+        favorites.append(_card("Všechny oblíbené", _target("list", "favorites", {}, "Oblíbené"),
+                               "%d položek" % len(state["favorites"]), icon="favorites"))
+    if not favorites:
+        favorites = [_card("Oblíbené", _target("list", "favorites", {}, "Oblíbené"),
+                           "Podržte OK na filmu a zvolte Přidat do oblíbených", icon="favorites")]
+    rows.append({"title": "Oblíbené", "items": favorites})
+    rows.append({"title": "Objevuj filmy", "items": app_discover.home_tiles("movie")})
+    rows.append({"title": "Objevuj seriály", "items": app_discover.home_tiles("tv")})
+    saved = _download_cards(lib, state, HOME_ROW)
+    if saved:
+        rows.append({"title": "Stažené na disku", "items": saved})
+    movies = lib.movies(order="added", limit=HOME_ROW)
+    if movies:
+        versions = lib.videos_grouped([m["key"] for m in movies if (m.get("video_count") or 1) > 1])
+        cards = [_movie_card(meta, state, versions) for meta in movies]
+        cards.append(_card("Všechny filmy", _target("list", "movies", {"order": "title"}, "Filmy"),
+                           "%d filmů" % lib.count_movies(), icon="movies"))
+        rows.append({"title": "Moje videa – nově přidané filmy", "items": cards})
+    shows = lib.shows(order="added", limit=HOME_ROW)
+    if shows:
+        cards = [_show_card(meta, state) for meta in shows]
+        cards.append(_card("Všechny seriály", _target("list", "shows", {"order": "title"}, "Seriály"),
+                           icon="series"))
+        rows.append({"title": "Moje videa – seriály", "items": cards})
+    library_cards = []
+    if total:
+        library_cards = [
+            _card("Filmy podle názvu", _target("list", "movies", {"order": "title"}, "Filmy"), icon="movies"),
+            _card("Filmy podle hodnocení", _target("list", "movies", {"order": "rating"}, "Nejlépe hodnocené filmy"),
+                  icon="rating"),
+            _card("Filmy podle roku", _target("list", "movies", {"order": "year"}, "Filmy podle roku"),
+                  icon="year"),
+            _card("Seriály podle názvu", _target("list", "shows", {"order": "title"}, "Seriály"), icon="series"),
+        ]
+    if total or lib.history_videos(limit=1, include_search=True):
+        library_cards.append(
+            _card("Naposledy přehrané", _target("list", "played", {}, "Naposledy přehrané"), icon="history"))
+        rows.append({"title": "Moje videa", "items": library_cards})
+    return rows
+
+
+def _ivysilani_rows(lib):
+    rows = [{"title": "Živé vysílání", "items": ivys_live({"quick": True})["items"]}]
+    progress = _ivys_in_progress(lib)
+    if progress:
+        rows.append({"title": "Rozkoukané", "items": progress})
+    shows = [_card(item["title"], _target("list", "ivys_show", {"id": item["show_id"]}, item["title"]), "",
+                   item["image"] or item["poster"], wide=True, icon="favorites")
+             for item in lib.ivys_favorites()[:HOME_ROW]]
+    if shows:
+        shows.append(_card("Moje pořady", _target("list", "ivys_favorites", {}, "Moje pořady"), "S počty nových dílů",
+                           icon="favorites"))
+        rows.append({"title": "Moje pořady", "items": shows})
+    categories = []
+    try:
+        # krátký limit: hlavní obrazovka nesmí bez připojení čekat desítky sekund
+        for category in _cached("ivys:menu", TTL["menu"], lambda: _ivys(timeout=4).menu()):
+            categories.append(_card(category["title"], _target(
+                "list", "ivys_category", {"cid": category["id"]}, category["title"]), "iVysílání",
+                icon=IVYS_ICONS.get(category["title"], "folder")))
+    except ivysilani.IvysilaniError:
+        pass  # bez připojení zůstane aspoň živé vysílání
+    if categories:
+        rows.append({"title": "Kategorie", "items": categories})
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -392,8 +456,9 @@ def shows(params):
     offset = _offset(params)
     with _library() as lib:
         items = lib.shows(order=order)
+        state = _state(lib)
     page = items[offset:offset + PAGE]
-    return {"items": [_show_card(meta) for meta in page],
+    return {"items": [_show_card(meta, state) for meta in page],
             "next": _next("shows", {"order": order}, offset, len(page), len(items))}
 
 
@@ -447,7 +512,7 @@ def search(params):
             rows.append({"title": "Filmy v katalogu", "items": [
                 _movie_card(meta, state, versions) for meta in found_movies[:PAGE]]})
         if found_shows:
-            rows.append({"title": "Seriály v katalogu", "items": [_show_card(meta) for meta in found_shows[:PAGE]]})
+            rows.append({"title": "Seriály v katalogu", "items": [_show_card(meta, state) for meta in found_shows[:PAGE]]})
     response = {"rows": rows}
     with ThreadPoolExecutor(max_workers=1) as pool:
         web = pool.submit(prehrajto_search, {"q": query})
@@ -762,7 +827,9 @@ def _ivys_call(work):
 
 def ivys_live(params):
     try:
-        channels = _cached("ivys:live", TTL["live"], lambda: _ivys().live_now())
+        # "quick": řada na hlavní obrazovce – program se nesmí načítat desítky sekund
+        timeout = 4 if params.get("quick") else None
+        channels = _cached("ivys:live", TTL["live"], lambda: _ivys(timeout=timeout).live_now())
     except ivysilani.IvysilaniError:
         channels = []  # program je jen doplněk – kanály zůstanou i bez něj
     listed = {channel["channel"] for channel in channels}
@@ -884,7 +951,7 @@ def ivys_play(params):
         return {"url": stream["url"], "headers": {}, "subtitles": [], "position": 0, "title": stream["title"],
                 "track": "", "live": True, "hls": True}
     idec = str(params.get("idec") or "") or _ivys_call(lambda: client.show(str(params.get("show") or "")))["idec"]
-    stream = _ivys_call(lambda: client.vod(idec))
+    stream = _ivys_stream(client, idec)
     with _library() as lib:
         lib.ivys_touch(idec, stream["show_id"], stream["episode_title"] or stream["title"], stream["show_title"],
                        stream["image"])
@@ -892,7 +959,38 @@ def ivys_play(params):
     title = " · ".join(part for part in (stream["show_title"], stream["episode_title"]) if part) or stream["title"]
     return {"url": stream["url"], "headers": {}, "subtitles": stream["subtitles"],
             "position": point[0] if point and not params.get("restart") else 0, "title": title,
-            "track": IVYS + idec, "live": False, "hls": True}
+            "track": IVYS + idec, "live": False, "hls": not stream.get("dash"), "dash": bool(stream.get("dash")),
+            "drm": stream.get("drm"),
+            # chráněný pořad bez údajů o licenci: přehrávač při chybě ukáže, co rozhraní vrátilo
+            "diagnostic": (stream.get("shape") or "") if stream.get("dash") and not stream.get("drm") else ""}
+
+
+def _ivys_stream(client, idec):
+    """Stream pořadu; chráněný pořad se zkusí přes vestavěný Widevine zařízení.
+
+    Nejdřív běžný (nechráněný) stream. Když ho ČT nevydá, zkusí se chráněný – ale jen s adresou
+    licence, kterou rozhraní samo vrátí. Územní omezení se neobchází: taková odpověď se rovnou předá.
+    """
+    try:
+        return client.vod(idec)
+    except ivysilani.NotPlayable as plain:
+        if "území" in str(plain):
+            raise ApiError(str(plain))
+        try:
+            stream = client.vod(idec, drm=True)
+        except ivysilani.NotPlayable as protected:
+            raise ApiError(str(protected))
+        except ivysilani.IvysilaniError as error:
+            raise ApiError(str(error))
+        if not stream.get("drm") and ".mpd" not in stream["url"].split("?")[0]:
+            raise ApiError(str(plain))
+        if not stream.get("drm"):
+            # DASH bez údajů o licenci: nechráněný pořad se přehraje, chráněný skončí chybou přehrávače.
+            # Názvy polí odpovědi jdou do logu, aby šlo podporu doladit podle skutečné odpovědi.
+            _STATE["ivys_shape"] = stream.get("shape") or ""
+        return stream
+    except ivysilani.IvysilaniError as error:
+        raise ApiError(str(error))
 
 
 # ---------------------------------------------------------------------------
@@ -1153,7 +1251,10 @@ def update_check(params):
 
 # ---------------------------------------------------------------------------
 
-ACTIONS = {
+import app_discover  # noqa: E402 – až po definicích výše: modul používá pomocné funkce odsud
+
+ACTIONS = dict(app_discover.ACTIONS)
+ACTIONS.update({
     "downloads": downloads, "download_add": download_add, "download_next": download_next,
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,
     "download_remove": download_remove, "update_check": update_check,
@@ -1164,7 +1265,7 @@ ACTIONS = {
     "progress": progress, "sync": sync, "enrich": enrich,
     "ivys_live": ivys_live, "ivys_category": ivys_category, "ivys_listing": ivys_listing, "ivys_show": ivys_show,
     "ivys_favorites": ivys_favorites, "ivys_favorite": ivys_favorite, "ivys_play": ivys_play,
-}
+})
 
 
 def call(action, params_json="{}"):

@@ -41,7 +41,10 @@ object Navigator {
                     .putExtra(EXTRA_CALL, target.call)
                     .putExtra(EXTRA_PARAMS, target.params.toString())
             )
-            "search" -> activity.startActivity(Intent(activity, SearchActivity::class.java))
+            // hledání lze otevřít i s připraveným dotazem (např. „Hledat ručně“ u titulu z Objevuj)
+            "search" -> activity.startActivity(
+                Intent(activity, SearchActivity::class.java).putExtra(EXTRA_PARAMS, target.params.toString())
+            )
             "settings" -> activity.startActivity(Intent(activity, SettingsActivity::class.java))
             "command" -> runCommand(activity, title, target, onChanged)
             "download" -> Api.call(target.call, target.params) { result ->

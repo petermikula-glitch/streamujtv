@@ -4,12 +4,15 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.fragment.app.FragmentActivity
 import androidx.leanback.app.BrowseSupportFragment
+import androidx.leanback.app.RowsSupportFragment
 import androidx.leanback.widget.ArrayObjectAdapter
 import androidx.leanback.widget.HeaderItem
 import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.ListRowPresenter
 import androidx.leanback.widget.OnItemViewClickedListener
 import androidx.leanback.widget.OnItemViewSelectedListener
+import androidx.leanback.widget.PageRow
+import org.json.JSONArray
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -22,12 +25,17 @@ class MainActivity : FragmentActivity() {
     }
 }
 
-/** Hlavní obrazovka: řady karet (Rozkoukané, filmy, seriály, iVysílání, Nástroje). */
+/**
+ * Hlavní obrazovka: postranní nabídka se sekcemi (Přehraj.to, iVysílání, Nástroje). Každá sekce je
+ * stránka s vlastními řadami karet. Obsah i názvy sekcí dodává logika v Pythonu (akce `home`).
+ */
 class MainFragment : BrowseSupportFragment() {
-    private val rows = ArrayObjectAdapter(ListRowPresenter())
+    private class Section(val title: String, val rows: JSONArray)
+
+    private val pages = ArrayObjectAdapter(ListRowPresenter())
+    private var sections = emptyList<Section>()
     private var loadedOnce = false
     private var shown = ""
-    private var shapes = emptyList<Boolean>()
     private var backdrop: Backdrop? = null
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val refresh = Runnable { if (isResumed) load() }
@@ -38,7 +46,12 @@ class MainFragment : BrowseSupportFragment() {
         badgeDrawable = androidx.core.content.ContextCompat.getDrawable(requireContext(), R.drawable.logo)
         headersState = HEADERS_ENABLED
         isHeadersTransitionOnBackEnabled = true
-        adapter = rows
+        mainFragmentRegistry.registerFragment(PageRow::class.java, object : FragmentFactory<SectionFragment>() {
+            override fun createFragment(row: Any?): SectionFragment =
+                SectionFragment.create((row as PageRow).headerItem.id.toInt())
+        })
+        adapter = pages
+        // posluchače nastavené tady platí i pro řady uvnitř stránek sekcí
         onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
             (item as? Card)?.let { Navigator.open(requireActivity(), it) { load() } }
         }
@@ -71,10 +84,12 @@ class MainFragment : BrowseSupportFragment() {
         load()  // po návratu z přehrávače nebo nastavení se mění Rozkoukané i katalog
     }
 
-    private fun load() {
-        if (!loadedOnce) {
-            rows.clear()
-            rows.add(ListRow(HeaderItem(0, "Načítám…"), ArrayObjectAdapter(CardPresenter())))
+    /** Řady sekce pro její stránku. */
+    fun rowsOf(index: Int): JSONArray? = sections.getOrNull(index)?.rows
+
+    fun load() {
+        if (!loadedOnce && pages.size() == 0) {
+            pages.add(ListRow(HeaderItem(0, "Načítám…"), ArrayObjectAdapter(CardPresenter())))
         }
         Api.call("home") { result ->
             if (!isAdded) return@call
@@ -89,34 +104,20 @@ class MainFragment : BrowseSupportFragment() {
             val raw = data.toString()
             if (loadedOnce && raw == shown) return@call  // beze změny: výběr i pozice zůstanou
             shown = raw
-            val titles = ArrayList<String>()
-            val items = ArrayList<List<Card>>()
-            val list = data.optJSONArray("rows")
-            for (index in 0 until (list?.length() ?: 0)) {
-                val row = list!!.optJSONObject(index) ?: continue
-                titles.add(row.optString("title"))
-                items.add(Card.list(row.optJSONArray("items")))
+            val list = data.optJSONArray("sections")
+            val fresh = (0 until (list?.length() ?: 0)).mapNotNull { index ->
+                list!!.optJSONObject(index)?.let { Section(it.optString("title"), it.optJSONArray("rows") ?: JSONArray()) }
             }
-            val posters = items.map { CardPresenter.posterShape(it) }
-            val sameRows = loadedOnce && rows.size() == titles.size && posters == shapes &&
-                titles.indices.all { (rows.get(it) as? ListRow)?.headerItem?.name == titles[it] }
-            if (sameRows) {
-                // stejné řady: vyměnit jen změněné karty, ať výběr neuskočí na začátek
-                for (index in titles.indices) {
-                    ((rows.get(index) as ListRow).adapter as ArrayObjectAdapter).setItems(items[index], Card.DIFF)
-                }
+            val sameMenu = loadedOnce && fresh.map { it.title } == sections.map { it.title }
+            sections = fresh
+            if (sameMenu) {
+                // stejné sekce: stránky si jen vymění změněné karty, výběr zůstane na místě
+                childFragmentManager.fragments.filterIsInstance<SectionFragment>().forEach { it.refresh() }
             } else {
-                val fresh = ArrayList<ListRow>()
-                for (index in titles.indices) {
-                    val cards = ArrayObjectAdapter(CardPresenter(posters[index]) { card ->
-                        Navigator.menu(requireActivity(), card) { load() }
-                    })
-                    cards.addAll(0, items[index])
-                    fresh.add(ListRow(HeaderItem(index.toLong(), titles[index]), cards))
-                }
-                rows.setItems(fresh, null)
+                pages.setItems(fresh.mapIndexed { index, section ->
+                    PageRow(HeaderItem(index.toLong(), section.title))
+                }, null)
             }
-            shapes = posters
             if (!loadedOnce) {
                 // po startu: navázat na rozpracované stahování a zeptat se na novou verzi
                 if (data.optBoolean("pending")) DownloadService.start(requireContext())
@@ -127,7 +128,56 @@ class MainFragment : BrowseSupportFragment() {
     }
 
     private fun showMessage(text: String) {
-        rows.clear()
-        rows.add(ListRow(HeaderItem(0, text), ArrayObjectAdapter(CardPresenter())))
+        pages.clear()
+        pages.add(ListRow(HeaderItem(0, text), ArrayObjectAdapter(CardPresenter())))
+    }
+}
+
+/** Stránka jedné sekce: její řady karet. Data si bere z hlavní obrazovky. */
+class SectionFragment : RowsSupportFragment() {
+    companion object {
+        private const val INDEX = "index"
+
+        fun create(index: Int) = SectionFragment().apply { arguments = Bundle().apply { putInt(INDEX, index) } }
+    }
+
+    private val rows = ArrayObjectAdapter(ListRowPresenter())
+    private var titles = emptyList<String>()
+    private var shapes = emptyList<Boolean>()
+
+    private fun host() = parentFragment as? MainFragment
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        adapter = rows
+        refresh()
+    }
+
+    fun refresh() {
+        val list = host()?.rowsOf(requireArguments().getInt(INDEX)) ?: return
+        val names = ArrayList<String>()
+        val items = ArrayList<List<Card>>()
+        for (index in 0 until list.length()) {
+            val row = list.optJSONObject(index) ?: continue
+            names.add(row.optString("title"))
+            items.add(Card.list(row.optJSONArray("items")))
+        }
+        val posters = items.map { CardPresenter.posterShape(it) }
+        if (names == titles && posters == shapes && rows.size() == names.size) {
+            // stejné řady: vyměnit jen změněné karty, ať výběr neuskočí na začátek
+            for (index in names.indices) {
+                ((rows.get(index) as ListRow).adapter as ArrayObjectAdapter).setItems(items[index], Card.DIFF)
+            }
+        } else {
+            rows.setItems(names.indices.map { index ->
+                val cards = ArrayObjectAdapter(CardPresenter(posters[index]) { card ->
+                    Navigator.menu(requireActivity(), card) { host()?.load() }
+                })
+                cards.addAll(0, items[index])
+                ListRow(HeaderItem(index.toLong(), names[index]), cards)
+            }, null)
+        }
+        titles = names
+        shapes = posters
     }
 }

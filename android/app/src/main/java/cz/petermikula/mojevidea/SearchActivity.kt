@@ -43,7 +43,14 @@ class SearchActivity : FragmentActivity() {
                 false
             }
         }
-        input.requestFocus()
+        val prepared = JSONObject(intent.getStringExtra(Navigator.EXTRA_PARAMS) ?: "{}").optString("q").trim()
+        if (prepared.isEmpty()) {
+            input.requestFocus()
+        } else {
+            // připravený dotaz: rovnou hledat, klávesnice se neotevírá
+            input.setText(prepared)
+            search(prepared)
+        }
     }
 
     private fun search(query: String) {

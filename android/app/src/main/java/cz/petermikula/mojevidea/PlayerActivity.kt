@@ -44,6 +44,7 @@ class PlayerActivity : FragmentActivity() {
     private var track = ""
     private var live = false
     private var local = false
+    private var diagnostic = ""
     private var started = false
     private var retried = false
 
@@ -120,6 +121,15 @@ class PlayerActivity : FragmentActivity() {
         }
         val item = MediaItem.Builder().setUri(source(stream.optString("url"))).setSubtitleConfigurations(subtitles)
         if (stream.optBoolean("hls")) item.setMimeType(MimeTypes.APPLICATION_M3U8)
+        if (stream.optBoolean("dash")) item.setMimeType(MimeTypes.APPLICATION_MPD)
+        // Chráněný pořad: dešifruje vestavěný Widevine zařízení, licenci vydává server,
+        // jehož adresu vrátilo rozhraní poskytovatele. Nic se neukládá ani neobchází.
+        diagnostic = stream.optString("diagnostic")
+        stream.optJSONObject("drm")?.optString("license")?.takeIf { it.isNotEmpty() }?.let { license ->
+            item.setDrmConfiguration(
+                MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID).setLicenseUri(license).setMultiSession(true).build()
+            )
+        }
 
         release()
         playerView.useController = true
@@ -207,9 +217,13 @@ class PlayerActivity : FragmentActivity() {
             PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
             PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ->
                 "Zařízení tento formát videa nebo zvuku nepřehraje."
+            in 6000..6999 ->
+                "Chráněný pořad se nepodařilo přehrát: licenci server nevydal, nebo ji zařízení nepřijalo."
             else -> "Přehrávání selhalo."
         }
-        return "$text\n(${error.errorCodeName})"
+        // u chráněného pořadu bez údajů o licenci pomůže vidět, co rozhraní vrátilo (jen názvy polí)
+        val detail = if (diagnostic.isEmpty()) "" else "\n\nDiagnostika: ${diagnostic.take(400)}"
+        return "$text\n(${error.errorCodeName})$detail"
     }
 
     private fun fail(text: String) {
