@@ -227,7 +227,7 @@ def home_tiles(kind):
                                          "%s – novinky" % name), "Právě vysílané" if kind == "tv" else "Poslední 3 měsíce",
                   icon=icon),
         api._card("Populární", api._target("list", "discover", {"kind": kind, "category": "popular"},
-                                           "%s – populární" % name), icon="favorites"),
+                                           "%s – populární" % name), icon="all"),
         api._card("Nejlépe hodnocené", api._target("list", "discover", {"kind": kind, "category": "top_rated"},
                                                    "%s – nejlépe hodnocené" % name), icon="rating"),
         api._card("Podle roku", api._target("list", "discover_years", {"kind": kind}, "%s podle roku" % name),
@@ -236,7 +236,7 @@ def home_tiles(kind):
                   icon="folder:" + icon),
         api._card("Československé", api._target("list", "discover_czechoslovak", {"kind": kind},
                                                 "Československé %s" % name.lower()), "Česko a Slovensko",
-                  icon="all"),
+                  icon="folder:past"),
     ]
 
 

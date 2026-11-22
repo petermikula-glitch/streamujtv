@@ -51,16 +51,14 @@ class MainFragment : BrowseSupportFragment() {
                 SectionFragment.create((row as PageRow).headerItem.id.toInt())
         })
         adapter = pages
-        // posluchače nastavené tady platí i pro řady uvnitř stránek sekcí
-        onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
-            (item as? Card)?.let { Navigator.open(requireActivity(), it) { load() } }
-        }
         setOnSearchClickedListener {
             startActivity(Intent(requireContext(), SearchActivity::class.java))
         }
-        onItemViewSelectedListener = OnItemViewSelectedListener { _, item, _, _ ->
-            backdrop?.show((item as? Card)?.image.orEmpty())
-        }
+    }
+
+    /** Pozadí podle vybrané karty (volají stránky sekcí). */
+    fun showBackdrop(image: String) {
+        backdrop?.show(image)
     }
 
     override fun onActivityCreated(savedInstanceState: Bundle?) {
@@ -150,6 +148,14 @@ class SectionFragment : RowsSupportFragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         adapter = rows
+        // Stránka sekce si kliknutí a výběr obsluhuje sama: hlavní obrazovka své posluchače
+        // předává jen obyčejným řadám, ne stránkám.
+        onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
+            (item as? Card)?.let { Navigator.open(requireActivity(), it) { host()?.load() } }
+        }
+        onItemViewSelectedListener = OnItemViewSelectedListener { _, item, _, _ ->
+            host()?.showBackdrop((item as? Card)?.image.orEmpty())
+        }
         refresh()
     }
 
