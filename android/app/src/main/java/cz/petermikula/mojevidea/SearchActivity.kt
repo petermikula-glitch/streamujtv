@@ -59,8 +59,9 @@ class SearchActivity : FragmentActivity() {
             val list = data.optJSONArray("rows")
             for (index in 0 until (list?.length() ?: 0)) {
                 val row = list!!.optJSONObject(index) ?: continue
-                val cards = ArrayObjectAdapter(CardPresenter())
-                cards.addAll(0, Card.list(row.optJSONArray("items")))
+                val found = Card.list(row.optJSONArray("items"))
+                val cards = ArrayObjectAdapter(CardPresenter(CardPresenter.posterShape(found)))
+                cards.addAll(0, found)
                 fresh.add(ListRow(HeaderItem(index.toLong(), row.optString("title")), cards))
             }
             rows.setItems(fresh, null)

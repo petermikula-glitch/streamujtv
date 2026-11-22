@@ -28,7 +28,19 @@ python3 -m pytest ../tests/test_app_api.py
 ```
 
 APK obsahuje Python pro 32bitový i 64bitový Android (`armeabi-v7a`, `arm64-v8a`).
-Pro emulátor přidejte `-PextraAbi=x86`.
+
+### Zkouška v emulátoru
+
+```bash
+gradle assembleDebug -PextraAbi=x86                       # emulátor Android TV (x86)
+gradle assembleDebug -PextraAbi=x86 -PtestCa=/cesta/ca.crt # navíc důvěra v autoritu zkušební proxy
+```
+
+`-PtestCa` je jen pro síť, kde proxy znovu šifruje HTTPS: přidá do ladicího sestavení důvěru v danou
+autoritu. Bez tohoto přepínače se do APK nedostane nic. Systémovou proxy (`adb shell settings put
+global http_proxy host:port`) aplikace používá celá, včetně části v Pythonu; tomu je ještě potřeba
+autoritu připsat do `files/chaquopy/cacert.pem` (`adb shell run-as cz.petermikula.mojevidea …`).
+Emulátor mívá jiné měřítko než televize – `adb shell wm density 213` nastaví 960 × 540 dp jako na TV.
 
 ### Podpis
 
@@ -44,6 +56,16 @@ gradle assembleDebug -PsigningKeystore=/cesta/klic.keystore -PsigningPassword=�
 1. V Google Play nainstalujte správce souborů (např. X-plore) nebo aplikaci Downloader.
 2. V *Nastavení → Aplikace → Zabezpečení a omezení → Neznámé zdroje* mu povolte instalaci.
 3. Otevřete soubor APK z USB disku (nebo ho stáhněte Downloaderem) a potvrďte instalaci.
+
+## Přehrávač a formáty
+
+Přehrávač je Media3/ExoPlayer. Video dekóduje čip zařízení (H.264, HEVC, VP9, AV1 – podle toho, co
+zařízení umí), kontejnery MP4, MKV, WebM, TS, AVI a streamy HLS zvládá sám přehrávač. Zvuk, který
+zařízení nedekóduje (DTS, TrueHD, někde i AC-3), přehraje softwarově knihovna
+[`media3-ffmpeg-decoder`](https://github.com/jellyfin/jellyfin-androidx-media) (GPL-3.0); dekodéry
+zařízení mají přednost. Verze knihovny musí odpovídat verzi Media3.
+
+Doplněk je pod GPL-2.0-or-later, sestavená aplikace kvůli této knihovně pod GPL-3.0.
 
 ## Co první verze umí a co ne
 

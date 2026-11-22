@@ -32,8 +32,16 @@ object Api {
     private fun ensureReady() {
         if (ready) return
         if (!Python.isStarted()) Python.start(AndroidPlatform(appContext))
-        Python.getInstance().getModule("app_api").callAttr("configure", appContext.filesDir.absolutePath)
+        Python.getInstance().getModule("app_api")
+            .callAttr("configure", appContext.filesDir.absolutePath, systemProxy())
         ready = true
+    }
+
+    /** Proxy nastavená v systému (Nastavení sítě); Python ji sám nezjistí, zbytek aplikace ji používá. */
+    private fun systemProxy(): String {
+        val host = System.getProperty("https.proxyHost").orEmpty()
+        val port = System.getProperty("https.proxyPort").orEmpty()
+        return if (host.isEmpty() || port.isEmpty()) "" else "http://$host:$port"
     }
 
     /** Synchronní volání – jen z vlákna na pozadí. */

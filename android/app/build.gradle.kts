@@ -52,6 +52,27 @@ android {
             signingConfigs.findByName("personal")?.let { signingConfig = it }
         }
     }
+    // Jen pro zkoušku v emulátoru za proxy, která znovu šifruje HTTPS: -PtestCa=/cesta/ca.crt
+    // přidá do ladicího sestavení důvěru v danou autoritu. Do běžného sestavení se nedostane nic.
+    providers.gradleProperty("testCa").orNull?.let { ca ->
+        val dir = layout.buildDirectory.dir("generated/test-ca").get().asFile
+        File(dir, "res/raw").mkdirs()
+        File(dir, "res/xml").mkdirs()
+        file(ca).copyTo(File(dir, "res/raw/test_ca.crt"), overwrite = true)
+        File(dir, "res/xml/test_network_security.xml").writeText(
+            "<network-security-config><base-config><trust-anchors>" +
+                "<certificates src=\"system\"/><certificates src=\"@raw/test_ca\"/>" +
+                "</trust-anchors></base-config></network-security-config>\n"
+        )
+        File(dir, "AndroidManifest.xml").writeText(
+            "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">" +
+                "<application android:networkSecurityConfig=\"@xml/test_network_security\"/></manifest>\n"
+        )
+        sourceSets.getByName("debug") {
+            res.srcDir(File(dir, "res"))
+            manifest.srcFile(File(dir, "AndroidManifest.xml"))
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -87,5 +108,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-exoplayer-hls:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")
+    // Softwarové dekodéry zvuku (DTS, TrueHD, AC-3…) pro soubory, které zařízení samo nepřehraje.
+    // Verze musí odpovídat verzi Media3.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.8.0+1")
     implementation("com.github.bumptech.glide:glide:4.16.0")
 }

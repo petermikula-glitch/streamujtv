@@ -25,6 +25,8 @@ class MainActivity : FragmentActivity() {
 class MainFragment : BrowseSupportFragment() {
     private val rows = ArrayObjectAdapter(ListRowPresenter())
     private var loadedOnce = false
+    private var shown = ""
+    private var shapes = emptyList<Boolean>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,16 +59,36 @@ class MainFragment : BrowseSupportFragment() {
                 if (!loadedOnce) showMessage(result.error ?: "Nepodařilo se načíst obsah.")
                 return@call
             }
-            loadedOnce = true
-            val fresh = ArrayList<ListRow>()
+            val raw = data.toString()
+            if (loadedOnce && raw == shown) return@call  // beze změny: výběr i pozice zůstanou
+            shown = raw
+            val titles = ArrayList<String>()
+            val items = ArrayList<List<Card>>()
             val list = data.optJSONArray("rows")
             for (index in 0 until (list?.length() ?: 0)) {
                 val row = list!!.optJSONObject(index) ?: continue
-                val cards = ArrayObjectAdapter(CardPresenter())
-                cards.addAll(0, Card.list(row.optJSONArray("items")))
-                fresh.add(ListRow(HeaderItem(index.toLong(), row.optString("title")), cards))
+                titles.add(row.optString("title"))
+                items.add(Card.list(row.optJSONArray("items")))
             }
-            rows.setItems(fresh, null)
+            val posters = items.map { CardPresenter.posterShape(it) }
+            val sameRows = loadedOnce && rows.size() == titles.size && posters == shapes &&
+                titles.indices.all { (rows.get(it) as? ListRow)?.headerItem?.name == titles[it] }
+            if (sameRows) {
+                // stejné řady: vyměnit jen změněné karty, ať výběr neuskočí na začátek
+                for (index in titles.indices) {
+                    ((rows.get(index) as ListRow).adapter as ArrayObjectAdapter).setItems(items[index], Card.DIFF)
+                }
+            } else {
+                val fresh = ArrayList<ListRow>()
+                for (index in titles.indices) {
+                    val cards = ArrayObjectAdapter(CardPresenter(posters[index]))
+                    cards.addAll(0, items[index])
+                    fresh.add(ListRow(HeaderItem(index.toLong(), titles[index]), cards))
+                }
+                rows.setItems(fresh, null)
+            }
+            shapes = posters
+            loadedOnce = true
         }
     }
 

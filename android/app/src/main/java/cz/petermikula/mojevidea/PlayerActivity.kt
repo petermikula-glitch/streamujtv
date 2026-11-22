@@ -16,6 +16,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -105,8 +106,16 @@ class PlayerActivity : FragmentActivity() {
         if (stream.optBoolean("hls")) item.setMimeType(MimeTypes.APPLICATION_M3U8)
 
         release()
-        val exo = ExoPlayer.Builder(this)
+        playerView.useController = true
+        // Dekodéry zařízení mají přednost; softwarové (FFmpeg) nastoupí jen u zvuku, který zařízení neumí.
+        val renderers = DefaultRenderersFactory(this)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
+        val exo = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
+            .build()
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .setPreferredAudioLanguages("cs", "sk")
             .build()
         player = exo
         playerView.player = exo
@@ -136,7 +145,7 @@ class PlayerActivity : FragmentActivity() {
                         resolve()
                     }
                 } else {
-                    fail("Přehrávání selhalo: ${error.errorCodeName}")
+                    fail(describe(error))
                 }
             }
         })
@@ -162,8 +171,33 @@ class PlayerActivity : FragmentActivity() {
         )
     }
 
+    private fun describe(error: PlaybackException): String {
+        val text = when (error.errorCode) {
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+                "Nepodařilo se připojit k serveru s videem. Zkontrolujte připojení k internetu."
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+            PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ->
+                "Server video nevydal – odkaz přestal platit, nebo video už není dostupné."
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+            PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ->
+                "Tento formát souboru přehrávač nezná."
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ->
+                "Zařízení tento formát videa nebo zvuku nepřehraje."
+            else -> "Přehrávání selhalo."
+        }
+        return "$text\n(${error.errorCodeName})"
+    }
+
     private fun fail(text: String) {
         release()
+        playerView.hideController()
+        playerView.useController = false
         message.text = "$text\n\nZpět se vrátíte tlačítkem Zpět."
         message.visibility = View.VISIBLE
     }

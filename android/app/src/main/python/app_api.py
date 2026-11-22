@@ -41,10 +41,16 @@ class ApiError(Exception):
 # Prostředí a nastavení
 # ---------------------------------------------------------------------------
 
-def configure(directory):
-    """Složka aplikace pro katalog, nastavení a přihlášení. Volá se jednou při startu."""
+def configure(directory, proxy=""):
+    """Složka aplikace pro katalog, nastavení a přihlášení. Volá se jednou při startu.
+
+    ``proxy`` je systémová proxy zařízení (``http://host:port``), pokud je nastavená:
+    urllib ji na Androidu sám nezjistí.
+    """
     os.makedirs(directory, exist_ok=True)
     _STATE["dir"] = directory
+    if proxy:
+        os.environ["https_proxy"] = os.environ["http_proxy"] = str(proxy)
     return "ok"
 
 
@@ -155,7 +161,7 @@ def _movie_card(meta, state, versions=None):
     ids = [video["id"] for video in videos] or [vid]
     point = next((state["resume"][i] for i in ids if i in state["resume"]), None)
     return _card(_display_title(meta), _target("play", "play", {"vid": vid}), subtitle,
-                 meta.get("poster") or meta.get("thumb"), _percent(point),
+                 meta.get("poster") or meta.get("thumb"), _percent(point), wide=not meta.get("poster"),
                  watched=any(i in state["watched"] for i in ids))
 
 
@@ -165,7 +171,7 @@ def _show_card(meta):
     subtitle = " · ".join(part for part in (rating, "%d dílů" % count if count else "") if part)
     title = _display_title(meta)
     return _card(title, _target("list", "show", {"key": meta["key"]}, title), subtitle,
-                 meta.get("poster") or meta.get("thumb"))
+                 meta.get("poster") or meta.get("thumb"), wide=not meta.get("poster"))
 
 
 def _video_card(video, meta, state, prefix=""):
@@ -178,7 +184,7 @@ def _video_card(video, meta, state, prefix=""):
     details = " · ".join(part for part in (video.get("lang"), video.get("quality"), video.get("size")) if part)
     return _card(prefix + label, _target("play", "play", {"vid": video["id"]}), details,
                  meta.get("poster") or video.get("thumb"), _percent(state["resume"].get(video["id"])),
-                 watched=video["id"] in state["watched"])
+                 wide=not meta.get("poster"), watched=video["id"] in state["watched"])
 
 
 def _state(lib):
@@ -552,8 +558,8 @@ def _ivys_show_card(item, note=""):
         target = _target("play", "ivys_play", {"show": item["id"]})
     else:
         target = _target("list", "ivys_show", {"id": item["id"]}, item["title"])
-    return _card(item["title"] + year, target, subtitle[:120], item.get("poster") or item.get("image"),
-                 wide=not item.get("poster"))
+    # obrázek na šířku má v iVysílání každý pořad, plakát jen některé: jednotný tvar karet ve výpisu
+    return _card(item["title"] + year, target, subtitle[:120], item.get("image") or item.get("poster"), wide=True)
 
 
 def _ivys_episode_card(item, state, show_title=""):
@@ -671,8 +677,8 @@ def ivys_favorites(params):
         fresh = max(0, programme["episode_count"] - favorite["seen_count"]) if programme else 0
         title = favorite["title"] or (programme or {}).get("title", "")
         cards.append(_card(title, _target("list", "ivys_show", {"id": favorite["show_id"]}, title),
-                           "nové díly: %d" % fresh if fresh else "", favorite["poster"] or favorite["image"],
-                           wide=not favorite["poster"]))
+                           "nové díly: %d" % fresh if fresh else "", favorite["image"] or favorite["poster"],
+                           wide=True))
     return {"items": cards, "next": None}
 
 

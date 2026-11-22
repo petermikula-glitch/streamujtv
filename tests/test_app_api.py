@@ -211,3 +211,27 @@ def test_call_never_raises(api):
     assert json.loads(app_api.call("home", "[1]")) == {"ok": False, "error": "Neplatné parametry."}
     assert json.loads(app_api.call("home", "{rozbité"))["ok"] is False
     assert set(app_api.ACTIONS) >= {"home", "play", "sync", "ivys_play", "progress_save"}
+
+
+def test_configure_passes_the_system_proxy_to_urllib(tmp_path, monkeypatch):
+    # urllib na Androidu systémovou proxy nezjistí; aplikace ji předává při startu
+    monkeypatch.setenv("https_proxy", "")
+    monkeypatch.setenv("http_proxy", "")
+    app_api.configure(str(tmp_path), "http://10.0.0.1:8080")
+    assert os.environ["https_proxy"] == "http://10.0.0.1:8080"
+    monkeypatch.setenv("https_proxy", "http://jina:1")
+    app_api.configure(str(tmp_path))  # bez proxy se prostředí nemění
+    assert os.environ["https_proxy"] == "http://jina:1"
+
+
+def test_cards_in_one_listing_share_a_shape(api):
+    # iVysílání: plakát má jen část pořadů, obrázek na šířku všechny – výpis je celý na šířku
+    card = app_api._ivys_show_card({"id": "1", "title": "Pořad", "type": "show", "image": "sirka.jpg",
+                                    "poster": "plakat.jpg"})
+    assert (card["wide"], card["image"]) == (True, "sirka.jpg")
+    # katalog: bez plakátu zbývá náhled z Přehraj.to, který je na šířku
+    state = {"resume": {}, "watched": set()}
+    plain = app_api._movie_card({"key": "movie:a|2000", "title": "A", "thumb": "nahled.jpg", "first_video": REF}, state)
+    poster = app_api._movie_card({"key": "movie:b|2000", "title": "B", "poster": "plakat.jpg", "first_video": REF},
+                                 state)
+    assert (plain["wide"], poster["wide"]) == (True, False)
