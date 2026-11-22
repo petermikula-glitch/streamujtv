@@ -71,8 +71,8 @@ class SettingsFragment : GuidedStepSupportFragment() {
             GuidedAction.Builder(context).id(SYNC).title("Synchronizovat s účtem")
                 .description("Načte nahraná videa a doplní metadata").build()
         )
-        actions.add(GuidedAction.Builder(context).id(LANGUAGE).title("Přehraj.to: jazyk").description("").build())
-        actions.add(GuidedAction.Builder(context).id(QUALITY).title("Přehraj.to: kvalita").description("").build())
+        actions.add(GuidedAction.Builder(context).id(LANGUAGE).title("Přednost: dabing, nebo titulky").description("").build())
+        actions.add(GuidedAction.Builder(context).id(QUALITY).title("Přednost: kvalita videa").description("").build())
         actions.add(
             GuidedAction.Builder(context).id(STORAGE).title("Úložiště pro stahování")
                 .description("Zjišťuji…").build()

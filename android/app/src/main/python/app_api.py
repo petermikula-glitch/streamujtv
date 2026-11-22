@@ -427,6 +427,9 @@ def home(params):
         _card("Doplnit hodnocení a plakáty", _target("command", "enrich", {}), "ČSFD, záložně TMDB", icon="enrich"),
         _card("Nastavení a přihlášení", _target("settings"), settings.get("username") or "Nepřihlášeno",
               icon="settings"),
+        _card("Jazyk a kvalita přehrávání", _target("choices", "prefs_choices", {}),
+              "%s · %s" % (dict(LANGUAGE_CHOICES)[state["prefs"]["language"]],
+                           dict(QUALITY_CHOICES)[state["prefs"]["quality"]]), icon="settings:movies"),
         _card("Profil: %s" % profile["name"], _target("list", "profiles", {}, "Kdo se dívá?"),
               "Přepnout nebo přidat profil", "res:avatar_" + profile["avatar"], wide=True),
         _card("Diagnostika", _target("diagnostics"), "Stav účtu, připojení a poslední chyby",
@@ -460,14 +463,19 @@ def _prehrajto_rows(lib, state, settings):
     following = app_discover.next_up_cards(lib, state)
     if following:
         rows.append({"title": "Další díly", "items": following})
-    favorites = app_discover.favorite_cards(lib, state, HOME_ROW)
-    if len(state["favorites"]) > HOME_ROW:
-        favorites.append(_card("Všechny oblíbené", _target("list", "favorites", {}, "Oblíbené"),
-                               "%d položek" % len(state["favorites"]), icon="favorites"))
-    if not favorites:
-        favorites = [_card("Oblíbené", _target("list", "favorites", {}, "Oblíbené"),
-                           "Podržte OK na filmu a zvolte Přidat do oblíbených", icon="favorites")]
-    rows.append({"title": "Oblíbené", "items": favorites})
+    # oblíbené zvlášť filmy a zvlášť seriály
+    for kind, name in (("movie", "Oblíbené filmy"), ("tv", "Oblíbené seriály")):
+        count = len([entry for entry in state["favorites"].values() if (entry.get("kind") == "tv") == (kind == "tv")])
+        cards = app_discover.favorite_cards(lib, state, HOME_ROW, kind)
+        if count > HOME_ROW:
+            cards.append(_card("Všechny", _target("list", "favorites", {"kind": kind}, name), "%d položek" % count,
+                               icon="favorites"))
+        if cards:
+            rows.append({"title": name, "items": cards})
+    if not state["favorites"]:
+        rows.append({"title": "Oblíbené", "items": [
+            _card("Oblíbené", _target("list", "favorites", {}, "Oblíbené"),
+                  "Podržte OK na filmu nebo seriálu a zvolte Přidat do oblíbených", icon="favorites")]})
     rows.append({"title": "Objevuj filmy", "items": app_discover.home_tiles("movie")})
     rows.append({"title": "Objevuj seriály", "items": app_discover.home_tiles("tv")})
     saved = _download_cards(lib, state, HOME_ROW)
@@ -940,6 +948,21 @@ def settings_get(params):
             "delete_watched": bool(settings.get("delete_watched")),
             "languages": [{"id": key, "title": title} for key, title in LANGUAGE_CHOICES],
             "qualities": [{"id": key, "title": title} for key, title in QUALITY_CHOICES]}
+
+
+def prefs_choices(params):
+    """Předvolby přehrávání z Přehraj.to jako nabídka: jazyk a kvalita (stejný tvar jako filtry výpisů).
+
+    ``apply`` je akce, které aplikace pošle parametry zvolené hodnoty.
+    """
+    prefs = _prefs()
+    groups = []
+    for title, key, choices, current in (("Jazyk", "prefer_language", LANGUAGE_CHOICES, prefs["language"]),
+                                         ("Kvalita", "prefer_quality", QUALITY_CHOICES, prefs["quality"])):
+        groups.append({"title": title, "value": dict(choices)[current],
+                       "options": [{"title": name, "current": value == current, "params": {key: value}}
+                                   for value, name in choices]})
+    return {"title": "Čemu dát přednost na Přehraj.to", "filters": groups, "reset": None, "apply": "settings_set"}
 
 
 def settings_set(params):
@@ -1651,4 +1674,5 @@ def call(action, params_json="{}"):
         return _failure(text, error)
 
 
-_register(diagnostics=diagnostics, log_error=log_error, catalog_filters=catalog_filters)
+_register(diagnostics=diagnostics, log_error=log_error, catalog_filters=catalog_filters,
+          prefs_choices=prefs_choices)

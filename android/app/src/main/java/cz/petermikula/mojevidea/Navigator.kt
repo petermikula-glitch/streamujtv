@@ -57,6 +57,7 @@ object Navigator {
             "diagnostics" -> activity.startActivity(Intent(activity, DiagnosticsActivity::class.java))
             "refresh" -> onChanged()  // „Zkusit znovu“: obrazovka si obsah načte znovu
             "input" -> askText(activity, title, target, onChanged)
+            "choices" -> showChoices(activity, target, onChanged)
             "command" -> runCommand(activity, title, target, onChanged)
             "download" -> Api.call(target.call, target.params) { result ->
                 if (activity.isFinishing || activity.isDestroyed) return@call
@@ -67,6 +68,43 @@ object Navigator {
                     onChanged()
                 }
             }
+        }
+    }
+
+    /**
+     * Nabídka voleb (předvolby přehrávání): skupiny s aktuální hodnotou, po výběru hodnoty se její
+     * parametry pošlou akci `apply` a obrazovka se obnoví.
+     */
+    private fun showChoices(activity: FragmentActivity, target: Target, onChanged: () -> Unit) {
+        Api.call(target.call, target.params) { result ->
+            if (activity.isFinishing || activity.isDestroyed) return@call
+            val data = result.data
+            val list = data?.optJSONArray("filters")
+            if (data == null || list == null) {
+                Toast.makeText(activity, result.error ?: "Nabídku se nepodařilo načíst.", Toast.LENGTH_LONG).show()
+                return@call
+            }
+            val groups = (0 until list.length()).mapNotNull { list.optJSONObject(it) }
+            AlertDialog.Builder(activity)
+                .setTitle(data.optString("title"))
+                .setItems(groups.map { "${it.optString("title")}: ${it.optString("value")}" }.toTypedArray()) { _, which ->
+                    val found = groups[which].optJSONArray("options") ?: return@setItems
+                    val options = (0 until found.length()).mapNotNull { found.optJSONObject(it) }
+                    AlertDialog.Builder(activity)
+                        .setTitle(groups[which].optString("title"))
+                        .setSingleChoiceItems(options.map { it.optString("title") }.toTypedArray(),
+                            options.indexOfFirst { it.optBoolean("current") }) { dialog, chosen ->
+                            dialog.dismiss()
+                            val params = options[chosen].optJSONObject("params") ?: return@setSingleChoiceItems
+                            Api.call(data.optString("apply"), params) { applied ->
+                                if (activity.isFinishing || activity.isDestroyed) return@call
+                                if (!applied.ok) Toast.makeText(activity, applied.error, Toast.LENGTH_LONG).show()
+                                onChanged()
+                            }
+                        }
+                        .show()
+                }
+                .show()
         }
     }
 

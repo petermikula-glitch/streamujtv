@@ -61,6 +61,7 @@ class PlayerActivity : FragmentActivity() {
     private var diagnostic = ""
     private var started = false
     private var retried = false
+    private var choice = ""          // titul z Objevuj, ke kterému video patří (pro návrh dalšího dílu)
     private var inspected = false   // u chráněného pořadu už proběhl pokus najít adresu licence v manifestu
     private lateinit var top: View
     private lateinit var endTime: TextView
@@ -191,6 +192,7 @@ class PlayerActivity : FragmentActivity() {
 
     private fun begin(stream: JSONObject, position: Long) {
         track = stream.optString("track")
+        choice = stream.optString("choice").ifEmpty { params.optString("choice") }
         local = stream.optBoolean("local")  // soubor stažený na disku: cesta místo adresy
         fun source(value: String): Uri = if (local) Uri.fromFile(File(value)) else Uri.parse(value)
         heading.text = stream.optString("title")
@@ -449,7 +451,7 @@ class PlayerActivity : FragmentActivity() {
         playerView.hideController()
         playerView.useController = false
         val ended = track
-        Api.call("play_next", JSONObject().put("track", ended).put("choice", params.optString("choice"))) { result ->
+        Api.call("play_next", JSONObject().put("track", ended).put("choice", choice)) { result ->
             if (isFinishing || isDestroyed || ended != track) return@call
             val next = result.data?.optJSONObject("next")
             val target = next?.let { Target.from(it.optJSONObject("target")) }

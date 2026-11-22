@@ -147,10 +147,15 @@ def favorites_check(params):
     return {"found": found}
 
 
-def favorite_cards(lib, state, limit=None):
-    """Karty oblíbených: položky katalogu se chovají jako v katalogu, tituly z TMDB vedou na své verze."""
+def favorite_cards(lib, state, limit=None, kind=None):
+    """Karty oblíbených: položky katalogu se chovají jako v katalogu, tituly z TMDB vedou na své verze.
+
+    ``kind`` (``movie`` / ``tv``) vybere jen filmy, nebo jen seriály.
+    """
     # naposledy přidané první (při stejném čase rozhoduje pořadí přidání)
     entries = sorted(reversed(list(state["favorites"].values())), key=lambda entry: -(entry.get("added") or 0))
+    if kind:
+        entries = [entry for entry in entries if (entry.get("kind") == "tv") == (kind == "tv")]
     cards = []
     for entry in entries[:limit] if limit else entries:
         meta = lib.get_meta(entry["key"]) if entry.get("key") else None
@@ -168,9 +173,11 @@ def favorite_cards(lib, state, limit=None):
 
 
 def favorites(params):
+    kind = params.get("kind") if params.get("kind") in ("movie", "tv") else None
     with api._library() as lib:
-        cards = favorite_cards(lib, api._state(lib))
-    return {"title": "Oblíbené", "items": cards, "next": None, "empty_art": "favorites",
+        cards = favorite_cards(lib, api._state(lib), kind=kind)
+    title = {"movie": "Oblíbené filmy", "tv": "Oblíbené seriály"}.get(kind, "Oblíbené")
+    return {"title": title, "items": cards, "next": None, "empty_art": "favorites",
             "empty": "Zatím nemáte nic oblíbeného.\n\nPodržte tlačítko OK na filmu nebo seriálu "
                      "a zvolte „Přidat do oblíbených“."}
 
@@ -669,19 +676,13 @@ def discover_title(params):
     toggle = favorite_item(favorites_state, entry)
     info, detail = _detail(params, kind)
     actions = [{"title": toggle["title"], "subtitle": "", "target": toggle["target"]},
-               {"title": "Hledat ručně", "subtitle": "", "target": api._target("search", "search", {"q": title})}]
+               {"title": "Hledat ručně", "subtitle": "", "target": api._target("search", "search", {"q": title})},
+               {"title": "Jazyk a kvalita", "subtitle": "", "target": api._target("choices", "prefs_choices", {})}]
     if kind == "tv" and params.get("id"):
-        seasons = _tmdb().seasons(params["id"])
-        cards = [api._card(season["title"], api._target(
-            "list", "discover_season", dict(params, season=season["number"]),
-            "%s – %s" % (title, season["title"])), "%d dílů" % season["episodes"] if season["episodes"] else "",
-            season["poster"] or params.get("poster") or "", icon="series") for season in seasons]
-        if last and any(str(season["number"]) == str(last) for season in seasons):
-            season = next(season for season in seasons if str(season["number"]) == str(last))
-            actions.insert(0, {"title": "Pokračovat", "subtitle": season["title"], "target": api._target(
-                "list", "discover_season", dict(params, season=season["number"]), "%s – %s" % (title, season["title"]))})
-        return {"detail": detail, "actions": actions,
-                "rows": ([{"title": "Řady", "items": cards}] if cards else []) + _related_rows(kind, params, info, state)}
+        rows, play = _series_rows(params, state)
+        if play:
+            actions.insert(0, play)
+        return {"detail": detail, "actions": actions, "rows": rows + _related_rows(kind, params, info, state)}
     choice = "movie:%s" % params["id"] if params.get("id") else ""
     failed = ""
     try:
@@ -713,6 +714,102 @@ def discover_title(params):
     return {"detail": detail, "actions": actions, "rows": rows + _related_rows(kind, params, info, state)}
 
 
+SEASON_ROWS = 6   # tolik řad ukáže stránka seriálu rovnou s díly; další jsou za kartou řady
+
+
+def _episode_card(params, season, number, episode, state, vid):
+    """Karta dílu: po výběru se rovnou přehraje nejlepší verze; ostatní verze jsou v nabídce karty."""
+    label = "%d×%02d" % (season, int(number))
+    name = "%s · %s" % (label, episode["title"]) if episode.get("title") else label
+    chosen = dict(params, season=season, episode=int(number))
+    point = state["resume"].get(vid) if vid else None
+    menu = [{"title": "Přehrát", "target": api._target("play", "discover_episode_play", chosen)}]
+    if point and point[0] > 0:
+        menu.append({"title": "Přehrát od začátku",
+                     "target": api._target("play", "discover_episode_play", dict(chosen, restart=True))})
+    menu.append({"title": "Vybrat verzi", "target": api._target(
+        "list", "discover_episode", chosen, "%s %s" % (params.get("title") or "", label))})
+    return api._card(name, api._target("play", "discover_episode_play", chosen), (episode.get("plot") or "")[:120],
+                     episode.get("still") or "", api._percent(point), wide=True,
+                     watched=bool(vid) and vid in state["watched"], icon="series", menu=menu)
+
+
+def _played_episodes(lib, tmdb_id, season, numbers):
+    """Verze, kterou si uživatel u dílu pustil: nese stav zhlédnutí celého dílu."""
+    return {number: lib.get_kv(api.CHOICE_PREFIX + "tv:%s:%s:%s" % (tmdb_id, season, number)) for number in numbers}
+
+
+def _series_rows(params, state):
+    """Řady stránky seriálu (díly po řadách) a tlačítko, které pustí díl, na kterém se skončilo."""
+    client = _tmdb()
+    tmdb_id = int(params["id"])
+    title = params.get("title") or ""
+    seasons = client.seasons(tmdb_id)
+    rows, order = [], []
+    for season in seasons[:SEASON_ROWS]:
+        try:
+            episodes = client.season_episodes(tmdb_id, season["number"])
+        except TmdbError:
+            episodes = {}
+        if not episodes:
+            continue
+        numbers = sorted(episodes, key=int)
+        with api._library() as lib:
+            played = _played_episodes(lib, tmdb_id, season["number"], numbers)
+        cards = []
+        for number in numbers:
+            card = _episode_card(params, season["number"], number, episodes[number], state, played.get(number))
+            cards.append(card)
+            order.append((card, played.get(number)))
+        rows.append({"title": "%s (%d dílů)" % (season["title"], len(cards)), "items": cards})
+    rest = [api._card(season["title"], api._target(
+        "list", "discover_season", dict(params, season=season["number"]), "%s – %s" % (title, season["title"])),
+        "%d dílů" % season["episodes"] if season["episodes"] else "",
+        season["poster"] or params.get("poster") or "", icon="series") for season in seasons[SEASON_ROWS:]]
+    if rest:
+        rows.append({"title": "Další řady", "items": rest})
+    if not order:
+        return rows, None
+    # rozkoukaný díl má přednost; jinak díl po posledním zhlédnutém; jinak první
+    unfinished = [index for index, (_card, vid) in enumerate(order) if vid and state["resume"].get(vid)]
+    watched = [index for index, (_card, vid) in enumerate(order) if vid and vid in state["watched"]]
+    if unfinished:
+        card, verb = order[unfinished[-1]][0], "Pokračovat"
+    elif watched and watched[-1] + 1 < len(order):
+        card, verb = order[watched[-1] + 1][0], "Přehrát další díl"
+    else:
+        card, verb = order[0][0], "Přehrát"
+    target = dict(card["target"], params=dict(card["target"]["params"], resume=True)) if unfinished else card["target"]
+    return rows, {"title": verb, "subtitle": card["title"], "target": target}
+
+
+def discover_episode_play(params):
+    """Přehraje díl seriálu z Objevuj rovnou: nejlepší verzi podle předvoleb (nebo tu naposledy zvolenou)."""
+    season, episode = int(params.get("season") or 0), int(params.get("episode") or 0)
+    tmdb_id = params.get("id") or 0
+    with api._library() as lib:
+        state = api._state(lib)
+        if tmdb_id:
+            _remember_title(lib, "tv", params)
+    choice = "tv:%s:%s:%s" % (tmdb_id, season, episode) if tmdb_id else ""
+    versions = [version for version in _find_versions(_names(params), 0, (season, episode), state, choice=choice)
+                if not version["short"]]
+    if not versions:
+        raise api.ApiError("Na Přehraj.to jsem tento díl nenašel.\n\nPodržte OK na dílu a zvolte „Vybrat verzi“, "
+                           "nebo ho zkuste najít hledáním.")
+    versions.sort(key=lambda version: version["bad"])   # verze, která nešla přehrát, až po ostatních
+    best = versions[0]
+    request = {"vid": best["video"]["id"], "web_result": best["result"]}
+    if choice:
+        request["choice"] = choice
+    for key in ("restart", "fresh", "online"):
+        if params.get(key):
+            request[key] = params[key]
+    stream = api.play(request)
+    stream["choice"] = choice   # přehrávač podle něj po dokoukání nabídne další díl
+    return stream
+
+
 def discover_season(params):
     """Díly jedné řady podle TMDB; každý díl vede na své verze na Přehraj.to."""
     season = int(params.get("season") or 0)
@@ -720,20 +817,9 @@ def discover_season(params):
     episodes = _tmdb().season_episodes(tmdb_id, season)
     with api._library() as lib:
         state = api._state(lib)
-        # verze dílu, kterou si uživatel pustil, nese stav zhlédnutí celého dílu
-        played = {number: lib.get_kv(api.CHOICE_PREFIX + "tv:%s:%s:%s" % (tmdb_id, season, number))
-                  for number in episodes}
-    cards = []
-    for number in sorted(episodes, key=int):
-        episode = episodes[number]
-        label = "%d×%02d" % (season, int(number))
-        name = "%s · %s" % (label, episode["title"]) if episode.get("title") else label
-        vid = played.get(number)
-        cards.append(api._card(name, api._target(
-            "list", "discover_episode", dict(params, episode=int(number)),
-            "%s %s" % (params.get("title") or "", label)), (episode.get("plot") or "")[:120],
-            episode.get("still") or "", api._percent(state["resume"].get(vid)) if vid else 0, wide=True,
-            watched=bool(vid) and vid in state["watched"], icon="series"))
+        played = _played_episodes(lib, tmdb_id, season, episodes)
+    cards = [_episode_card(params, season, number, episodes[number], state, played.get(number))
+             for number in sorted(episodes, key=int)]
     if cards:
         cards.append(api._card("Stáhnout celou řadu", api._target("command", "discover_download_season", params),
                                "Vyhledá a zařadí všechny díly", icon="download"))
@@ -1054,5 +1140,5 @@ ACTIONS = {
     "discover_season": discover_season, "discover_episode": discover_episode, "discover_check": discover_check,
     "play_next": play_next, "title_csfd": title_csfd, "favorites_check": favorites_check,
     "discover_download_season": discover_download_season, "discover_filters": discover_filters,
-    "discover_person": discover_person,
+    "discover_person": discover_person, "discover_episode_play": discover_episode_play,
 }
