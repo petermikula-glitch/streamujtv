@@ -18,7 +18,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
     id TEXT PRIMARY KEY,           -- ID videa u poskytovatele
     raw_title TEXT NOT NULL,       -- název tak, jak je u poskytovatele
-    source TEXT NOT NULL,          -- account | favorites | playlist | manual
+    source TEXT NOT NULL,          -- account | favorites | playlist | manual | search
     added_at INTEGER NOT NULL,
     last_seen INTEGER NOT NULL,
     duration INTEGER DEFAULT 0,
@@ -475,6 +475,8 @@ class Library(object):
     def _upsert_video(self, vid, raw_title, source, parsed, duration, thumb,
                       description, now, size, quality, track_episode):
         existing = self.find_video(vid)
+        if existing and source == "search":
+            return False  # výsledek hledání nesmí změnit položku katalogu
         if existing and existing["id"] != vid:
             # stejné video pod jiným ID (např. ruční odkaz bez čísla videa) – sluč
             keep = self.prefer_ref(vid, existing["id"])
@@ -497,6 +499,8 @@ class Library(object):
             # přednost má zdroj "account" před ostatními
             if source == "account" and existing["source"] != "account":
                 updates["source"] = source
+                if existing["source"] == "search":
+                    updates["hidden"] = 0
             if not existing["locked"] and raw_title and raw_title != existing["raw_title"]:
                 updates.update(self._parsed_fields(raw_title, parsed or parse(raw_title)))
                 if not updates["quality"]:
@@ -511,7 +515,7 @@ class Library(object):
         fields = self._parsed_fields(raw_title, parsed or parse(raw_title))
         fields.update({"id": vid, "source": source, "added_at": now, "last_seen": now,
                        "duration": duration or 0, "thumb": thumb or "", "description": description or "",
-                       "vkey": self.video_key(vid), "size": size or ""})
+                       "vkey": self.video_key(vid), "size": size or "", "hidden": int(source == "search")})
         if quality and not fields["quality"]:
             fields["quality"] = quality
         cols = ", ".join(fields)
@@ -681,8 +685,11 @@ class Library(object):
             "WHERE v.meta_key=episode_additions.meta_key AND v.season=episode_additions.season "
             "AND v.episode=episode_additions.episode)")
 
-    def count_videos(self):
-        return self.conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0]
+    def count_videos(self, visible_only=False):
+        query = "SELECT COUNT(*) FROM videos"
+        if visible_only:
+            query += " WHERE hidden=0"
+        return self.conn.execute(query).fetchone()[0]
 
     def clear(self):
         for t in ("videos", "meta", "collection_items", "collections", "history", "watched_marks",
@@ -1172,9 +1179,10 @@ class Library(object):
             "SELECT m.* FROM progress_hidden h JOIN meta m ON m.key=h.target "
             "ORDER BY COALESCE(NULLIF(m.title, ''), m.search_title) COLLATE NOCASE")]
 
-    def history_videos(self, in_progress=False, limit=100):
+    def history_videos(self, in_progress=False, limit=100, include_search=False):
+        visible = "(v.hidden=0 OR v.source='search')" if include_search else "v.hidden=0"
         q = ("SELECT v.*, h.last_played, h.position, h.total, h.plays FROM history h "
-             "JOIN videos v ON v.id = h.vid WHERE v.hidden = 0 ")
+             "JOIN videos v ON v.id = h.vid WHERE " + visible + " ")
         params = []
         if in_progress:
             q += ("AND h.position >= ? AND h.total > 0 AND h.position < h.total * ? "
