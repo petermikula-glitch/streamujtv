@@ -3,6 +3,7 @@ package cz.petermikula.mojevidea
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.view.KeyEvent
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
 import androidx.leanback.widget.ImageCardView
@@ -13,7 +14,7 @@ import com.bumptech.glide.Glide
  * Karta s obrázkem: plakát na výšku, nebo širší náhled (díly, živé vysílání, složky).
  * Tvar je společný pro celou řadu či mřížku – karty různých tvarů vedle sebe mřížku rozhází.
  */
-class CardPresenter(var poster: Boolean = false) : Presenter() {
+class CardPresenter(var poster: Boolean = false, private val onMenu: ((Card) -> Unit)? = null) : Presenter() {
     companion object {
         /** Plakáty na výšku, jakmile je má aspoň jedna karta; jinak náhledy na šířku. */
         fun posterShape(cards: List<Card>): Boolean = cards.any { it.image.isNotEmpty() && !it.wide }
@@ -79,6 +80,26 @@ class CardPresenter(var poster: Boolean = false) : Presenter() {
             glide.clear(view.mainImageView)
             view.setMainImage(TileDrawable(context, card.title, card.icon), false)
         }
+        // nabídka karty: podržení OK, nebo tlačítko Menu na ovladači
+        val menu = onMenu
+        if (menu != null && card.menu.isNotEmpty()) {
+            view.setOnLongClickListener {
+                menu(card)
+                true
+            }
+            view.setOnKeyListener { _, code, event ->
+                if (code == KeyEvent.KEYCODE_MENU && event.action == KeyEvent.ACTION_UP) {
+                    menu(card)
+                    true
+                } else {
+                    code == KeyEvent.KEYCODE_MENU
+                }
+            }
+        } else {
+            view.setOnLongClickListener(null)
+            view.isLongClickable = false
+            view.setOnKeyListener(null)
+        }
         view.mainImageView.foreground = if (card.progress > 0 || card.watched) {
             CardOverlay(card.progress, card.watched, density, ContextCompat.getColor(context, R.color.accent))
         } else {
@@ -91,5 +112,8 @@ class CardPresenter(var poster: Boolean = false) : Presenter() {
         Glide.with(view.context.applicationContext).clear(view.mainImageView)
         view.mainImage = null
         view.mainImageView.foreground = null
+        view.setOnLongClickListener(null)
+        view.isLongClickable = false
+        view.setOnKeyListener(null)
     }
 }

@@ -35,7 +35,7 @@ object Api {
         if (ready) return
         if (!Python.isStarted()) Python.start(AndroidPlatform(appContext))
         Python.getInstance().getModule("app_api")
-            .callAttr("configure", appContext.filesDir.absolutePath, systemProxy())
+            .callAttr("configure", appContext.filesDir.absolutePath, systemProxy(), proxyExceptions())
         ready = true
     }
 
@@ -45,6 +45,10 @@ object Api {
         val port = System.getProperty("https.proxyPort").orEmpty()
         return if (host.isEmpty() || port.isEmpty()) "" else "http://$host:$port"
     }
+
+    /** Adresy, které jdou mimo systémovou proxy (Java je odděluje svislítkem, urllib čárkou). */
+    private fun proxyExceptions(): String =
+        System.getProperty("http.nonProxyHosts").orEmpty().replace('|', ',')
 
     /** Synchronní volání – jen z vlákna na pozadí. */
     fun callBlocking(action: String, params: JSONObject = JSONObject()): ApiResult {

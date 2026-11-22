@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 
 /** Otevře cíl karty: výpis, přehrávač, hledání, nastavení, nebo provede příkaz. */
@@ -13,13 +14,27 @@ object Navigator {
     const val EXTRA_TITLE = "title"
 
     fun open(activity: FragmentActivity, card: Card, onChanged: () -> Unit = {}) {
-        val target = card.target
+        open(activity, card.target, card.title, onChanged)
+    }
+
+    /** Nabídka karty: podržení tlačítka OK nebo tlačítko Menu na ovladači. */
+    fun menu(activity: FragmentActivity, card: Card, onChanged: () -> Unit = {}) {
+        if (card.menu.isEmpty() || activity.isFinishing || activity.isDestroyed) return
+        AlertDialog.Builder(activity)
+            .setTitle(card.title)
+            .setItems(card.menu.map { it.title }.toTypedArray()) { _, which ->
+                open(activity, card.menu[which].target, card.title, onChanged)
+            }
+            .show()
+    }
+
+    fun open(activity: FragmentActivity, target: Target, title: String, onChanged: () -> Unit = {}) {
         when (target.type) {
             "list" -> activity.startActivity(
                 Intent(activity, ListActivity::class.java)
                     .putExtra(EXTRA_CALL, target.call)
                     .putExtra(EXTRA_PARAMS, target.params.toString())
-                    .putExtra(EXTRA_TITLE, target.title.ifEmpty { card.title })
+                    .putExtra(EXTRA_TITLE, target.title.ifEmpty { title })
             )
             "play" -> activity.startActivity(
                 Intent(activity, PlayerActivity::class.java)
@@ -28,7 +43,16 @@ object Navigator {
             )
             "search" -> activity.startActivity(Intent(activity, SearchActivity::class.java))
             "settings" -> activity.startActivity(Intent(activity, SettingsActivity::class.java))
-            "command" -> runCommand(activity, card.title, target, onChanged)
+            "command" -> runCommand(activity, title, target, onChanged)
+            "download" -> Api.call(target.call, target.params) { result ->
+                if (activity.isFinishing || activity.isDestroyed) return@call
+                val message = if (result.ok) result.data?.optString("message").orEmpty() else result.error.orEmpty()
+                if (message.isNotEmpty()) Toast.makeText(activity, message, Toast.LENGTH_LONG).show()
+                if (result.ok) {
+                    DownloadService.start(activity)
+                    onChanged()
+                }
+            }
         }
     }
 

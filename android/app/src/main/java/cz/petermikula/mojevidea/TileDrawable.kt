@@ -35,7 +35,7 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
             "society" to 0xFF475569, "spirit" to 0xFFA16207, "archive" to 0xFF57534E,
             "login" to 0xFFC98A00, "search" to 0xFF0E7490, "sync" to 0xFF1D4ED8, "enrich" to 0xFF6D28D9,
             "settings" to 0xFF475569, "all" to 0xFF4338CA, "history" to 0xFF0F766E, "favorites" to 0xFFBE123C,
-            "rating" to 0xFFB7791F, "year" to 0xFF1E40AF, "folder" to 0xFF334155,
+            "rating" to 0xFFB7791F, "year" to 0xFF1E40AF, "folder" to 0xFF334155, "download" to 0xFF047857,
         )
 
         fun mix(color: Int, target: Int, amount: Float): Int {

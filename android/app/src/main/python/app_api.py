@@ -14,8 +14,12 @@ Modul nesmí importovat nic z Androidu, aby šel testovat mimo něj.
 """
 import json
 import os
+import re
 import threading
 import time
+
+import urllib.parse
+import urllib.request
 
 import catalog
 import db
@@ -29,7 +33,14 @@ LINK_PREFIX = "link:"   # zapamatované adresy souborů (jako v doplňku)
 IVYS = "ivys:"          # označení pořadu z iVysílání při ukládání pozice
 TTL = {"menu": 24 * 3600, "category": 3600, "show": 3600, "episodes": 900, "search": 600, "live": 60}
 
+DOWNLOADS = "downloads.json"   # evidence souborů stažených na disk (jen v aplikaci)
+VIDEO_SUFFIXES = (".mp4", ".mkv", ".avi", ".webm", ".ts", ".mov", ".m4v", ".mpg", ".mpeg", ".wmv")
+UPDATE_URL = "https://api.github.com/repos/petermikula-glitch/streamujtv/releases?per_page=20"
+UPDATE_TAG = "app-v"           # vydání aplikace: značka app-v<verze>, příloha .apk
+UPDATE_EVERY = 6 * 3600        # automatická kontrola nové verze nejvýš jednou za tuto dobu
+
 _STATE = {"dir": "", "progress": "", "busy": False}
+_DOWNLOADS_LOCK = threading.RLock()
 _LOCK = threading.Lock()   # dlouhé operace (synchronizace, metadata) běží nejvýš jedna
 
 
@@ -41,16 +52,18 @@ class ApiError(Exception):
 # Prostředí a nastavení
 # ---------------------------------------------------------------------------
 
-def configure(directory, proxy=""):
+def configure(directory, proxy="", no_proxy=""):
     """Složka aplikace pro katalog, nastavení a přihlášení. Volá se jednou při startu.
 
     ``proxy`` je systémová proxy zařízení (``http://host:port``), pokud je nastavená:
-    urllib ji na Androidu sám nezjistí.
+    urllib ji na Androidu sám nezjistí. ``no_proxy`` jsou adresy, které jdou mimo ni (oddělené čárkou).
     """
     os.makedirs(directory, exist_ok=True)
     _STATE["dir"] = directory
     if proxy:
         os.environ["https_proxy"] = os.environ["http_proxy"] = str(proxy)
+        if no_proxy:
+            os.environ["no_proxy"] = str(no_proxy)
     return "ok"
 
 
@@ -121,10 +134,16 @@ def _target(kind, call=None, params=None, title=None):
     return target
 
 
-def _card(title, target, subtitle="", image="", progress=0, wide=False, watched=False, icon=""):
-    """Karta; ``icon`` je název ikony dlaždice pro karty bez obrázku (složky, nástroje)."""
-    return {"title": title or "", "subtitle": subtitle or "", "image": image or "", "progress": int(progress or 0),
+def _card(title, target, subtitle="", image="", progress=0, wide=False, watched=False, icon="", menu=None):
+    """Karta; ``icon`` je název ikony dlaždice pro karty bez obrázku (složky, nástroje).
+
+    ``menu`` je nabídka po podržení tlačítka OK: seznam ``{"title", "target"}``.
+    """
+    card = {"title": title or "", "subtitle": subtitle or "", "image": image or "", "progress": int(progress or 0),
             "wide": bool(wide), "watched": bool(watched), "icon": icon or "", "target": target}
+    if menu:
+        card["menu"] = menu
+    return card
 
 
 # Ikony hlavních kategorií iVysílání (podle názvu v nabídce ČT); neznámá kategorie dostane obecnou.
@@ -169,9 +188,12 @@ def _movie_card(meta, state, versions=None):
     vid = min(videos, key=_version_rank)["id"] if videos else meta.get("first_video")
     ids = [video["id"] for video in videos] or [vid]
     point = next((state["resume"][i] for i in ids if i in state["resume"]), None)
-    return _card(_display_title(meta), _target("play", "play", {"vid": vid}), subtitle,
+    saved = next((i for i in ids if _saved(state, i)), None)
+    if saved:  # stažená verze má přednost: hraje i bez internetu
+        vid = saved
+    return _card(_display_title(meta), _target("play", "play", {"vid": vid}), _mark(state, vid, subtitle),
                  meta.get("poster") or meta.get("thumb"), _percent(point), wide=not meta.get("poster"),
-                 watched=any(i in state["watched"] for i in ids))
+                 watched=any(i in state["watched"] for i in ids), menu=_video_menu(state, vid, point), icon="movies")
 
 
 def _show_card(meta):
@@ -180,7 +202,7 @@ def _show_card(meta):
     subtitle = " · ".join(part for part in (rating, "%d dílů" % count if count else "") if part)
     title = _display_title(meta)
     return _card(title, _target("list", "show", {"key": meta["key"]}, title), subtitle,
-                 meta.get("poster") or meta.get("thumb"), wide=not meta.get("poster"))
+                 meta.get("poster") or meta.get("thumb"), wide=not meta.get("poster"), icon="series")
 
 
 def _video_card(video, meta, state, prefix=""):
@@ -191,13 +213,45 @@ def _video_card(video, meta, state, prefix=""):
     else:
         label = title
     details = " · ".join(part for part in (video.get("lang"), video.get("quality"), video.get("size")) if part)
-    return _card(prefix + label, _target("play", "play", {"vid": video["id"]}), details,
-                 meta.get("poster") or video.get("thumb"), _percent(state["resume"].get(video["id"])),
-                 wide=not meta.get("poster"), watched=video["id"] in state["watched"])
+    point = state["resume"].get(video["id"])
+    return _card(prefix + label, _target("play", "play", {"vid": video["id"]}), _mark(state, video["id"], details),
+                 meta.get("poster") or video.get("thumb"), _percent(point),
+                 wide=not meta.get("poster"), watched=video["id"] in state["watched"],
+                 menu=_video_menu(state, video["id"], point),
+                 icon="series" if video["kind"] == "episode" else "movies")
 
 
 def _state(lib):
-    return {"resume": lib.resume_points(), "watched": lib.watched()}
+    return {"resume": lib.resume_points(), "watched": lib.watched(), "downloads": _downloads()}
+
+
+def _saved(state, vid):
+    """Je video stažené a soubor je právě dostupný (disk je připojený)?"""
+    entry = state.get("downloads", {}).get(vid)
+    return bool(entry and entry.get("state") == "done" and os.path.exists(entry.get("path") or ""))
+
+
+def _mark(state, vid, subtitle):
+    return " · ".join(part for part in ("Staženo" if _saved(state, vid) else "", subtitle) if part)
+
+
+def _video_menu(state, vid, point=None):
+    """Nabídka po podržení OK na videu z Přehraj.to: přehrání a stahování na disk."""
+    items = [{"title": "Přehrát", "target": _target("play", "play", {"vid": vid})}]
+    if point and point[0] > 0:
+        items.append({"title": "Přehrát od začátku", "target": _target("play", "play", {"vid": vid, "restart": True})})
+    entry = state.get("downloads", {}).get(vid)
+    remove = _target("command", "download_remove", {"vid": vid})
+    if not entry:
+        items.append({"title": "Stáhnout na disk", "target": _target("download", "download_add", {"vid": vid})})
+    elif entry.get("state") == "done":
+        items.append({"title": "Smazat stažený soubor", "target": remove})
+    elif entry.get("state") == "failed":
+        items.append({"title": "Zkusit stáhnout znovu", "target": _target("download", "download_add", {"vid": vid})})
+        items.append({"title": "Odebrat ze stahování", "target": remove})
+    else:
+        items.append({"title": "Zrušit stahování", "target": remove})
+    return items
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +286,9 @@ def home(params):
         progress = _in_progress(lib, state)
         if progress:
             rows.append({"title": "Rozkoukané", "items": progress})
+        saved = _download_cards(lib, state, HOME_ROW)
+        if saved:
+            rows.append({"title": "Stažené na disku", "items": saved})
         movies = lib.movies(order="added", limit=HOME_ROW)
         if movies:
             versions = lib.videos_grouped([m["key"] for m in movies if (m.get("video_count") or 1) > 1])
@@ -273,6 +330,8 @@ def home(params):
     last = settings.get("last_sync")
     rows.append({"title": "Nástroje", "items": [
         _card("Hledat", _target("search"), "Katalog i iVysílání", icon="search"),
+        _card("Stahování", _target("list", "downloads", {}, "Stahování"), _downloads_summary(state["downloads"]),
+              icon="download"),
         _card("Synchronizovat s účtem", _target("command", "sync", {}),
               "Naposledy: %s" % time.strftime("%d.%m. %H:%M", time.localtime(last)) if last else "Zatím neproběhla",
               icon="sync"),
@@ -280,7 +339,9 @@ def home(params):
         _card("Nastavení a přihlášení", _target("settings"), settings.get("username") or "Nepřihlášeno",
               icon="settings"),
     ]})
-    return {"rows": rows}
+    # "pending": ve frontě něco čeká – aplikace po startu znovu spustí službu stahování
+    return {"rows": rows, "pending": any(entry.get("state") in ("queued", "downloading")
+                                         for entry in state["downloads"].values())}
 
 
 # ---------------------------------------------------------------------------
@@ -341,9 +402,11 @@ def show(params):
         video = best[position]
         label = "%d×%02d" % (video["season"], video["episode"]) if video["episode"] else video["raw_title"]
         details = " · ".join(part for part in (video.get("lang"), video.get("quality")) if part)
-        cards.append(_card(label, _target("play", "play", {"vid": video["id"]}), details,
-                           video.get("thumb") or meta.get("poster"), _percent(state["resume"].get(video["id"])),
-                           wide=True, watched=video["id"] in state["watched"]))
+        point = state["resume"].get(video["id"])
+        cards.append(_card(label, _target("play", "play", {"vid": video["id"]}), _mark(state, video["id"], details),
+                           video.get("thumb") or meta.get("poster"), _percent(point),
+                           wide=True, watched=video["id"] in state["watched"],
+                           menu=_video_menu(state, video["id"], point), icon="series"))
     return {"title": title, "items": cards, "next": None}
 
 
@@ -408,34 +471,54 @@ def play(params):
             raise ApiError("Video v katalogu není. Zkuste synchronizaci.")
         vid = video["id"]
         meta = lib.get_meta(video["meta_key"]) or {}
-        cached = None if params.get("fresh") else _link_get(lib, vid)
         point = lib.resume_points([vid]).get(vid)
-    if cached:
-        url, subtitles = cached["url"], cached.get("subtitles") or {}
-    else:
-        client = _client()
-        try:
-            streams, _message = client.get_streams(vid)
-            if not streams:
-                raise provider.VideoUnavailableError("Video nemá žádný přehratelný soubor")
-            order = provider.QUALITY_ORDER
-            stream = min(streams, key=lambda s: order.index(s["quality"]) if s["quality"] in order else len(order))
-            url = client.resolve(stream["url"])
-            subtitles = stream.get("subtitles") or {}
-        except provider.LoginError:
-            raise ApiError("Přihlášení k Přehraj.to se nezdařilo. Zkontrolujte e-mail a heslo v Nastavení.")
-        except provider.VideoUnavailableError:
-            raise ApiError("Video už na Přehraj.to není dostupné.")
-        except provider.ProviderError as error:
-            raise ApiError("Přehraj.to: %s" % error)
-        with _library() as lib:
-            lib.set_kv(LINK_PREFIX + vid, json.dumps({"url": url, "subtitles": subtitles, "ts": int(time.time())}))
-    title = _display_title(meta) or video["title"]
+    title = _video_title(video, meta)
+    position = point[0] if point and not params.get("restart") else 0
+    entry = _downloads().get(vid)
+    if entry and entry.get("state") == "done" and os.path.exists(entry.get("path") or "") \
+            and not params.get("online"):
+        # stažený soubor: hraje z disku, bez internetu i bez přihlášení
+        return {"url": entry["path"], "local": True, "headers": {},
+                "subtitles": [name for name in entry.get("subtitles") or [] if os.path.exists(name)],
+                "position": position, "title": title, "track": vid, "live": False, "hls": False}
+    url, subtitles = _stream_link(vid, bool(params.get("fresh")))
+    return {"url": url, "local": False, "headers": {"User-Agent": provider.USER_AGENT},
+            "subtitles": list(subtitles.values()), "position": position, "title": title,
+            "track": vid, "live": False, "hls": False}
+
+
+def _video_title(video, meta):
+    title = _display_title(meta or {}) or video["title"]
     if video["kind"] == "episode" and video["episode"]:
         title = "%s %d×%02d" % (title, video["season"], video["episode"])
-    return {"url": url, "headers": {"User-Agent": provider.USER_AGENT}, "subtitles": list(subtitles.values()),
-            "position": point[0] if point and not params.get("restart") else 0, "title": title,
-            "track": vid, "live": False, "hls": False}
+    return title
+
+
+def _stream_link(vid, fresh=False):
+    """Adresa nejlepší verze souboru a titulky; zapamatovaná adresa se použije, dokud platí."""
+    if not fresh:
+        with _library() as lib:
+            cached = _link_get(lib, vid)
+        if cached:
+            return cached["url"], cached.get("subtitles") or {}
+    client = _client()
+    try:
+        streams, _message = client.get_streams(vid)
+        if not streams:
+            raise provider.VideoUnavailableError("Video nemá žádný přehratelný soubor")
+        order = provider.QUALITY_ORDER
+        stream = min(streams, key=lambda s: order.index(s["quality"]) if s["quality"] in order else len(order))
+        url = client.resolve(stream["url"])
+        subtitles = stream.get("subtitles") or {}
+    except provider.LoginError:
+        raise ApiError("Přihlášení k Přehraj.to se nezdařilo. Zkontrolujte e-mail a heslo v Nastavení.")
+    except provider.VideoUnavailableError:
+        raise ApiError("Video už na Přehraj.to není dostupné.")
+    except provider.ProviderError as error:
+        raise ApiError("Přehraj.to: %s" % error)
+    with _library() as lib:
+        lib.set_kv(LINK_PREFIX + vid, json.dumps({"url": url, "subtitles": subtitles, "ts": int(time.time())}))
+    return url, subtitles
 
 
 def progress_save(params):
@@ -469,12 +552,12 @@ def link_failed(params):
 def settings_get(params):
     settings = _settings()
     return {"username": settings.get("username", ""), "has_password": bool(settings.get("password")),
-            "tmdb_key": settings.get("tmdb_key", "")}
+            "tmdb_key": settings.get("tmdb_key", ""), "download_dir": settings.get("download_dir", "")}
 
 
 def settings_set(params):
     settings = _settings()
-    for key in ("username", "password", "tmdb_key"):
+    for key in ("username", "password", "tmdb_key", "download_dir"):
         if key in params and params[key] is not None:
             settings[key] = str(params[key]).strip()
     _save_settings(settings)
@@ -736,8 +819,267 @@ def ivys_play(params):
 # ---------------------------------------------------------------------------
 # Vstupní bod
 # ---------------------------------------------------------------------------
+# Stahování na disk
+# ---------------------------------------------------------------------------
+# Evidenci vede Python (downloads.json), bajty přenáší služba v aplikaci: ptá se na další položku
+# (download_next), hlásí průběh (download_progress) a výsledek (download_finish / download_fail).
+
+def _downloads():
+    with _DOWNLOADS_LOCK:
+        try:
+            with open(_path(DOWNLOADS), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return {}
+        return {vid: entry for vid, entry in data.items() if isinstance(entry, dict)} if isinstance(data, dict) else {}
+
+
+def _save_downloads(items):
+    with _DOWNLOADS_LOCK:
+        temporary = _path(DOWNLOADS + ".tmp")
+        with open(temporary, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False)
+        os.replace(temporary, _path(DOWNLOADS))
+
+
+def _size_text(size):
+    size = float(size or 0)
+    if size >= 1024 ** 3:
+        return ("%.1f GB" % (size / 1024 ** 3)).replace(".", ",")
+    return "%d MB" % round(size / 1024 ** 2)
+
+
+def _safe_name(title):
+    """Název souboru použitelný i na FAT/exFAT."""
+    name = "".join(" " if char in '\\/:*?"<>|' or ord(char) < 32 else char for char in title or "")
+    return " ".join(name.split()).strip(" .")[:120] or "video"
+
+
+def _download_status(entry):
+    state = entry.get("state")
+    total = entry.get("total") or 0
+    if state == "done":
+        if not os.path.exists(entry.get("path") or ""):
+            return "Disk není připojený"
+        return "Staženo · %s" % _size_text(total) if total else "Staženo"
+    if state == "failed":
+        return "Chyba: %s" % (entry.get("error") or "stahování selhalo")
+    if state == "downloading":
+        if total:
+            return "Stahuje se · %d %% z %s" % (100 * (entry.get("done") or 0) // total, _size_text(total))
+        return "Stahuje se · %s" % _size_text(entry.get("done"))
+    return "Čeká na disk" if _STATE.get("no_disk") else "Ve frontě"
+
+
+def _downloads_summary(items):
+    done = sum(1 for entry in items.values() if entry.get("state") == "done")
+    waiting = sum(1 for entry in items.values() if entry.get("state") in ("queued", "downloading"))
+    parts = ["%d stažených" % done if done else "", "%d ve frontě" % waiting if waiting else ""]
+    return " · ".join(part for part in parts if part) or "Podržte OK na filmu a zvolte Stáhnout"
+
+
+def _download_cards(lib, state, limit=None):
+    cards = []
+    items = sorted(state["downloads"].values(), key=lambda entry: -(entry.get("added") or 0))
+    for entry in items[:limit] if limit else items:
+        vid = entry.get("vid") or ""
+        total = entry.get("total") or 0
+        percent = 100 * (entry.get("done") or 0) // total if total and entry.get("state") != "done" else 0
+        point = state["resume"].get(vid)
+        cards.append(_card(entry.get("title") or vid, _target("play", "play", {"vid": vid}), _download_status(entry),
+                           entry.get("image"), percent or _percent(point), wide=bool(entry.get("wide")),
+                           watched=vid in state["watched"], menu=_video_menu(state, vid, point), icon="download"))
+    return cards
+
+
+def downloads(params):
+    with _library() as lib:
+        cards = _download_cards(lib, _state(lib))
+    return {"title": "Stahování", "items": cards, "next": None,
+            "refresh": 3 if any(entry.get("state") in ("queued", "downloading")
+                                for entry in _downloads().values()) else 0,
+            "empty": "Zatím tu nic není.\n\nPodržte tlačítko OK na filmu nebo dílu a zvolte „Stáhnout na disk“. "
+                     "Stažené filmy pak hrají i bez internetu."}
+
+
+def download_add(params):
+    """Zařadí video do fronty; stahovat začne služba aplikace."""
+    with _library() as lib:
+        video = lib.find_video(params.get("vid", ""))
+        if not video:
+            raise ApiError("Video v katalogu není. Zkuste synchronizaci.")
+        meta = lib.get_meta(video["meta_key"]) or {}
+    vid = video["id"]
+    with _DOWNLOADS_LOCK:
+        items = _downloads()
+        entry = items.get(vid) or {}
+        if entry.get("state") == "done" and os.path.exists(entry.get("path") or ""):
+            raise ApiError("Tohle video už je stažené.")
+        title = _video_title(video, meta)
+        items[vid] = {"vid": vid, "title": title, "image": meta.get("poster") or video.get("thumb") or "",
+                      "wide": not meta.get("poster"), "state": "queued", "path": entry.get("path") or "",
+                      "done": 0, "total": 0, "error": "", "subtitles": [], "added": int(time.time())}
+        _save_downloads(items)
+    return {"message": "Zařazeno ke stažení: %s" % title, "start": True}
+
+
+def download_next(params):
+    """Další položka pro službu: {"vid", "url", "headers", "path", "part", "subtitles"}; prázdné vid = hotovo."""
+    directory = params.get("dir") or ""
+    _STATE["no_disk"] = not directory
+    if not directory:
+        raise ApiError("Disk pro stahování není připojený. Připojte USB disk, nebo zvolte úložiště v Nastavení.")
+    while True:
+        with _DOWNLOADS_LOCK:
+            items = _downloads()
+            waiting = sorted((entry for entry in items.values() if entry.get("state") in ("downloading", "queued")),
+                             key=lambda entry: (entry.get("state") != "downloading", entry.get("added") or 0))
+        if not waiting:
+            return {"vid": ""}
+        entry = waiting[0]
+        vid = entry["vid"]
+        try:
+            url, subtitles = _stream_link(vid, bool(params.get("fresh")))
+        except ApiError as error:
+            download_fail({"vid": vid, "error": str(error)})
+            continue
+        suffix = os.path.splitext(urllib.parse.urlparse(url).path)[1].lower()
+        name = _safe_name(entry.get("title")) + (suffix if suffix in VIDEO_SUFFIXES else ".mp4")
+        target = entry.get("path") or ""
+        if os.path.dirname(target) != directory:  # nová položka, nebo mezitím jiný disk
+            target = os.path.join(directory, name)
+            taken = {other.get("path") for other in items.values() if other.get("vid") != vid}
+            if target in taken:
+                base, extension = os.path.splitext(target)
+                target = "%s [%s]%s" % (base, _safe_name(vid)[:12], extension)
+        base = os.path.splitext(target)[0]
+        tracks = []
+        for index, link in enumerate(subtitles.values()):
+            ending = ".srt" if urllib.parse.urlparse(link).path.lower().endswith(".srt") else ".vtt"
+            tracks.append({"url": link, "path": "%s.%d%s" % (base, index + 1, ending)})
+        with _DOWNLOADS_LOCK:
+            items = _downloads()
+            if vid not in items:
+                continue  # mezitím zrušeno
+            items[vid].update({"state": "downloading", "path": target, "error": ""})
+            _save_downloads(items)
+        return {"vid": vid, "title": entry.get("title") or "", "url": url,
+                "headers": {"User-Agent": provider.USER_AGENT}, "path": target, "part": target + ".part",
+                "subtitles": tracks}
+
+
+def download_progress(params):
+    """Průběh od služby; odpověď říká, jestli uživatel stahování mezitím nezrušil."""
+    vid = params.get("vid") or ""
+    with _DOWNLOADS_LOCK:
+        items = _downloads()
+        entry = items.get(vid)
+        if not entry or entry.get("state") != "downloading":
+            return {"cancel": True}
+        entry["done"] = int(params.get("done") or 0)
+        entry["total"] = int(params.get("total") or 0)
+        _save_downloads(items)
+    return {"cancel": False}
+
+
+def download_finish(params):
+    vid = params.get("vid") or ""
+    with _DOWNLOADS_LOCK:
+        items = _downloads()
+        entry = items.get(vid)
+        if not entry:
+            return {"saved": False}
+        size = int(params.get("size") or 0)
+        entry.update({"state": "done", "done": size, "total": size, "error": "",
+                      "subtitles": [str(name) for name in params.get("subtitles") or []]})
+        _save_downloads(items)
+    return {"saved": True}
+
+
+def download_fail(params):
+    vid = params.get("vid") or ""
+    with _DOWNLOADS_LOCK:
+        items = _downloads()
+        if vid in items:
+            items[vid].update({"state": "failed", "error": str(params.get("error") or "stahování selhalo")[:200]})
+            _save_downloads(items)
+    return {"saved": True}
+
+
+def download_remove(params):
+    """Zruší stahování nebo smaže stažený soubor (i rozpracovaný a titulky)."""
+    vid = params.get("vid") or ""
+    with _DOWNLOADS_LOCK:
+        items = _downloads()
+        entry = items.pop(vid, None)
+        if entry is None:
+            return {"message": ""}
+        _save_downloads(items)
+    target = entry.get("path") or ""
+    for name in [target, target + ".part"] + list(entry.get("subtitles") or []):
+        if name and name != ".part":
+            try:
+                os.remove(name)
+            except OSError:
+                pass  # soubor už není, nebo disk není připojený – evidence se smaže i tak
+    return {"message": "Smazáno: %s" % entry.get("title") if entry.get("state") == "done" else "Stahování zrušeno."}
+
+
+# ---------------------------------------------------------------------------
+# Aktualizace aplikace
+# ---------------------------------------------------------------------------
+
+def _version(text):
+    return tuple(int(part) for part in re.findall(r"\d+", str(text or ""))[:4])
+
+
+def update_check(params):
+    """Je na GitHubu novější verze aplikace? {"available", "version", "url", "size", "notes"}.
+
+    Bez ``force`` se ptá nejvýš jednou za UPDATE_EVERY a potíže se sítí mlčky přejde.
+    """
+    current = params.get("current") or ""
+    force = bool(params.get("force"))
+    settings = _settings()
+    if not force and time.time() - (settings.get("update_checked") or 0) < UPDATE_EVERY:
+        return {"available": False, "current": current}
+    request = urllib.request.Request(settings.get("update_url") or UPDATE_URL, headers={
+        "User-Agent": "MojeVidea-Android/%s" % (current or "0"), "Accept": "application/vnd.github+json"})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            releases = json.loads(response.read().decode("utf-8"))
+        if not isinstance(releases, list):
+            raise ValueError("neočekávaná odpověď")
+    except (OSError, ValueError) as error:
+        if force:
+            raise ApiError("Novou verzi se nepodařilo ověřit: %s" % error)
+        return {"available": False, "current": current}
+    best = None
+    for release in releases:
+        tag = str(release.get("tag_name") or "") if isinstance(release, dict) else ""
+        if not tag.startswith(UPDATE_TAG) or release.get("draft") or release.get("prerelease"):
+            continue
+        asset = next((item for item in release.get("assets") or []
+                      if str(item.get("name") or "").lower().endswith(".apk")), None)
+        version = tag[len(UPDATE_TAG):]
+        if asset and asset.get("browser_download_url") and (best is None or _version(version) > _version(best[0])):
+            best = (version, asset, release)
+    settings = _settings()
+    settings["update_checked"] = int(time.time())
+    _save_settings(settings)
+    if best is None or _version(best[0]) <= _version(current):
+        return {"available": False, "current": current}
+    version, asset, release = best
+    return {"available": True, "current": current, "version": version, "url": asset["browser_download_url"],
+            "size": int(asset.get("size") or 0), "notes": str(release.get("body") or "").strip()[:800]}
+
+
+# ---------------------------------------------------------------------------
 
 ACTIONS = {
+    "downloads": downloads, "download_add": download_add, "download_next": download_next,
+    "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,
+    "download_remove": download_remove, "update_check": update_check,
     "home": home, "movies": movies, "shows": shows, "show": show, "played": played, "search": search,
     "play": play, "progress_save": progress_save, "link_failed": link_failed,
     "settings_get": settings_get, "settings_set": settings_set, "account_status": account_status,

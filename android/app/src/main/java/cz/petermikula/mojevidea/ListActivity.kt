@@ -30,7 +30,10 @@ class ListActivity : FragmentActivity() {
 
 /** Mřížka karet jednoho výpisu; další stránky se dotahují, jak se uživatel blíží ke konci. */
 class ListFragment : VerticalGridSupportFragment() {
-    private val presenter = CardPresenter()
+    private val presenter = CardPresenter(false) { card -> Navigator.menu(requireActivity(), card) { reload() } }
+    private var emptyText = "Nic tu není."
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val refresh = Runnable { if (isResumed) reload(quiet = true) }
     private val cards = ArrayObjectAdapter(presenter)
     private var call = ""
     private var params = JSONObject()
@@ -95,10 +98,15 @@ class ListFragment : VerticalGridSupportFragment() {
             }
             data.optString("title").takeIf { it.isNotEmpty() && title.isNullOrEmpty() }?.let { title = it }
             val list = Card.list(data.optJSONArray("items"))
+            data.optString("empty").takeIf { it.isNotEmpty() }?.let { emptyText = it }
+            // výpis, který se mění sám (stahování), si říká o obnovení po pár sekundách
+            handler.removeCallbacks(refresh)
+            val seconds = data.optInt("refresh")
+            if (seconds > 0) handler.postDelayed(refresh, seconds * 1000L)
             applyShape(list)
             cards.setItems(list, Card.DIFF)
             next = data.optJSONObject("next")
-            showMessage(if (cards.size() == 0) "Nic tu není." else "")
+            showMessage(if (cards.size() == 0) emptyText else "")
         }
     }
 
@@ -119,6 +127,11 @@ class ListFragment : VerticalGridSupportFragment() {
         }
         label.text = text
         label.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    override fun onPause() {
+        handler.removeCallbacks(refresh)
+        super.onPause()
     }
 
     override fun onDestroyView() {

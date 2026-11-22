@@ -60,7 +60,9 @@ class SearchActivity : FragmentActivity() {
             for (index in 0 until (list?.length() ?: 0)) {
                 val row = list!!.optJSONObject(index) ?: continue
                 val found = Card.list(row.optJSONArray("items"))
-                val cards = ArrayObjectAdapter(CardPresenter(CardPresenter.posterShape(found)))
+                val cards = ArrayObjectAdapter(CardPresenter(CardPresenter.posterShape(found)) { card ->
+                    Navigator.menu(this, card)
+                })
                 cards.addAll(0, found)
                 fresh.add(ListRow(HeaderItem(index.toLong(), row.optString("title")), cards))
             }

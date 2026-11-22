@@ -21,6 +21,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import org.json.JSONObject
+import java.io.File
 
 /**
  * Přehrávač: adresu streamu získá z logiky v Pythonu, pokračuje od uložené pozice
@@ -42,6 +43,7 @@ class PlayerActivity : FragmentActivity() {
     private var params = JSONObject()
     private var track = ""
     private var live = false
+    private var local = false
     private var started = false
     private var retried = false
 
@@ -87,6 +89,8 @@ class PlayerActivity : FragmentActivity() {
 
     private fun play(stream: JSONObject) {
         track = stream.optString("track")
+        local = stream.optBoolean("local")  // soubor stažený na disku: cesta místo adresy
+        fun source(value: String): Uri = if (local) Uri.fromFile(File(value)) else Uri.parse(value)
         heading.text = stream.optString("title")
         live = stream.optBoolean("live")
         val headers = HashMap<String, String>()
@@ -107,14 +111,14 @@ class PlayerActivity : FragmentActivity() {
             if (url.isEmpty()) continue
             val mime = if (url.substringBefore('?').endsWith(".srt", true)) MimeTypes.APPLICATION_SUBRIP else MimeTypes.TEXT_VTT
             subtitles.add(
-                MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
+                MediaItem.SubtitleConfiguration.Builder(source(url))
                     .setMimeType(mime)
                     .setLanguage("cs")
                     .setSelectionFlags(if (index == 0) C.SELECTION_FLAG_DEFAULT else 0)
                     .build()
             )
         }
-        val item = MediaItem.Builder().setUri(stream.optString("url")).setSubtitleConfigurations(subtitles)
+        val item = MediaItem.Builder().setUri(source(stream.optString("url"))).setSubtitleConfigurations(subtitles)
         if (stream.optBoolean("hls")) item.setMimeType(MimeTypes.APPLICATION_M3U8)
 
         release()
@@ -155,6 +159,7 @@ class PlayerActivity : FragmentActivity() {
                         if (isFinishing || isDestroyed) return@call
                         if (resumeAt > 0) saveProgress(ended = false)
                         params.put("fresh", true)
+                        if (local) params.put("online", true)  // stažený soubor nejde přehrát: zkusit stream
                         resolve()
                     }
                 } else {

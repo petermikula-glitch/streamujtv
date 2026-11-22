@@ -28,6 +28,8 @@ class SettingsFragment : GuidedStepSupportFragment() {
         const val SAVE = 4L
         const val SYNC = 5L
         const val BACK = 6L
+        const val STORAGE = 7L
+        const val UPDATE = 8L
     }
 
     override fun onCreateGuidance(savedInstanceState: Bundle?): GuidanceStylist.Guidance {
@@ -66,7 +68,43 @@ class SettingsFragment : GuidedStepSupportFragment() {
             GuidedAction.Builder(context).id(SYNC).title("Synchronizovat s účtem")
                 .description("Načte nahraná videa a doplní metadata").build()
         )
+        actions.add(
+            GuidedAction.Builder(context).id(STORAGE).title("Úložiště pro stahování")
+                .description("Zjišťuji…").build()
+        )
+        actions.add(
+            GuidedAction.Builder(context).id(UPDATE).title("Zkontrolovat aktualizace")
+                .description("Verze ${Updater.currentVersion(context)}").build()
+        )
         actions.add(GuidedAction.Builder(context).id(BACK).title("Zpět").build())
+    }
+
+    private var downloadDir = ""
+
+    /** Popis zvoleného úložiště; bez volby se použije první připojený USB disk. */
+    private fun showStorage() {
+        val volume = Storage.target(requireContext(), downloadDir)
+        setText(STORAGE, volume?.description ?: "USB disk není připojený")
+    }
+
+    private fun chooseStorage() {
+        val context = requireContext()
+        val volumes = Storage.volumes(context)
+        if (volumes.isEmpty()) {
+            Toast.makeText(context, "Žádné úložiště není dostupné.", Toast.LENGTH_LONG).show()
+            return
+        }
+        android.app.AlertDialog.Builder(context)
+            .setTitle(if (volumes.any { it.removable }) "Kam stahovat" else "Kam stahovat (USB disk není připojený)")
+            .setItems(volumes.map { it.description }.toTypedArray()) { _, which ->
+                downloadDir = volumes[which].dir.absolutePath
+                Api.call("settings_set", JSONObject().put("download_dir", downloadDir)) {
+                    if (!isAdded) return@call
+                    showStorage()
+                    DownloadService.start(requireContext())  // co čekalo na disk, může začít
+                }
+            }
+            .show()
     }
 
     override fun onViewCreated(view: android.view.View, savedInstanceState: Bundle?) {
@@ -76,6 +114,8 @@ class SettingsFragment : GuidedStepSupportFragment() {
             if (!isAdded || data == null) return@call
             setText(EMAIL, data.optString("username"))
             setText(TMDB, data.optString("tmdb_key"))
+            downloadDir = data.optString("download_dir")
+            showStorage()
             if (data.optBoolean("has_password")) {
                 findActionById(PASSWORD)?.title = "Heslo (uložené – vyplňte jen při změně)"
                 notifyActionChanged(findActionPositionById(PASSWORD))
@@ -112,6 +152,8 @@ class SettingsFragment : GuidedStepSupportFragment() {
             SYNC -> save {
                 Navigator.runCommand(activity, "Synchronizace", Target("command", "sync", JSONObject(), "")) {}
             }
+            STORAGE -> chooseStorage()
+            UPDATE -> Updater.check(activity, force = true)
             BACK -> activity.finish()
         }
     }

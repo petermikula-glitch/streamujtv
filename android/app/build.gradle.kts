@@ -25,8 +25,8 @@ android {
         applicationId = "cz.petermikula.mojevidea"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
         ndk {
             // 32bitový i 64bitový Android (řada Android TV boxů má 32bitový systém)
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
@@ -60,7 +60,7 @@ android {
         File(dir, "res/xml").mkdirs()
         file(ca).copyTo(File(dir, "res/raw/test_ca.crt"), overwrite = true)
         File(dir, "res/xml/test_network_security.xml").writeText(
-            "<network-security-config><base-config><trust-anchors>" +
+            "<network-security-config><base-config cleartextTrafficPermitted=\"true\"><trust-anchors>" +
                 "<certificates src=\"system\"/><certificates src=\"@raw/test_ca\"/>" +
                 "</trust-anchors></base-config></network-security-config>\n"
         )
@@ -88,7 +88,9 @@ android {
 chaquopy {
     defaultConfig {
         version = "3.11"
-        buildPython("/usr/bin/python3.11")
+        // Python pro sestavení: -PbuildPython=/cesta, jinak python3.11 ze systému (jinde ten na PATH)
+        (providers.gradleProperty("buildPython").orNull
+            ?: "/usr/bin/python3.11".takeIf { File(it).exists() })?.let { buildPython(it) }
     }
     sourceSets {
         getByName("main") {

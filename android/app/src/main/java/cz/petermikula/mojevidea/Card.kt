@@ -5,7 +5,22 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Kam karta vede; o cíli rozhoduje logika v Pythonu. */
-class Target(val type: String, val call: String, val params: JSONObject, val title: String)
+class Target(val type: String, val call: String, val params: JSONObject, val title: String) {
+    companion object {
+        fun from(json: JSONObject?): Target {
+            val target = json ?: JSONObject()
+            return Target(
+                type = target.optString("type"),
+                call = target.optString("call"),
+                params = target.optJSONObject("params") ?: JSONObject(),
+                title = target.optString("title"),
+            )
+        }
+    }
+}
+
+/** Položka nabídky karty (podržení tlačítka OK nebo tlačítko Menu). */
+class MenuItem(val title: String, val target: Target)
 
 class Card(
     val title: String,
@@ -16,6 +31,7 @@ class Card(
     val watched: Boolean,
     val icon: String,
     val target: Target,
+    val menu: List<MenuItem>,
 ) {
     /** Totožnost karty (kam vede) – nezávisle na tom, jak je zrovna vykreslená. */
     val key: String get() = target.type + "|" + target.call + "|" + target.params + "|" + title
@@ -35,7 +51,10 @@ class Card(
         }
 
         fun from(json: JSONObject): Card {
-            val target = json.optJSONObject("target") ?: JSONObject()
+            val entries = json.optJSONArray("menu")
+            val menu = (0 until (entries?.length() ?: 0)).mapNotNull { index ->
+                entries!!.optJSONObject(index)?.let { MenuItem(it.optString("title"), Target.from(it.optJSONObject("target"))) }
+            }
             return Card(
                 title = json.optString("title"),
                 subtitle = json.optString("subtitle"),
@@ -44,12 +63,8 @@ class Card(
                 wide = json.optBoolean("wide"),
                 watched = json.optBoolean("watched"),
                 icon = json.optString("icon"),
-                target = Target(
-                    type = target.optString("type"),
-                    call = target.optString("call"),
-                    params = target.optJSONObject("params") ?: JSONObject(),
-                    title = target.optString("title"),
-                ),
+                target = Target.from(json.optJSONObject("target")),
+                menu = menu,
             )
         }
 

@@ -53,7 +53,9 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
     assert _titles(television) == ["Živé vysílání", "Seriály", "Filmy"]
     assert television[1]["target"] == {"type": "list", "call": "ivys_category", "params": {"cid": "3976"},
                                        "title": "Seriály"}
-    assert [item["target"]["type"] for item in rows[2]["items"]] == ["search", "command", "command", "settings"]
+    assert [item["target"]["type"] for item in rows[2]["items"]] == ["search", "list", "command", "command",
+                                                                     "settings"]
+    assert rows[2]["items"][1]["target"]["call"] == "downloads"
 
 
 def test_catalogue_rows_lists_and_search(api):
@@ -65,8 +67,9 @@ def test_catalogue_rows_lists_and_search(api):
     assert _titles(rows["Rozkoukané"]) == ["Pelíšky"] and rows["Rozkoukané"][0]["progress"] == 20
     film = rows["Nově přidané filmy"][0]
     assert film == {"title": "Pelíšky", "subtitle": "1999 · 91 % · CZ dabing, EN", "image": "https://img/pelisky.jpg",
-                    "progress": 20, "wide": False, "watched": False, "icon": "",
+                    "progress": 20, "wide": False, "watched": False, "icon": "movies", "menu": film["menu"],
                     "target": {"type": "play", "call": "play", "params": {"vid": REF}}}  # česká verze ve vyšší kvalitě
+    assert [item["title"] for item in film["menu"]] == ["Přehrát", "Přehrát od začátku", "Stáhnout na disk"]
     assert rows["Nově přidané filmy"][-1]["target"]["call"] == "movies"
     assert rows["Nově přidané filmy"][-1]["icon"] == "movies"  # dlaždice bez obrázku nese ikonu
     assert rows["Seriály"][0]["target"] == {"type": "list", "call": "show", "params": {"key": "show:archa"},
@@ -104,7 +107,7 @@ def test_playback_resolves_remembers_link_and_tracks_progress(api, monkeypatch):
     _fill()
     assert "vyplňte e-mail" in api("play", vid=REF)["error"]
     api("settings_set", username="a@b.cz", password="heslo")
-    assert api("settings_get") == {"username": "a@b.cz", "has_password": True, "tmdb_key": ""}
+    assert api("settings_get") == {"username": "a@b.cz", "has_password": True, "tmdb_key": "", "download_dir": ""}
     page = fixture("video_synthetic.html")
     clients = []
 
@@ -158,7 +161,7 @@ def test_sync_reports_progress_and_blocks_parallel_runs(api, monkeypatch):
     assert seen == [{"text": "Načítám videa z účtu: stránka 3, 2 videí", "busy": True}]
     assert api("progress") == {"text": "", "busy": False}
     rows = {row["title"]: row["items"] for row in api("home")["rows"]}
-    assert "Naposledy:" in rows["Nástroje"][1]["subtitle"] and rows["Nástroje"][3]["subtitle"] == "a@b.cz"
+    assert "Naposledy:" in rows["Nástroje"][2]["subtitle"] and rows["Nástroje"][4]["subtitle"] == "a@b.cz"
 
     Client.listing_complete = False
     assert "Nic se neodebralo" in api("sync")["message"]
@@ -236,3 +239,124 @@ def test_cards_in_one_listing_share_a_shape(api):
     poster = app_api._movie_card({"key": "movie:b|2000", "title": "B", "poster": "plakat.jpg", "first_video": REF},
                                  state)
     assert (plain["wide"], poster["wide"]) == (True, False)
+
+
+def _link(vid, url):
+    with app_api._library() as lib:
+        lib.set_kv(app_api.LINK_PREFIX + vid, json.dumps({"url": url, "subtitles": {"cs": "https://cdn.x/t.vtt"},
+                                                         "ts": int(app_api.time.time())}))
+
+
+def test_download_queue_progress_local_playback_and_removal(api, tmp_path):
+    _fill()
+    disk = tmp_path / "usb"
+    disk.mkdir()
+    assert api("downloads")["items"] == [] and "Podržte" in api("downloads")["empty"]
+    assert "není připojený" in api("download_next", dir="")["error"]
+    assert api("download_next", dir=str(disk)) == {"vid": ""}                 # prázdná fronta
+    assert api("download_add", vid=REF) == {"message": "Zařazeno ke stažení: Pelíšky", "start": True}
+    assert "není" in api("download_add", vid="9:x:00000000000000ff")["error"]
+    _link(REF, "https://cdn.x/Pel%C3%AD%C5%A1ky.1999.mkv?sig=1")
+
+    job = api("download_next", dir=str(disk))
+    assert job["vid"] == REF and job["url"].startswith("https://cdn.x/") and job["headers"]["User-Agent"]
+    assert job["path"] == str(disk / "Pelíšky.mkv") and job["part"] == job["path"] + ".part"   # přípona podle adresy
+    assert job["subtitles"] == [{"url": "https://cdn.x/t.vtt", "path": str(disk / "Pelíšky.1.vtt")}]
+    assert api("download_next", dir=str(disk))["path"] == job["path"]        # rozdělaná položka se vrací znovu
+    assert api("download_progress", vid=REF, done=50, total=200) == {"cancel": False}
+    card = api("downloads")["items"][0]
+    assert (card["subtitle"], card["progress"]) == ("Stahuje se · 25 % z 0 MB", 25)
+    assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zrušit stahování"]
+    rows = {row["title"]: row["items"] for row in api("home")["rows"]}
+    assert _titles(rows["Stažené na disku"]) == ["Pelíšky"] and "1 ve frontě" in rows["Nástroje"][1]["subtitle"]
+
+    (disk / "Pelíšky.mkv").write_bytes(b"x" * 200)
+    (disk / "Pelíšky.1.vtt").write_text("WEBVTT")
+    assert api("download_finish", vid=REF, size=200, subtitles=[job["subtitles"][0]["path"]]) == {"saved": True}
+    stream = api("play", vid=REF)                                            # hraje z disku, bez přihlášení
+    assert stream["local"] is True and stream["url"] == job["path"] and stream["subtitles"] == [str(disk / "Pelíšky.1.vtt")]
+    rows = {row["title"]: row["items"] for row in api("home")["rows"]}
+    film = rows["Nově přidané filmy"][0]
+    assert film["subtitle"].startswith("Staženo · ") and film["menu"][-1]["title"] == "Smazat stažený soubor"
+    assert "už je stažené" in api("download_add", vid=REF)["error"]
+    assert api("download_progress", vid=REF, done=1, total=2) == {"cancel": True}   # hotové se už nestahuje
+
+    (disk / "Pelíšky.mkv").rename(disk / "jinde.mkv")                        # disk odpojen: zpět na stream
+    assert api("downloads")["items"][0]["subtitle"] == "Disk není připojený"
+    assert api("play", vid=REF)["local"] is False
+    (disk / "jinde.mkv").rename(disk / "Pelíšky.mkv")
+    assert api("download_remove", vid=REF) == {"message": "Smazáno: Pelíšky"}
+    assert not (disk / "Pelíšky.mkv").exists() and not (disk / "Pelíšky.1.vtt").exists()
+    assert api("downloads")["items"] == [] and api("download_remove", vid=REF) == {"message": ""}
+
+
+def test_download_failures_and_cancel(api, tmp_path, monkeypatch):
+    _fill()
+    disk = str(tmp_path)
+    api("download_add", vid=REF)
+    job_error = api("download_next", dir=disk)                               # bez přihlášení adresu nezíská
+    assert job_error == {"vid": ""}
+    card = api("downloads")["items"][0]
+    assert card["subtitle"].startswith("Chyba: Nejdřív v Nastavení")
+    assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zkusit stáhnout znovu", "Odebrat ze stahování"]
+    api("download_add", vid=REF)                                             # znovu do fronty
+    _link(REF, "https://cdn.x/stream?id=5")
+    job = api("download_next", dir=disk)
+    assert job["path"].endswith("Pelíšky.mp4")                               # bez přípony v adrese → mp4
+    assert api("download_fail", vid=REF, error="Na disku není dost místa") == {"saved": True}
+    assert api("downloads")["items"][0]["subtitle"] == "Chyba: Na disku není dost místa"
+    api("download_add", vid=REF)
+    api("download_next", dir=disk)
+    assert api("download_remove", vid=REF) == {"message": "Stahování zrušeno."}
+    assert api("download_progress", vid=REF, done=1, total=2) == {"cancel": True}
+    assert app_api._safe_name('A/B: "C" <D>? *.') == "A B C D" and app_api._size_text(5 * 1024 ** 3) == "5,0 GB"
+
+
+class _Response:
+    def __init__(self, body):
+        self.body = body
+
+    def read(self):
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_update_check_finds_newer_release_and_throttles(api, monkeypatch):
+    releases = [
+        {"tag_name": "v1.4.1", "assets": [{"name": "x.apk", "browser_download_url": "https://x/kodi.apk"}]},
+        {"tag_name": "app-v0.4.0", "prerelease": True, "assets": [{"name": "a.apk", "browser_download_url": "u4"}]},
+        {"tag_name": "app-v0.3.0", "body": "Stahování na disk", "assets": [
+            {"name": "notes.txt", "browser_download_url": "n"},
+            {"name": "MojeVidea-0.3.0.apk", "browser_download_url": "https://gh/MojeVidea-0.3.0.apk", "size": 42}]},
+        {"tag_name": "app-v0.10.0", "assets": []},                           # vydání bez APK se přeskočí
+        {"tag_name": "app-v0.2.0", "assets": [{"name": "old.apk", "browser_download_url": "old"}]},
+    ]
+    asked = []
+
+    def urlopen(request, timeout=None):
+        asked.append(request.full_url)
+        if isinstance(releases, Exception):
+            raise releases
+        return _Response(json.dumps(releases).encode())
+
+    monkeypatch.setattr(app_api.urllib.request, "urlopen", urlopen)
+    found = api("update_check", current="0.2.0")
+    assert found == {"available": True, "current": "0.2.0", "version": "0.3.0", "size": 42,
+                     "url": "https://gh/MojeVidea-0.3.0.apk", "notes": "Stahování na disk"}
+    assert asked == [app_api.UPDATE_URL]
+    assert api("update_check", current="0.2.0") == {"available": False, "current": "0.2.0"}   # hned znovu se neptá
+    assert len(asked) == 1
+    assert api("update_check", current="0.2.0", force=True)["available"] is True               # ruční kontrola ano
+    assert api("update_check", current="0.3.0", force=True) == {"available": False, "current": "0.3.0"}
+    assert api("update_check", current="0.10.0", force=True)["available"] is False             # čísla, ne text
+    releases = OSError("bez sítě")
+    assert "nepodařilo ověřit" in api("update_check", current="0.2.0", force=True)["error"]
+    settings = app_api._settings()
+    settings["update_checked"] = 0
+    app_api._save_settings(settings)
+    assert api("update_check", current="0.2.0") == {"available": False, "current": "0.2.0"}   # automaticky mlčky

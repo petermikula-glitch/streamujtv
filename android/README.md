@@ -78,6 +78,32 @@ Názvy ikon: `live`, `series`, `movies`, `docs`, `news`, `sport`, `kids`, `fun`,
 `app_api.py` (pole `icon`). Existuje-li ilustrace `tile_<název>`, použije se místo přechodu s ikonou
 a název se vykreslí přes její ztmavenou spodní část. Výchozí ikony jsou Material Icons (Apache 2.0).
 
+## Stahování na disk
+
+Podržení tlačítka OK (nebo tlačítko Menu) na filmu či dílu z Přehraj.to otevře nabídku se „Stáhnout
+na disk“. Stahuje služba v popředí (`DownloadService`), takže pokračuje i po opuštění aplikace, umí
+navázat na rozpracovaný soubor a při chybě to zkusí znovu s novou adresou. Evidenci a frontu vede
+logika v Pythonu (`downloads.json`; akce `download_*` v `app_api.py`), stažený soubor má při přehrávání
+přednost před streamem a hraje i bez internetu. Pořady z iVysílání se nestahují.
+
+Aplikace zapisuje do vlastní složky na disku (`Android/data/cz.petermikula.mojevidea/files`), k čemuž
+nepotřebuje žádné oprávnění; Android tuto složku při odinstalaci aplikace smaže. Úložiště se volí
+v Nastavení, bez volby se použije první připojený USB disk. Disk má být ve formátu exFAT – FAT32
+neuloží soubor větší než 4 GB (aplikace na to upozorní předem).
+
+## Aktualizace
+
+Aplikace se při startu (nejvýš jednou za 6 hodin) zeptá na vydání na GitHubu
+(`releases` se značkou `app-v<verze>` a přílohou `.apk`), nabídne novější verzi, stáhne ji a předá
+systémovému instalátoru; ruční kontrola je v Nastavení. Poprvé je potřeba aplikaci povolit instalaci
+z neznámých zdrojů. Nová verze musí být podepsaná stejným klíčem jako ta nainstalovaná.
+
+Vydání vytváří `.github/workflows/android.yml` při změně na hlavní větvi: spustí testy, sestaví APK,
+podepíše ho klíčem z tajné proměnné `SIGNING_KEYSTORE_BASE64` (úložiště klíčů v base64; heslo
+v `SIGNING_PASSWORD`, výchozí `android`) a založí vydání, pokud pro danou verzi ještě neexistuje.
+Nové vydání tedy znamená zvýšit `versionCode` a `versionName` v `app/build.gradle.kts` a přepsat
+`RELEASE_NOTES.md` (text se ukáže v nabídce aktualizace).
+
 ## Přehrávač a formáty
 
 Přehrávač je Media3/ExoPlayer. Video dekóduje čip zařízení (H.264, HEVC, VP9, AV1 – podle toho, co
@@ -95,5 +121,5 @@ Rozkoukané a pokračování od uložené pozice, hledání, iVysílání (živ�
 a podkategorie, řady a díly, Moje pořady).
 
 Zatím chybí: kolekce, Chci vidět, objevování v TMDB, ruční úpravy katalogu, výběr verze filmu
-(vždy se vybere nejlepší: český/slovenský dabing, pak vyšší kvalita), automatická synchronizace
-na pozadí a upozornění na novou verzi aplikace.
+(vždy se vybere nejlepší: český/slovenský dabing, pak vyšší kvalita) a automatická synchronizace
+na pozadí.

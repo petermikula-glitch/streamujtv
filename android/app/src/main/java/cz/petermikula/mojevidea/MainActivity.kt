@@ -29,6 +29,8 @@ class MainFragment : BrowseSupportFragment() {
     private var shown = ""
     private var shapes = emptyList<Boolean>()
     private var backdrop: Backdrop? = null
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val refresh = Runnable { if (isResumed) load() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,6 +55,11 @@ class MainFragment : BrowseSupportFragment() {
         backdrop = Backdrop(requireActivity())
     }
 
+    override fun onPause() {
+        handler.removeCallbacks(refresh)
+        super.onPause()
+    }
+
     override fun onDestroy() {
         backdrop?.release()
         super.onDestroy()
@@ -75,6 +82,9 @@ class MainFragment : BrowseSupportFragment() {
                 if (!loadedOnce) showMessage(result.error ?: "Nepodařilo se načíst obsah.")
                 return@call
             }
+            // dokud se stahuje, obnovovat řadu Stažené (stejná data nic nepřekreslí)
+            handler.removeCallbacks(refresh)
+            if (data.optBoolean("pending")) handler.postDelayed(refresh, 3000)
             val raw = data.toString()
             if (loadedOnce && raw == shown) return@call  // beze změny: výběr i pozice zůstanou
             shown = raw
@@ -97,13 +107,20 @@ class MainFragment : BrowseSupportFragment() {
             } else {
                 val fresh = ArrayList<ListRow>()
                 for (index in titles.indices) {
-                    val cards = ArrayObjectAdapter(CardPresenter(posters[index]))
+                    val cards = ArrayObjectAdapter(CardPresenter(posters[index]) { card ->
+                        Navigator.menu(requireActivity(), card) { load() }
+                    })
                     cards.addAll(0, items[index])
                     fresh.add(ListRow(HeaderItem(index.toLong(), titles[index]), cards))
                 }
                 rows.setItems(fresh, null)
             }
             shapes = posters
+            if (!loadedOnce) {
+                // po startu: navázat na rozpracované stahování a zeptat se na novou verzi
+                if (data.optBoolean("pending")) DownloadService.start(requireContext())
+                Updater.checkOnStart(requireActivity())
+            }
             loadedOnce = true
         }
     }
