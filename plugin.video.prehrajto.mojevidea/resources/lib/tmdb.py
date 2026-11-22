@@ -144,6 +144,24 @@ class Tmdb(object):
         data = self._get("/discover/" + kind, **params)
         return data.get("results") or [], min(data.get("total_pages") or 0, 500)
 
+    def recommendations(self, kind, tmdb_id):
+        """Tituly, které TMDB k danému doporučuje (položky ve stejném tvaru jako v seznamech)."""
+        data = self._get("/%s/%d/recommendations" % (kind, int(tmdb_id)))
+        return [item for item in data.get("results") or [] if isinstance(item, dict) and item.get("id")]
+
+    def cast(self, tmdb_id, want_series=False, limit=12):
+        """Herci titulu: ``[{"id", "name", "character", "photo"}]``. Stejný dotaz jako ``details``."""
+        kind = "tv" if want_series else "movie"
+        data = self._get("/%s/%s" % (kind, tmdb_id), append_to_response="credits")
+        people = []
+        for person in ((data.get("credits") or {}).get("cast") or [])[:limit]:
+            if not isinstance(person, dict) or not person.get("id") or not person.get("name"):
+                continue
+            photo = person.get("profile_path") or ""
+            people.append({"id": person["id"], "name": person["name"], "character": person.get("character") or "",
+                           "photo": IMG + "w185" + photo if isinstance(photo, str) and photo.startswith("/") else ""})
+        return people
+
     def seasons(self, tmdb_id):
         """Řady seriálu bez speciálů: [{"number", "title", "episodes", "poster"}]."""
         data = self._get("/tv/%d" % int(tmdb_id))

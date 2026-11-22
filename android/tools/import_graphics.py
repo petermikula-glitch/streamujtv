@@ -31,6 +31,12 @@ SECTIONS = {"Prehraj-to": "ic_section_prehrajto", "iVysilani": "ic_section_ivysi
 ICONS = {"Doplnit-plakaty": "enrich", "Hledat": "search", "Moje-porady": "favorites", "Naposledy-prehrane": "history",
          "Nastaveni": "settings", "Podle-hodnoceni": "rating", "Podle-roku": "year", "Prihlaseni": "login",
          "Slozka": "folder", "Synchronizovat": "sync", "Vsechny-porady": "all", "Stahovani": "download"}
+PLAYER = {"Prehrat": "play", "Pauza": "pause", "Zpet-10": "rewind", "Vpred-10": "forward", "Predchozi": "previous",
+          "Dalsi-dil": "next", "Titulky": "subtitles", "Zvuk": "audio", "Kvalita": "quality",
+          "Od-zacatku": "restart", "Zavrit": "close"}
+PROFILES = {"Profil-klapka": "clapper", "Profil-popcorn": "popcorn", "Profil-koruna": "crown", "Profil-sova": "owl",
+            "Profil-kocka": "cat", "Profil-raketa": "rocket"}
+GUIDE = {"Ucet": "account", "Katalog": "catalog", "Predvolby": "prefs"}
 SVG = "{http://www.w3.org/2000/svg}"
 
 
@@ -72,7 +78,9 @@ def vector(paths, width):
 def icon(source, target):
     root = ET.parse(source).getroot()
     group = root.find(SVG + "g")
-    if root.get("viewBox") != "0 0 24 24" or group is None or group.get("fill") != "none":
+    if group is None:  # vlastnosti tahu přímo na kořeni, tvary hned pod ním
+        group = root
+    if root.get("viewBox") != "0 0 24 24" or group.get("fill") != "none":
         raise SystemExit("%s: čekám obrysovou ikonu ve výřezu 24 × 24" % source)
     paths = []
     for element in group:
@@ -122,6 +130,23 @@ def main(source, res):
         if os.path.exists(path):
             icon(path, os.path.join(res, "drawable", key + ".xml"))
             done.append(key)
+    for name, key in PLAYER.items():
+        path = os.path.join(source, "prehravac", name + ".svg")
+        if os.path.exists(path):
+            icon(path, os.path.join(res, "drawable", "ic_player_%s.xml" % key))
+            done.append("ic_player_" + key)
+    for folder, names, prefix, size in (("profily", PROFILES, "avatar_", 256), ("pruvodce", GUIDE, "guide_", 400)):
+        for name, key in names.items():
+            path = os.path.join(source, folder, name + ".png")
+            if os.path.exists(path):
+                image = Image.open(path).convert("RGBA").resize((size, size), Image.LANCZOS)
+                image.save(os.path.join(res, "drawable-nodpi", prefix + key + ".webp"), "WEBP", quality=92, method=6)
+                done.append(prefix + key)
+    hero = os.path.join(source, "uvod", "Uvodni-panel.png")
+    if os.path.exists(hero):
+        Image.open(hero).convert("RGB").resize((1280, 720), Image.LANCZOS).save(
+            os.path.join(res, "drawable-nodpi", "hero_default.webp"), "WEBP", quality=88, method=6)
+        done.append("hero_default")
     brand = os.path.join(source, "znacka")
     if os.path.exists(os.path.join(brand, "Pozadi.png")):
         Image.open(os.path.join(brand, "Pozadi.png")).convert("RGB").save(

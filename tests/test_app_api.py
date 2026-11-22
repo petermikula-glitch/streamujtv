@@ -72,7 +72,8 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
     assert television["Kategorie"][0]["target"] == {"type": "list", "call": "ivys_category",
                                                     "params": {"cid": "3976"}, "title": "Seriály"}
     tools = _section(api, "tools")["Nástroje"]
-    assert [item["target"]["type"] for item in tools] == ["search", "list", "command", "command", "settings"]
+    assert [item["target"]["type"] for item in tools] == ["search", "list", "command", "command", "settings",
+                                                          "diagnostics"]
     assert tools[1]["target"]["call"] == "downloads"
 
 
@@ -651,7 +652,120 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
         raise app_api.provider.ProviderError("HTTP 500")
 
     monkeypatch.setattr(app_api.provider, "search_catalog", broken)
-    assert "nezdařilo" in api("discover_title", **FILM)["error"]
+    failed = api("discover_title", **FILM)                                   # hledání selhalo: stránka není slepá ulička
+    assert failed["detail"]["title"] == "Pelíšky" and failed["detail"]["plot"].startswith("Hledání na Přehraj.to se nezdařilo")
+    assert "Rodinná komedie." in failed["detail"]["plot"] and failed["rows"] == []
+    assert [(action["title"], action["target"]["type"]) for action in failed["actions"]] == [
+        ("Zkusit znovu", "refresh"), ("Odebrat z oblíbených", "command"), ("Hledat ručně", "search")]
+
+
+def test_title_page_offers_the_series_similar_titles_cast_and_csfd(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    _catalogue_search(monkeypatch, {})
+    detail = dict(FILM_DETAIL, belongs_to_collection={"id": 900}, credits={"cast": [
+        {"id": 5, "name": "Miroslav Donutil", "character": "Šebek", "profile_path": "/d.jpg"},
+        {"id": 6, "name": "Jiří Kodet", "character": "Kraus"}, {"name": "bez čísla"}]})
+    calls = _fake_tmdb(monkeypatch, {
+        "/movie/11": detail,
+        "/collection/900": {"parts": [{"id": 12, "title": "Pelíšky 2", "release_date": "2010-05-05"},
+                                      {"id": 11, "title": "Pelíšky", "release_date": "1999-04-08", "poster_path": "/p.jpg"}]},
+        "/movie/11/recommendations": {"results": [{"id": 21, "title": "Pupendo", "release_date": "2003-03-27",
+                                                   "vote_average": 7.9, "poster_path": "/pu.jpg"}]},
+        "/discover/movie": {"results": [{"id": 31, "title": "Dědictví", "release_date": "1992-01-01"}], "total_pages": 1},
+    })
+    rows = {row["title"]: row["items"] for row in api("discover_title", **FILM)["rows"]}
+    assert list(rows) == ["Celá série", "Podobné tituly", "Hrají"]
+    assert _titles(rows["Celá série"]) == ["Pelíšky", "Pelíšky 2"]             # v pořadí uvedení
+    assert rows["Celá série"][0]["subtitle"].startswith("Právě otevřený")
+    assert rows["Celá série"][1]["target"]["params"]["id"] == 12 and rows["Celá série"][1]["target"]["type"] == "title"
+    assert rows["Podobné tituly"][0]["title"] == "Pupendo" and rows["Podobné tituly"][0]["subtitle"] == "2003 · 79 % · film"
+    actor, second = rows["Hrají"]
+    assert (actor["title"], actor["subtitle"]) == ("Miroslav Donutil", "Šebek")
+    assert actor["image"] == "https://image.tmdb.org/t/p/w185/d.jpg" and second["image"] == "" and second["wide"]
+    assert actor["target"] == {"type": "list", "call": "discover", "params": {"kind": "movie", "cast": "5"},
+                               "title": "Filmy – Miroslav Donutil"}
+    films = api("discover", **actor["target"]["params"])                     # filmy s hercem
+    assert "Dědictví" in _titles(films["items"]) and calls[-1][1]["with_cast"] == "5"
+    alone = api("discover_title", kind="movie", id=5, title="Neznámý film", year=2001)
+    assert alone["rows"] == []                                               # TMDB nic nedodal: žádné prázdné řady
+
+    asked = []
+
+    def find(title, year=0, want_series=False, log=None):
+        asked.append((title, year, want_series))
+        if title == "Pelisky":
+            return {"rating": 91}
+        if title == "Nedostupný":
+            raise app_api.app_discover.csfd.CsfdBlocked("ČSFD vyžaduje ověření")
+        return None
+
+    monkeypatch.setattr(app_api.app_discover.csfd, "find", find)
+    assert api("title_csfd", **FILM) == {"text": "ČSFD 91 %"}                # nejdřív český název, pak původní
+    assert asked == [("Pelíšky", 1999, False), ("Pelisky", 1999, False)]
+    assert api("title_csfd", **FILM) == {"text": "ČSFD 91 %"} and len(asked) == 2    # podruhé z mezipaměti
+    assert api("title_csfd", kind="movie", title="Nedostupný", year=2000) == {"text": ""}
+    assert api("title_csfd", kind="movie", title="", year=2000) == {"text": ""}
+
+
+def test_favourite_that_appears_on_prehrajto_is_announced(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    found = {}
+    asked = _catalogue_search(monkeypatch, found)
+    page = api("discover_title", **FILM)                                     # film na Přehraj.to zatím není
+    favourite = next(action for action in page["actions"] if action["title"] == "Přidat do oblíbených")
+    api(favourite["target"]["call"], **favourite["target"]["params"])
+    api("discover_title", **FILM)                                            # stránka si u oblíbeného zapamatuje „není“
+    before = len(asked)
+    assert api("favorites_check") == {"found": []} and len(asked) > before   # pořád nic
+    before = len(asked)
+    assert api("favorites_check") == {"found": []} and len(asked) == before  # podruhé se hned neptá
+    found["Pelíšky 1999"] = [_web(61, "Pelisky 1999 CZ 1080p", 7000, "4 GB")]
+    assert api("favorites_check", force=True) == {"found": ["Pelíšky"]}
+    card = _section(api, "prehrajto")["Oblíbené"][0]
+    assert card["badges"] == ["Nově na Přehraj.to"]
+    assert api("favorites_check", force=True) == {"found": []}               # známý titul se znovu neohlašuje
+    api("discover_title", **FILM)                                            # otevřením štítek zmizí
+    assert "badges" not in _section(api, "prehrajto")["Oblíbené"][0]
+
+
+def test_web_results_of_one_title_are_grouped(api, monkeypatch):
+    hour = 3600
+    found = {"Pelíšky": [_web(71, "Pelisky 1999 EN 720p", 2 * hour, "1 GB"), _web(72, "Jiny film 2001 CZ", 2 * hour),
+                         _web(73, "Pelisky.1999.CZ.1080p", 2 * hour, "4 GB"), _web(74, "Pelisky 1999 CZ tit", 2 * hour)]}
+    _catalogue_search(monkeypatch, found)
+    rows = {row["title"]: row["items"] for row in api("search", q="Pelíšky")["rows"]}
+    grouped, other = rows["Videa na Přehraj.to"]
+    assert grouped["target"]["params"]["vid"] == _web(73, "")["id"]          # nejlepší verze podle předvoleb
+    assert grouped["subtitle"].startswith("3 verze") and other["title"].startswith("Jiny film")
+    versions = grouped["menu"][-1]
+    assert versions["title"] == "Všechny verze (3)" and versions["target"]["call"] == "prehrajto_search"
+    listed = api("prehrajto_search", **versions["target"]["params"])
+    assert len(listed["items"]) == 3 and listed["next"] is None
+    assert len(api("prehrajto_search", q="Pelíšky")["items"]) == 4            # samotný výpis zůstává po souborech
+
+
+def test_diagnostics_reports_state_and_recent_errors(api, monkeypatch):
+    first = {line["label"]: line for line in api("diagnostics")["lines"]}
+    assert first["Přehraj.to"]["ok"] is False and "nepřihlášeno" in first["Přehraj.to"]["value"]
+    assert first["TMDB"]["ok"] is False and first["iVysílání"]["ok"] is True
+    assert first["Katalog"] == {"label": "Katalog", "value": "0 videí, 0 filmů, 0 seriálů", "ok": None}
+    assert first["Předvolby"]["value"] == "Český dabing, Nejvyšší dostupná"
+
+    api("settings_set", username="a@b.cz", password="heslo", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {"/genre/movie/list": {"genres": [{"id": 35, "name": "Komedie"}]}})
+    monkeypatch.setattr(app_api, "account_status", lambda params: {"message": "Přihlášení v pořádku."})
+    api.raw("neexistuje")                                                    # chyby se pamatují, nejnovější první
+    api("log_error", where="přehrávač", text="Zařízení formát nepřehraje")
+    report = api("diagnostics")
+    lines = {line["label"]: line for line in report["lines"]}
+    assert lines["Přehraj.to"] == {"label": "Přehraj.to", "value": "a@b.cz – Přihlášení v pořádku.", "ok": True}
+    assert lines["TMDB"] == {"label": "TMDB", "value": "klíč platí, 1 filmových žánrů", "ok": True}
+    assert "přehrávač: Zařízení formát nepřehraje" in report["errors"][0]
+    assert "neexistuje: Neznámá akce: neexistuje" in report["errors"][1]
+    for _ in range(40):
+        api.raw("neexistuje")
+    assert len(api("diagnostics")["errors"]) == app_api.ERRORS_KEEP
 
 
 def test_series_page_seasons_episodes_and_continue(api, monkeypatch):

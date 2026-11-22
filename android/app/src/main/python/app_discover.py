@@ -10,6 +10,7 @@ import os
 import threading
 import time
 
+import csfd
 import nameparser
 import provider
 import search_results
@@ -22,6 +23,8 @@ CZECHOSLOVAK = "CZ|SK|XC"        # Česko, Slovensko a někdejší Českoslovens
 AVAILABLE_PREFIX = "avail:"      # kolik verzí titulu se na Přehraj.to naposledy našlo
 AVAILABLE_TTL = 7 * 24 * 3600
 CHECK_BATCH = 20                 # kolik titulů ověří jedno „Ověřit dostupnost“
+FAVORITES_EVERY = 12 * 3600      # hlídání oblíbených nejvýš jednou za tuto dobu
+FAVORITES_BATCH = 6              # a nejvýš tolika titulů najednou
 # seriálové žánry TMDB bez vlastní ilustrace: nejbližší filmová, nebo dlaždice z iVysílání
 GENRE_ART = {10759: "genre_28", 10765: "genre_878", 10768: "genre_10752", 10762: "kids", 10763: "news"}
 TITLE_PREFIX = "title:"          # název a plakát titulu z Objevuj (pro další díl a pokračování)
@@ -88,6 +91,61 @@ def favorite_toggle(params):
     return {"message": message}
 
 
+def _note_favorite(fid, count):
+    """U oblíbeného titulu si pamatuje, kolik verzí bylo naposledy na Přehraj.to; otevřením mizí štítek „Nově“."""
+    with _LOCK:
+        items = load_favorites()
+        entry = items.get(fid)
+        if entry is None:
+            return
+        entry.update(avail=count, checked=int(time.time()))
+        entry.pop("fresh", None)
+        _save_favorites(items)
+
+
+def favorites_check(params):
+    """Hlídání oblíbených: objevil se na Přehraj.to film, který tam minule nebyl? ``{"found": [názvy]}``.
+
+    Spouští aplikace po startu; ptá se nejvýš jednou za FAVORITES_EVERY a jen na pár titulů (jedno
+    hledání na film). Nalezený titul dostane na kartě štítek „Nově“, dokud ho uživatel neotevře.
+    """
+    settings = api._settings()
+    now = int(time.time())
+    if not params.get("force") and now - int(settings.get("favorites_checked") or 0) < FAVORITES_EVERY:
+        return {"found": []}
+    settings["favorites_checked"] = now
+    api._save_settings(settings)
+    waiting = sorted((entry for entry in load_favorites().values()
+                      if not entry.get("key") and entry.get("kind") == "movie" and entry.get("tmdb_id")
+                      and not entry.get("avail")), key=lambda entry: entry.get("checked") or 0)[:FAVORITES_BATCH]
+    if not waiting:
+        return {"found": []}
+    with api._library() as lib:
+        state = api._state(lib)
+    found = []
+    for entry in waiting:
+        try:
+            versions = _find_versions([entry.get("title") or "", entry.get("orig") or ""],
+                                      int(entry.get("year") or 0), None, state, pages=1)
+        except api.ApiError:
+            break  # hledání teď nejde; zkusí se příště
+        good = len([version for version in versions if not version["short"]])
+        with _LOCK:
+            items = load_favorites()
+            current = items.get(entry["id"])
+            if current is None:
+                continue
+            # „nově“ jen u titulu, o kterém se už vědělo, že na Přehraj.to není
+            appeared = bool(good) and current.get("avail") == 0
+            current.update(avail=good, checked=now)
+            if appeared:
+                current["fresh"] = True
+                found.append(current.get("title") or "")
+            _save_favorites(items)
+        _remember_availability("movie", entry["tmdb_id"], good)
+    return {"found": found}
+
+
 def favorite_cards(lib, state, limit=None):
     """Karty oblíbených: položky katalogu se chovají jako v katalogu, tituly z TMDB vedou na své verze."""
     # naposledy přidané první (při stejném čase rozhoduje pořadí přidání)
@@ -138,6 +196,8 @@ def _title_card(kind, tmdb_id, title, year, poster, orig, state, rating=0, favor
     menu = [{"title": "Otevřít", "target": target}, favorite_item(state.get("favorites", {}), entry)]
     known = state.get("available", {}).get("%s:%s" % (kind, tmdb_id))
     badges = ["Přehraj.to"] if known else ["Nenalezeno"] if known == 0 else None
+    if favorite and favorite.get("fresh"):
+        badges = ["Nově na Přehraj.to"]
     return api._card(title, target, subtitle, poster, wide=not poster, menu=menu,
                      icon="series" if kind == "tv" else "movies", badges=badges)
 
@@ -205,7 +265,8 @@ def _list_items(params):
     if category == "recent":
         # novinky: filmy za poslední tři měsíce, u seriálů právě vysílané
         return client.browse(kind, "recent" if kind == "movie" else "on_the_air", page)
-    filters = {"with_genres": params.get("genre") or "", "with_origin_country": params.get("origin") or ""}
+    filters = {"with_genres": params.get("genre") or "", "with_origin_country": params.get("origin") or "",
+               "with_cast": params.get("cast") or ""}
     start, end = search_results.period(str(params.get("year") or ""))
     if start and start == end:
         filters["primary_release_year" if kind == "movie" else "first_air_date_year"] = start
@@ -408,7 +469,8 @@ def _names(params):
 def _detail(params, kind):
     """Údaje o titulu pro jeho stránku; bez TMDB zůstane to, co nese karta."""
     info = {"title": params.get("title") or "", "year": int(params.get("year") or 0), "rating": 0, "genres": [],
-            "plot": "", "poster": params.get("poster") or "", "fanart": "", "runtime": 0}
+            "plot": "", "poster": params.get("poster") or "", "fanart": "", "runtime": 0, "collection_id": 0,
+            "orig_title": params.get("orig") or ""}
     if params.get("id"):
         try:
             found = _tmdb().details(int(params["id"]), want_series=kind == "tv")
@@ -421,6 +483,76 @@ def _detail(params, kind):
         ", ".join(info["genres"][:3])) if part)
     return info, {"title": info["title"], "meta": meta, "plot": info["plot"], "poster": info["poster"],
                   "backdrop": info["fanart"] or info["poster"]}
+
+
+def _related_rows(kind, params, info, state):
+    """Další řady stránky titulu: celá filmová série, podobné tituly a herci. Co TMDB nedodá, chybí."""
+    rows = []
+    if not params.get("id"):
+        return rows
+    try:
+        client = _tmdb()
+    except api.ApiError:
+        return rows
+    tmdb_id = int(params["id"])
+    if kind == "movie" and info.get("collection_id"):
+        try:
+            parts = client.collection_movies(info["collection_id"])
+        except TmdbError:
+            parts = []
+        if len(parts) > 1:
+            cards = []
+            for part in parts:
+                card = _item_card(part, "movie", state)
+                if part["id"] == tmdb_id:
+                    card["subtitle"] = " · ".join(text for text in ("Právě otevřený", card["subtitle"]) if text)
+                cards.append(card)
+            rows.append({"title": "Celá série", "items": cards})
+    try:
+        similar = client.recommendations(kind, tmdb_id)
+    except TmdbError:
+        similar = []
+    if similar:
+        rows.append({"title": "Podobné tituly", "items": [_item_card(item, kind, state) for item in similar[:20]]})
+    try:
+        people = client.cast(tmdb_id, want_series=kind == "tv")
+    except TmdbError:
+        people = []
+    if people:
+        rows.append({"title": "Hrají", "items": [
+            api._card(person["name"], api._target("list", "discover", {"kind": "movie", "cast": str(person["id"])},
+                                                  "Filmy – %s" % person["name"]),
+                      person["character"], person["photo"], wide=not person["photo"], icon="favorites")
+            for person in people]})
+    return rows
+
+
+def title_csfd(params):
+    """Hodnocení ČSFD k titulu (načítá se až po zobrazení stránky): ``{"text": "ČSFD 86 %"}`` nebo prázdné.
+
+    ČSFD dotazy často odmítá; výsledek i neúspěch se proto pamatuje, ať se stránka nezdržuje znovu.
+    """
+    title, year = params.get("title") or "", int(params.get("year") or 0)
+    if not title:
+        return {"text": ""}
+    key = "csfd:%s:%s:%s" % (_kind(params), search_results.normalize(title), year)
+    with api._library() as lib:
+        cached = lib.cache_get(key)
+    if isinstance(cached, dict):
+        return {"text": cached.get("text") or ""}
+    text, ttl = "", 24 * 3600
+    try:
+        found = None
+        for name in [title, params.get("orig") or ""]:
+            if name and not found:
+                found = csfd.find(name, year, want_series=_kind(params) == "tv")
+        if found and found.get("rating"):
+            text, ttl = "ČSFD %d %%" % found["rating"], 7 * 24 * 3600
+    except csfd.CsfdError:
+        ttl = 3600   # odmítnuto nebo nedostupné: zkusit až za chvíli
+    with api._library() as lib:
+        lib.cache_put(key, {"text": text}, ttl)
+    return {"text": text}
 
 
 def discover_title(params):
@@ -453,13 +585,26 @@ def discover_title(params):
             season = next(season for season in seasons if str(season["number"]) == str(last))
             actions.insert(0, {"title": "Pokračovat", "subtitle": season["title"], "target": api._target(
                 "list", "discover_season", dict(params, season=season["number"]), "%s – %s" % (title, season["title"]))})
-        return {"detail": detail, "actions": actions, "rows": [{"title": "Řady", "items": cards}] if cards else []}
+        return {"detail": detail, "actions": actions,
+                "rows": ([{"title": "Řady", "items": cards}] if cards else []) + _related_rows(kind, params, info, state)}
     choice = "movie:%s" % params["id"] if params.get("id") else ""
-    versions = _find_versions(_names(params), info["year"], None, state, info["runtime"], choice=choice)
+    failed = ""
+    try:
+        versions = _find_versions(_names(params), info["year"], None, state, info["runtime"], choice=choice)
+    except api.ApiError as error:
+        # hledání selhalo: stránka zůstane použitelná – údaje, oblíbené, ruční hledání a nový pokus
+        versions, failed = [], str(error)
     good = [version for version in versions if not version["short"]]
-    _remember_availability("movie", params.get("id"), len(good))
     rows = []
-    if good:
+    if failed:
+        actions.insert(0, {"title": "Zkusit znovu", "subtitle": "", "target": api._target("refresh")})
+        detail["plot"] = (failed + "\n\n" + detail["plot"]).strip()
+    else:
+        _remember_availability("movie", params.get("id"), len(good))
+        _note_favorite(entry["id"], len(good))
+    if failed:
+        pass
+    elif good:
         best = _version_card(good[0], state, choice)
         actions.insert(0, {"title": "Přehrát", "subtitle": best["title"], "target": best["target"]})
         rows.append({"title": "Verze na Přehraj.to (%d)" % len(good),
@@ -470,7 +615,7 @@ def discover_title(params):
     rest = [version for version in versions if version["short"]]
     if rest:
         rows.append({"title": "Ukázky a neúplné soubory", "items": [_version_card(v, state, choice) for v in rest]})
-    return {"detail": detail, "actions": actions, "rows": rows}
+    return {"detail": detail, "actions": actions, "rows": rows + _related_rows(kind, params, info, state)}
 
 
 def discover_season(params):
@@ -729,5 +874,5 @@ ACTIONS = {
     "discover": discover, "discover_years": discover_years, "discover_genres": discover_genres,
     "discover_czechoslovak": discover_czechoslovak, "discover_title": discover_title,
     "discover_season": discover_season, "discover_episode": discover_episode, "discover_check": discover_check,
-    "play_next": play_next,
+    "play_next": play_next, "title_csfd": title_csfd, "favorites_check": favorites_check,
 }

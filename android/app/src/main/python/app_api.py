@@ -29,6 +29,7 @@ import db
 import ivysilani
 import nameparser
 import provider
+import search_results
 from tmdb import Tmdb, TmdbError
 
 PAGE = 60               # položek katalogu na stránku výpisu
@@ -38,6 +39,8 @@ IVYS = "ivys:"          # označení pořadu z iVysílání při ukládání poz
 TTL = {"menu": 24 * 3600, "category": 3600, "show": 3600, "episodes": 900, "search": 600, "live": 60}
 
 DOWNLOADS = "downloads.json"   # evidence souborů stažených na disk (jen v aplikaci)
+ERRORS = "errors.json"         # posledních pár chyb pro obrazovku Diagnostika
+ERRORS_KEEP = 15
 VIDEO_SUFFIXES = (".mp4", ".mkv", ".avi", ".webm", ".ts", ".mov", ".m4v", ".mpg", ".mpeg", ".wmv")
 UPDATE_URL = "https://api.github.com/repos/petermikula-glitch/streamujtv/releases?per_page=20"
 UPDATE_TAG = "app-v"           # vydání aplikace: značka app-v<verze>, příloha .apk
@@ -416,6 +419,8 @@ def home(params):
         _card("Doplnit hodnocení a plakáty", _target("command", "enrich", {}), "ČSFD, záložně TMDB", icon="enrich"),
         _card("Nastavení a přihlášení", _target("settings"), settings.get("username") or "Nepřihlášeno",
               icon="settings"),
+        _card("Diagnostika", _target("diagnostics"), "Stav účtu, připojení a poslední chyby",
+              icon="settings:history"),
     ]}]
     # "pending": ve frontě něco čeká – aplikace po startu znovu spustí službu stahování
     return {"sections": [{"id": "prehrajto", "title": "Přehraj.to", "icon": "section_prehrajto", "rows": prehrajto},
@@ -603,7 +608,7 @@ def search(params):
     _remember_search(query)
     rows.extend(app_discover.search_rows(query, state))
     with ThreadPoolExecutor(max_workers=1) as pool:
-        web = pool.submit(prehrajto_search, {"q": query})
+        web = pool.submit(prehrajto_search, {"q": query, "group": True})
         rows.extend(_ivys_search_rows(query))
         try:
             results = web.result()
@@ -663,20 +668,44 @@ def prehrajto_search(params):
         raise ApiError("Hledání na Přehraj.to se nezdařilo. Zkontrolujte přihlášení v Nastavení.")
     except provider.ProviderError:
         raise ApiError("Hledání na Přehraj.to se nezdařilo. Zkuste to znovu.")
-    cards = []
+    cards, groups = [], {}
+    only = params.get("only") or ""
     with _library() as lib:
         state = _state(lib)
         for result in results:
             video = lib.find_video(result["id"])
-            if video:
-                cards.append(_video_card(video, lib.get_meta(video["meta_key"]), state, web_result=result))
-            else:
+            meta = lib.get_meta(video["meta_key"]) if video else None
+            if not video:
                 title = result["title"]
                 video = dict(nameparser.parse(title), id=result["id"], raw_title=title,
                              thumb=result.get("thumb", ""), size=result.get("size", ""))
                 video["quality"] = result.get("quality") or video["quality"]
-                cards.append(_video_card(video, None, state, web_result=result))
-    following = {"call": "prehrajto_search", "params": {"q": query, "page": page + 1, "cursor": cursor}} if cursor else None
+            key = "|".join(str(part) for part in (search_results.normalize(video.get("title") or ""),
+                                                  video.get("year") or 0, video.get("season") or 0,
+                                                  video.get("episode") or 0))
+            if only and key != only:
+                continue
+            card = _video_card(video, meta, state, web_result=result)
+            if params.get("group"):
+                groups.setdefault(key, []).append((_version_rank(video, state["prefs"], state["bad"]), len(cards)))
+            cards.append(card)
+    if params.get("group"):
+        # stejný titul nahraný vícekrát: jedna karta s nejlepší verzí podle předvoleb, ostatní v její nabídce
+        grouped = []
+        for key, members in groups.items():
+            best = min(members)[1]
+            card = cards[best]
+            if len(members) > 1:
+                card = dict(card, subtitle=" · ".join(part for part in ("%d verze" % len(members) if len(members) < 5
+                                                                        else "%d verzí" % len(members),
+                                                                        card["subtitle"]) if part))
+                card["menu"] = list(card.get("menu") or []) + [{"title": "Všechny verze (%d)" % len(members), "target": _target(
+                    "list", "prehrajto_search", {"q": query, "page": page, "cursor": params.get("cursor", ""),
+                                                 "only": key}, card["title"])}]
+            grouped.append((min(index for _rank, index in members), card))
+        cards = [card for _index, card in sorted(grouped, key=lambda item: item[0])]
+    following = {"call": "prehrajto_search", "params": {"q": query, "page": page + 1, "cursor": cursor}} \
+        if cursor and not only else None
     return {"items": cards, "next": following}
 
 
@@ -1391,6 +1420,11 @@ ACTIONS.update({
 })
 
 
+def _register(**actions):
+    """Akce definované až pod tabulkou výše."""
+    ACTIONS.update(actions)
+
+
 def _offline(error):
     """Chyba vznikla výpadkem spojení (i když ji mezitím kód přeložil do srozumitelné hlášky)."""
     for _ in range(6):
@@ -1404,6 +1438,76 @@ def _offline(error):
 
 
 OFFLINE_TEXT = "Nepodařilo se připojit k serveru. Zkontrolujte připojení k internetu a zkuste to znovu."
+
+
+def _errors():
+    try:
+        with open(_path(ERRORS), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError, ApiError):
+        return []
+    return [entry for entry in data if isinstance(entry, dict)] if isinstance(data, list) else []
+
+
+def _remember_error(action, text):
+    """Posledních pár chyb pro Diagnostiku; zápis nesmí nikdy shodit odpověď."""
+    try:
+        entries = ([{"time": int(time.time()), "action": str(action)[:40], "text": str(text)[:300]}] + _errors())
+        with open(_path(ERRORS), "w", encoding="utf-8") as f:
+            json.dump(entries[:ERRORS_KEEP], f, ensure_ascii=False)
+    except (OSError, ApiError):
+        pass
+
+
+def log_error(params):
+    """Chyba, která vznikla v aplikaci mimo logiku (přehrávač): ať je vidět v Diagnostice."""
+    _remember_error(params.get("where") or "aplikace", params.get("text") or "")
+    return {"saved": True}
+
+
+def diagnostics(params):
+    """Stav pro obrazovku Diagnostika: ``{"lines": [{"label", "value", "ok"}], "errors": [text]}``.
+
+    ``ok`` je True/False, nebo None u pouhé informace. Každá zkouška má krátký limit a selhání
+    jedné nezastaví ostatní.
+    """
+    settings = _settings()
+    lines = []
+
+    def add(label, value, ok=None):
+        lines.append({"label": label, "value": value, "ok": ok})
+
+    if not settings.get("username"):
+        add("Přehraj.to", "nepřihlášeno (vyplňte e-mail a heslo v Nastavení)", False)
+    else:
+        try:
+            add("Přehraj.to", "%s – %s" % (settings["username"], account_status({})["message"]), True)
+        except ApiError as error:
+            add("Přehraj.to", "%s – %s" % (settings["username"], error), False)
+    tmdb = Tmdb(settings.get("tmdb_key", ""), timeout=8)   # bez mezipaměti: ověřuje se klíč i spojení
+    if not tmdb.enabled:
+        add("TMDB", "klíč není vyplněný (Objevuj a plakáty nebudou fungovat)", False)
+    else:
+        try:
+            add("TMDB", "klíč platí, %d filmových žánrů" % len(tmdb.genres("movie")), True)
+        except TmdbError as error:
+            add("TMDB", str(error), False)
+    try:
+        add("iVysílání", "dostupné, %d kategorií" % len(_ivys(timeout=8).menu()), True)
+    except ivysilani.IvysilaniError as error:
+        add("iVysílání", str(error), False)
+    with _library() as lib:
+        add("Katalog", "%d videí, %d filmů, %d seriálů" % (
+            lib.count_videos(visible_only=True), lib.count_movies(), len(lib.shows())))
+    downloads = _downloads()
+    add("Stahování", "%s; úložiště: %s" % (_downloads_summary(downloads), settings.get("download_dir") or "automaticky"))
+    last = settings.get("last_sync")
+    add("Synchronizace", time.strftime("%d.%m.%Y %H:%M", time.localtime(last)) if last else "zatím neproběhla")
+    prefs = _prefs(settings)
+    add("Předvolby", "%s, %s" % (dict(LANGUAGE_CHOICES)[prefs["language"]], dict(QUALITY_CHOICES)[prefs["quality"]]))
+    errors = ["%s  %s: %s" % (time.strftime("%d.%m. %H:%M", time.localtime(entry.get("time") or 0)),
+                              entry.get("action") or "", entry.get("text") or "") for entry in _errors()]
+    return {"lines": lines, "errors": errors}
 
 
 def _failure(text, error):
@@ -1425,6 +1529,12 @@ def call(action, params_json="{}"):
             raise ApiError("Neplatné parametry.")
         return json.dumps({"ok": True, "data": handler(params)}, ensure_ascii=False)
     except (ApiError, TmdbError) as error:
+        _remember_error(action, error)
         return _failure(str(error), error)
     except Exception as error:  # noqa: BLE001 – aplikace musí dostat odpověď, ne spadnout
-        return _failure("Neočekávaná chyba: %s: %s" % (type(error).__name__, error), error)
+        text = "Neočekávaná chyba: %s: %s" % (type(error).__name__, error)
+        _remember_error(action, text)
+        return _failure(text, error)
+
+
+_register(diagnostics=diagnostics, log_error=log_error)
