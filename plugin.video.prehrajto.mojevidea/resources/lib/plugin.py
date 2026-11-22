@@ -12,10 +12,17 @@ import ui
 from kodiutils import log, log_error
 
 MODULES = ("ui", "views_catalog", "views_progress", "views_discover", "views_search", "views_collections",
-           "views_tools", "views_kodi", "views_edit", "playback")
+           "views_tools", "views_kodi", "views_edit", "playback", "views_ivysilani")
 
 # akce -> "modul.funkce"
 ROUTES = {
+    # views_ivysilani
+    "ivys_menu": "views_ivysilani.ivys_menu",
+    "ivys_live": "views_ivysilani.ivys_live",
+    "ivys_category": "views_ivysilani.ivys_category",
+    "ivys_show": "views_ivysilani.ivys_show",
+    "ivys_search": "views_ivysilani.ivys_search",
+    "ivys_play": "views_ivysilani.ivys_play",
     # views_catalog
     "root": "views_catalog.root",
     "movies_menu": "views_catalog.movies_menu",

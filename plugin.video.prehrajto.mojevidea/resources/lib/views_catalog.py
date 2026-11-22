@@ -8,7 +8,7 @@ from itertools import islice
 import xbmc
 import xbmcplugin
 
-from kodiutils import keyboard, log, notify, text_viewer
+from kodiutils import keyboard, log, notify, setting_bool, text_viewer
 from search_results import normalize
 import ui
 from ui import (_, add_action, add_dir, _add_item, add_movie, _add_movies, _add_next_page,
@@ -41,6 +41,8 @@ def root(params):
     add_dir(_(30407), "search", "DefaultAddonsSearch.png", context=search_history)
     add_dir(_(30421), "tmdb_catalog", "DefaultMovies.png")
     add_dir(_(30490), "news_menu", "DefaultRecentlyAddedMovies.png")
+    if setting_bool("ivysilani_enabled"):
+        add_dir(_(30579), "ivys_menu", "DefaultAddonPVRClient.png")
     add_dir(_(30420), "my_videos_menu", "DefaultVideo.png")
     add_dir(_(30103), "collections", "DefaultSets.png")
     add_dir(_(30106), "tools", "DefaultAddonProgram.png")

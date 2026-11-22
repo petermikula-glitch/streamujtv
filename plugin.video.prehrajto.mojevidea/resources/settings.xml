@@ -188,6 +188,20 @@
                 </setting>
             </group>
         </category>
+        <category id="ivysilani" label="30579" help="">
+            <group id="1" label="30579">
+                <setting id="ivysilani_enabled" type="boolean" label="30583" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="ivysilani_adaptive" type="boolean" label="30584" help="">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+            </group>
+        </category>
         <category id="library" label="30040" help="">
             <group id="1" label="30040">
                 <setting id="library_path" type="path" label="30041" help="">

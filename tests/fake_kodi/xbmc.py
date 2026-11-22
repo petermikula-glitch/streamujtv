@@ -13,6 +13,13 @@ def getInfoLabel(label):
     return "21.1 (21.1.0) Git:test" if label == "System.BuildVersion" else ""
 
 
+CONDITIONS = set()
+
+
+def getCondVisibility(condition):
+    return condition in CONDITIONS
+
+
 def executebuiltin(cmd, wait=False):
     BUILTINS.append(cmd)
 

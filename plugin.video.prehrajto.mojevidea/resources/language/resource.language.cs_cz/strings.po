@@ -1494,3 +1494,31 @@ msgstr "podle hodnocení"
 msgctxt "#30578"
 msgid "by year"
 msgstr "podle roku"
+
+msgctxt "#30579"
+msgid "iVysílání"
+msgstr "iVysílání"
+
+msgctxt "#30580"
+msgid "Live broadcast"
+msgstr "Živé vysílání"
+
+msgctxt "#30581"
+msgid "Search iVysílání"
+msgstr "Hledat v iVysílání"
+
+msgctxt "#30582"
+msgid "All episodes (%d)"
+msgstr "Všechny díly (%d)"
+
+msgctxt "#30583"
+msgid "Show iVysílání (Czech Television) in the main menu"
+msgstr "Zobrazit iVysílání (Česká televize) v hlavní nabídce"
+
+msgctxt "#30584"
+msgid "Play through InputStream Adaptive when it is installed"
+msgstr "Přehrávat přes InputStream Adaptive, je-li nainstalovaný"
+
+msgctxt "#30586"
+msgid "Search iVysílání: %s"
+msgstr "Hledat v iVysílání: %s"

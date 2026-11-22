@@ -7,7 +7,7 @@ from hashlib import sha256
 import xbmc
 
 import search_results
-from kodiutils import keyboard, notify, setting
+from kodiutils import keyboard, notify, setting, setting_bool
 from nameparser import parse
 from search_results import normalize
 import ui
@@ -530,6 +530,8 @@ def search(params):
     else:
         add_dir(_(30340), "provider_search", "DefaultAddonsSearch.png", q=query, **filters)
         add_dir(_(30372), "tmdb_search", "DefaultAddonsSearch.png", q=title)
+    if setting_bool("ivysilani_enabled"):
+        add_dir(_(30586) % title, "ivys_search", "DefaultAddonPVRClient.png", q=title)
     end("videos", cache=from_keyboard)
 
 

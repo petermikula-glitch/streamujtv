@@ -1,7 +1,7 @@
 # Přehraj.to – Moje videa (doplněk pro Kodi)
 
 Doplněk **Přehraj.to – Moje videa** (`plugin.video.prehrajto.mojevidea`) pro Kodi 19+ (Matrix,
-Nexus, Omega, Piers). Instaluje se z Kodi repozitáře, který je přímo v tomto GitHub repozitáři
+Nexus, Omega, Piers), nově i se sekcí [iVysílání České televize](#ivysílání-české-televize). Instaluje se z Kodi repozitáře, který je přímo v tomto GitHub repozitáři
 (složka `repo/`) – viz [Instalace](#instalace).
 
 Po přihlášení načte **videa nahraná na váš účet** a udělá z nich přehledný katalog filmů
@@ -135,6 +135,32 @@ online pokus.
 zkratka na první nezhlédnutý díl. Při chybě přehrávání doplněk nabídne jiné
 verze stejného filmu nebo epizody ve vlastním katalogu.
 
+## iVysílání České televize
+
+V hlavní nabídce je sekce **iVysílání** s volně dostupnými pořady České televize. Nepotřebuje
+přihlášení a s katalogem vašich videí z Přehraj.to se nemíchá.
+
+- **Živé vysílání** – ČT1, ČT2, ČT24, ČT sport, ČT :D, ČT art a ČT3.
+- **Kategorie** (Seriály, Filmy, Dokumenty…) – pořady, které web iVysílání v dané kategorii právě
+  nabízí. Filmy se přehrají rovnou, seriály a pořady se otevřou po řadách a dílech (40 na stránku).
+- **Hledat v iVysílání** – najde pořady i jednotlivé díly. Stejné hledání nabídne i poslední položka
+  ve výsledcích běžného **Hledat**.
+- **Přehrávání** v HLS s titulky, pokud je pořad má. Je-li nainstalovaný InputStream Adaptive,
+  použije se (lze vypnout v **Nastavení → iVysílání**).
+
+Omezení:
+
+- **Chráněný obsah (DRM) doplněk nepřehrává.** Když Česká televize stream nevydá (práva pro území,
+  vypršelá licence, chráněný zahraniční pořad), zobrazí se její vysvětlení.
+- Část pořadů je dostupná jen z českých IP adres.
+- Kategorie ukazují výběr, který nabízí web, ne úplný seznam všech pořadů – ke všemu ostatnímu
+  vede hledání.
+- Pozici v pořadech z iVysílání si pamatuje Kodi samo; do Rozkoukaných doplňku se nezapisují.
+- Doplněk není oficiálním produktem České televize. Používá stejné veřejné rozhraní jako web
+  iVysílání; když ho ČT změní, může sekce přestat fungovat, dokud se doplněk neupraví.
+
+Sekci skryjete v **Nastavení → iVysílání → Zobrazit iVysílání v hlavní nabídce**.
+
 ## Instalace
 
 Kodi neumí instalovat přímo z gitu, proto je tu **Kodi repozitář**. Nainstaluje se jednou
@@ -202,6 +228,7 @@ Pokud ČSFD automatické dotazy pustí, čtou se z něj strukturovaná data (JSO
 | Část | Soubor | Poznámka |
 |---|---|---|
 | Klient Přehraj.to | `resources/lib/prehrajto.py` | přihlášení, výpis nahraných videí, hledání, odkazy na soubory |
+| iVysílání | `resources/lib/ivysilani.py`, `views_ivysilani.py` | katalog přes GraphQL ČT, adresy HLS streamů, obrazovky |
 | Rozbor názvů | `resources/lib/nameparser.py` | film / seriál, rok, SxxEyy, jazyk, kvalita |
 | Katalog | `resources/lib/db.py`, `catalog.py` | SQLite v profilu doplňku, synchronizace, doplnění metadat |
 | ČSFD / TMDB | `resources/lib/csfd.py`, `tmdb.py` | |

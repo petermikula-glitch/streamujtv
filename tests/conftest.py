@@ -16,7 +16,8 @@ def fixture(name):
 
 
 PLUGIN_MODULES = ("plugin", "ui", "views_catalog", "views_progress", "views_discover", "views_search",
-                  "views_collections", "views_tools", "views_kodi", "views_edit", "playback")
+                  "views_collections", "views_tools", "views_kodi", "views_edit", "playback",
+                  "views_ivysilani")
 
 
 @pytest.fixture
