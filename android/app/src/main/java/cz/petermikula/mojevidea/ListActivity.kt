@@ -15,21 +15,36 @@ import androidx.leanback.widget.FocusHighlight
 import androidx.leanback.widget.OnItemViewClickedListener
 import androidx.leanback.widget.OnItemViewSelectedListener
 import androidx.leanback.widget.VerticalGridPresenter
-import androidx.leanback.widget.VerticalGridView
 import org.json.JSONObject
 
 class ListActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) {
-            val fragment = ListFragment().apply { arguments = intent.extras }
-            supportFragmentManager.beginTransaction().replace(android.R.id.content, fragment).commit()
+        if (savedInstanceState == null) show(poster = false, first = null)
+    }
+
+    /**
+     * Mřížka výpisu v daném tvaru. Počet sloupců se u hotové mřížky měnit nedá (knihovna na tom padá),
+     * proto se pro jiný tvar karet vytvoří mřížka nová a už načtená první stránka se jí předá.
+     */
+    fun show(poster: Boolean, first: JSONObject?) {
+        if (isFinishing || isDestroyed) return
+        val fragment = ListFragment().apply {
+            arguments = Bundle(intent.extras ?: Bundle()).apply { putBoolean(ListFragment.ARG_POSTER, poster) }
+            initial = first
         }
+        supportFragmentManager.beginTransaction().replace(android.R.id.content, fragment).commitAllowingStateLoss()
     }
 }
 
 /** Mřížka karet jednoho výpisu; další stránky se dotahují, jak se uživatel blíží ke konci. */
 class ListFragment : VerticalGridSupportFragment() {
+    companion object {
+        const val ARG_POSTER = "poster"
+    }
+
+    /** První stránka načtená předchozí mřížkou jiného tvaru (viz [ListActivity.show]). */
+    var initial: JSONObject? = null
     private val presenter = CardPresenter(false) { card -> Navigator.menu(requireActivity(), card) { reload() } }
     private var emptyText = "Nic tu není."
     private var emptyArt = EmptyArt.NOTHING
@@ -47,8 +62,12 @@ class ListFragment : VerticalGridSupportFragment() {
         call = arguments?.getString(Navigator.EXTRA_CALL).orEmpty()
         params = JSONObject(arguments?.getString(Navigator.EXTRA_PARAMS) ?: "{}")
         title = arguments?.getString(Navigator.EXTRA_TITLE).orEmpty()
+        // plakáty: 5 sloupců; náhledy na šířku: 4 sloupce – dané předem, za běhu se nemění
+        presenter.poster = arguments?.getBoolean(ARG_POSTER) ?: false
         // bez ztmavení nevybraných karet: obrázky a názvy zůstanou čitelné v celé mřížce
-        gridPresenter = VerticalGridPresenter(FocusHighlight.ZOOM_FACTOR_MEDIUM, false).apply { numberOfColumns = 4 }
+        gridPresenter = VerticalGridPresenter(FocusHighlight.ZOOM_FACTOR_MEDIUM, false).apply {
+            numberOfColumns = if (presenter.poster) 5 else 4
+        }
         adapter = cards
         onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
             (item as? Card)?.let { Navigator.open(requireActivity(), it) { reload() } }
@@ -58,7 +77,13 @@ class ListFragment : VerticalGridSupportFragment() {
             if (index >= cards.size() - 10) loadNext()
             backdrop?.show((item as? Card)?.image.orEmpty())
         })
-        reload()
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        val first = initial
+        initial = null
+        if (first != null) fill(first) else reload()
     }
 
     override fun onActivityCreated(savedInstanceState: Bundle?) {
@@ -101,19 +126,28 @@ class ListFragment : VerticalGridSupportFragment() {
                 }
                 return@call
             }
-            data.optString("title").takeIf { it.isNotEmpty() && title.isNullOrEmpty() }?.let { title = it }
-            val list = Card.list(data.optJSONArray("items"))
-            data.optString("empty").takeIf { it.isNotEmpty() }?.let { emptyText = it }
-            data.optString("empty_art").takeIf { it.isNotEmpty() }?.let { emptyArt = it }
-            // výpis, který se mění sám (stahování), si říká o obnovení po pár sekundách
-            handler.removeCallbacks(refresh)
-            val seconds = data.optInt("refresh")
-            if (seconds > 0) handler.postDelayed(refresh, seconds * 1000L)
-            applyShape(list)
-            cards.setItems(list, Card.DIFF)
-            next = data.optJSONObject("next")
-            showMessage(if (cards.size() == 0) emptyText else "", emptyArt)
+            fill(data)
         }
+    }
+
+    /** Zobrazí první stránku výpisu; karty jiného tvaru, než má tahle mřížka, předá mřížce nové. */
+    private fun fill(data: JSONObject) {
+        val list = Card.list(data.optJSONArray("items"))
+        if (list.isNotEmpty() && CardPresenter.posterShape(list) != presenter.poster) {
+            handler.removeCallbacks(refresh)
+            (activity as? ListActivity)?.show(!presenter.poster, data)
+            return
+        }
+        data.optString("title").takeIf { it.isNotEmpty() && title.isNullOrEmpty() }?.let { title = it }
+        data.optString("empty").takeIf { it.isNotEmpty() }?.let { emptyText = it }
+        data.optString("empty_art").takeIf { it.isNotEmpty() }?.let { emptyArt = it }
+        // výpis, který se mění sám (stahování), si říká o obnovení po pár sekundách
+        handler.removeCallbacks(refresh)
+        val seconds = data.optInt("refresh")
+        if (seconds > 0) handler.postDelayed(refresh, seconds * 1000L)
+        cards.setItems(list, Card.DIFF)
+        next = data.optJSONObject("next")
+        showMessage(if (cards.size() == 0) emptyText else "", emptyArt)
     }
 
     private var message: TextView? = null
@@ -144,17 +178,6 @@ class ListFragment : VerticalGridSupportFragment() {
     override fun onDestroyView() {
         message = null
         super.onDestroyView()
-    }
-
-    /** Plakáty: 5 sloupců; náhledy na šířku: 4 sloupce. Určí se podle první stránky. */
-    private fun applyShape(list: List<Card>) {
-        val poster = CardPresenter.posterShape(list)
-        val columns = if (poster) 5 else 4
-        if (presenter.poster == poster && gridPresenter.numberOfColumns == columns) return
-        if (cards.size() > 0) cards.clear()  // karty starého tvaru se musí vytvořit znovu
-        presenter.poster = poster
-        gridPresenter.numberOfColumns = columns
-        view?.findViewById<VerticalGridView>(androidx.leanback.R.id.browse_grid)?.setNumColumns(columns)
     }
 
     private fun loadNext() {
