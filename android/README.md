@@ -120,15 +120,20 @@ jeho verze; u seriálu přes řady a díly. Potřebuje klíč TMDB v Nastavení.
 otevření titulu, ne u celého seznamu.
 
 **Oblíbené** jsou jen v aplikaci (`favorites.json`): film či seriál z katalogu, nebo titul z Objevuj.
+Na hlavní obrazovce mají filmy a seriály každé svou řadu.
 Přidávají se z nabídky karty (podržení OK).
 
 **Stránka titulu** (`TitleActivity`, data z `discover_title`): údaje z TMDB, tlačítka a řady karet;
 pod verzemi řady Celá série, Podobné tituly a Hrají. Hodnocení ČSFD se dotahuje zvlášť (`title_csfd`).
 Když hledání na Přehraj.to selže, stránka zůstane použitelná a nabídne Zkusit znovu.
-U filmu první tlačítko přehraje nejlepší verzi podle předvoleb a řady nabízejí ostatní verze; u seriálu
-jsou v řadě jeho série a tlačítko Pokračovat vede do naposledy otevřené.
+U filmu první tlačítko přehraje nejlepší verzi podle předvoleb a řady nabízejí ostatní verze. Stránka
+seriálu je stejná: první tlačítko pustí díl, na kterém se skončilo (rozkoukaný, jinak další po
+posledním zhlédnutém, jinak první), a řady jsou díly po řadách (prvních `SEASON_ROWS` řad, další za
+kartou řady). Výběr dílu rovnou hraje nejlepší verzi (`discover_episode_play`); ruční výběr verze je
+v nabídce karty dílu. Tlačítko „Jazyk a kvalita“ otevírá předvolby přehrávání.
 
-**Předvolby přehrávání** (Nastavení): jazyk (český dabing / originál s titulky / jedno) a kvalita
+**Předvolby přehrávání** (dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích, tlačítko na stránce
+titulu a Nastavení; cíl typu `choices`, akce `prefs_choices`): jazyk (český dabing / originál s titulky / jedno) a kvalita
 (nejvyšší / 1080p / 720p / nejmenší soubor). Řídí pořadí verzí (`_version_rank`) i výběr varianty
 souboru při přehrání (`_pick_stream`).
 
