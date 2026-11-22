@@ -33,6 +33,7 @@ class TitleActivity : FragmentActivity() {
     private var loadedOnce = false
     private var meta = ""
     private var csfd = ""
+    private var expanded = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,6 +50,25 @@ class TitleActivity : FragmentActivity() {
             (item as? Card)?.let { Navigator.open(this, it) { load() } }
         }
         supportFragmentManager.beginTransaction().replace(R.id.title_rows, results).commit()
+        val area = findViewById<View>(R.id.title_rows)
+        window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, focused ->
+            var view: View? = focused
+            while (view != null && view !== area) view = view.parent as? View
+            expand(view === area)
+        }
+    }
+
+    /** Výběr v řadách: plakát a popis ustoupí, řady dostanou víc místa. Zpět u tlačítek se vrátí. */
+    private fun expand(rowsFocused: Boolean) {
+        if (rowsFocused == expanded) return
+        expanded = rowsFocused
+        val hidden = if (rowsFocused) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.title_poster).visibility = hidden
+        plot.visibility = hidden
+        val area = findViewById<View>(R.id.title_rows)
+        area.layoutParams = area.layoutParams.apply {
+            height = ((if (rowsFocused) 390 else 250) * resources.displayMetrics.density).toInt()
+        }
     }
 
     override fun onResume() {

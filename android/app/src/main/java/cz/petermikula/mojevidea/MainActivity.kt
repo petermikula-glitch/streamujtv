@@ -80,6 +80,10 @@ class MainFragment : BrowseSupportFragment() {
             orientation = android.widget.LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
             visibility = android.view.View.GONE
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(0xF20B1220.toInt(), 0xE60B1220.toInt(), 0x000B1220),
+            )
         }
         (view as? android.view.ViewGroup)?.addView(strip, android.widget.FrameLayout.LayoutParams(
             (52 * density).toInt(), android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.Gravity.START))

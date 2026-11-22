@@ -70,6 +70,8 @@ class PlayerActivity : FragmentActivity() {
     private var audioChoice = ""
     private var subtitleChoice = ""
     private var userChangedTracks = false
+    private var seenAudio = ""       // co skutečně hrálo při poslední změně stop
+    private var seenSubtitles = ""
 
     /** Čas konce se počítá průběžně, dokud je lišta vidět. */
     private val clock = object : Runnable {
@@ -244,6 +246,8 @@ class PlayerActivity : FragmentActivity() {
         audioChoice = remembered?.optString("audio").orEmpty()
         subtitleChoice = remembered?.optString("subs").orEmpty()
         userChangedTracks = false
+        seenAudio = ""
+        seenSubtitles = ""
         val selection = exo.trackSelectionParameters.buildUpon()
         if (audioChoice.isNotEmpty()) selection.setPreferredAudioLanguages(audioChoice, "cs", "sk")
         else selection.setPreferredAudioLanguages("cs", "sk")
@@ -276,10 +280,13 @@ class PlayerActivity : FragmentActivity() {
                 // rychlé volby jen tam, kde je z čeho vybírat
                 audioButton.visibility = if (groups(C.TRACK_TYPE_AUDIO).size > 1) View.VISIBLE else View.GONE
                 subtitleButton.visibility = if (groups(C.TRACK_TYPE_TEXT).isNotEmpty()) View.VISIBLE else View.GONE
+                val (audio, subtitles) = selectedTracks()
                 if (userChangedTracks) {
                     userChangedTracks = false
-                    rememberTracks()
+                    rememberTracks(audio, subtitles)
                 }
+                seenAudio = audio
+                seenSubtitles = subtitles
             }
 
             override fun onTrackSelectionParametersChanged(parameters: TrackSelectionParameters) {
@@ -374,21 +381,37 @@ class PlayerActivity : FragmentActivity() {
             .show()
     }
 
-    /** Uloží právě zvolený zvuk a titulky, aby je další díl seriálu použil také. */
-    private fun rememberTracks() {
-        if (tracksKey.isEmpty()) return
+    /** Jazyk právě hrající zvukové stopy a titulků (`off` = titulky jsou, ale vypnuté). */
+    private fun selectedTracks(): Pair<String, String> {
         val audio = groups(C.TRACK_TYPE_AUDIO).firstOrNull { it.isSelected }?.getTrackFormat(0)?.language
-            ?.takeIf { it != "und" } ?: audioChoice
+            ?.takeIf { it != "und" }.orEmpty()
         val texts = groups(C.TRACK_TYPE_TEXT)
         val subtitles = when {
-            texts.isEmpty() -> subtitleChoice
+            texts.isEmpty() -> ""
             texts.none { it.isSelected } -> "off"
             else -> texts.first { it.isSelected }.getTrackFormat(0).language?.takeIf { it != "und" }.orEmpty()
         }
-        if (audio == audioChoice && subtitles == subtitleChoice) return
-        audioChoice = audio
-        subtitleChoice = subtitles
-        Api.send("track_prefs", JSONObject().put("key", tracksKey).put("audio", audio).put("subs", subtitles))
+        return audio to subtitles
+    }
+
+    /**
+     * Uloží uživatelovu volbu, aby ji další díl seriálu použil také. Pamatuje se jen to, co se
+     * opravdu změnilo: kdo přepne zvuk, nemá tím zároveň „zvolené“ vypnuté titulky.
+     */
+    private fun rememberTracks(audio: String, subtitles: String) {
+        if (tracksKey.isEmpty()) return
+        var changed = false
+        if (audio != seenAudio && audio.isNotEmpty() && audio != audioChoice) {
+            audioChoice = audio
+            changed = true
+        }
+        if (subtitles != seenSubtitles && subtitles.isNotEmpty() && subtitles != subtitleChoice) {
+            subtitleChoice = subtitles
+            changed = true
+        }
+        if (changed) {
+            Api.send("track_prefs", JSONObject().put("key", tracksKey).put("audio", audioChoice).put("subs", subtitleChoice))
+        }
     }
 
     private fun showEndTime() {

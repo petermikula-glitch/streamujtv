@@ -153,7 +153,9 @@ class ListFragment : VerticalGridSupportFragment() {
         handler.removeCallbacks(refresh)
         val seconds = data.optInt("refresh")
         if (seconds > 0) handler.postDelayed(refresh, seconds * 1000L)
-        cards.setItems(list, Card.DIFF)
+        val same = cards.size() == list.size &&
+            (0 until cards.size()).all { (cards.get(it) as? Card)?.key == list[it].key }
+        cards.setItems(list, if (same) Card.DIFF else null)
         next = data.optJSONObject("next")
         showMessage(if (cards.size() == 0) emptyText else "", emptyArt)
     }

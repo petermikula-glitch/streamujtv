@@ -525,7 +525,7 @@ def _related_rows(kind, params, info, state):
         rows.append({"title": "Hrají", "items": [
             api._card(person["name"], api._target("list", "discover", {"kind": "movie", "cast": str(person["id"])},
                                                   "Filmy – %s" % person["name"]),
-                      person["character"], person["photo"], wide=not person["photo"], icon="favorites")
+                      person["character"], person["photo"], wide=not person["photo"], icon="movies")
             for person in people]})
     return rows
 

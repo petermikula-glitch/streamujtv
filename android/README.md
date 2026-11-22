@@ -77,6 +77,10 @@ Grafiku lze vyměnit bez zásahu do kódu – stačí soubor se správným názv
 | Ikona dlaždice | `res/drawable/ic_tile_<název>.xml` | obrysová, bílá, výřez 24 × 24 |
 | Ikona sekce v postranní nabídce | `res/drawable/ic_section_<název>.xml` | obrysová, bílá, výřez 24 × 24 |
 | Ilustrace prázdné obrazovky | `res/drawable-nodpi/empty_<název>.webp` | 480 × 320 px, průhledné pozadí |
+| Ikona přehrávače | `res/drawable/ic_player_<název>.xml` | obrysová, bílá, výřez 24 × 24 |
+| Avatar profilu | `res/drawable-nodpi/avatar_<název>.webp` | 256 × 256 px, průhledné pozadí |
+| Ilustrace průvodce | `res/drawable-nodpi/guide_<název>.webp` | 400 × 400 px, průhledné pozadí |
+| Výchozí pozadí úvodního panelu | `res/drawable-nodpi/hero_default.webp` | 1280 × 720 px, motiv vpravo |
 
 Kterou dlaždici karta dostane, určuje `app_api.py` polem `icon`. Existuje-li ilustrace
 `tile_<název>`, vyplní dlaždici a název se vykreslí přes její ztmavený okraj; jinak se kreslí tmavě
@@ -118,7 +122,9 @@ otevření titulu, ne u celého seznamu.
 **Oblíbené** jsou jen v aplikaci (`favorites.json`): film či seriál z katalogu, nebo titul z Objevuj.
 Přidávají se z nabídky karty (podržení OK).
 
-**Stránka titulu** (`TitleActivity`, data z `discover_title`): údaje z TMDB, tlačítka a řady karet.
+**Stránka titulu** (`TitleActivity`, data z `discover_title`): údaje z TMDB, tlačítka a řady karet;
+pod verzemi řady Celá série, Podobné tituly a Hrají. Hodnocení ČSFD se dotahuje zvlášť (`title_csfd`).
+Když hledání na Přehraj.to selže, stránka zůstane použitelná a nabídne Zkusit znovu.
 U filmu první tlačítko přehraje nejlepší verzi podle předvoleb a řady nabízejí ostatní verze; u seriálu
 jsou v řadě jeho série a tlačítko Pokračovat vede do naposledy otevřené.
 
@@ -139,6 +145,38 @@ data uvedení): hraje z katalogu nebo z Přehraj.to, a když tam není, nabídne
 sám nespouští. Když nic dalšího není nebo to nejde zjistit, přehrávač se zavře jako dřív.
 Řada **Další díly** na hlavní obrazovce: po dokoukaném dílu z katalogu ten následující a seriály
 z Objevuj, které se naposledy přehrávaly (vedou na stránku seriálu s tlačítkem Pokračovat).
+
+**Úvodní panel a lišta ikon** (`hero` v `app_extras.py`, `HeroPresenter`): sekce s rozkoukaným videem
+začíná velkým panelem s tlačítkem Pokračovat; obrázek je z metadat titulu, jinak výchozí ilustrace.
+Když se postranní nabídka sbalí, zůstane vlevo úzká lišta ikon sekcí.
+
+**Profily** (`app_extras.py`): každý profil má vlastní Rozkoukané, Oblíbené, Moje pořady z iVysílání
+a předvolby přehrávání. Tabulky katalogu se nemění (sdílí je doplněk pro Kodi): osobní stav patří
+vždy aktivnímu profilu a při přepnutí se uloží do `profile_<id>.json` a nahradí stavem druhého
+profilu. Katalog, stažené soubory a přihlášení jsou společné. Při víc profilech se aplikace po startu
+zeptá, kdo se dívá.
+
+**Pokračovat na domovské obrazovce televize** (`WatchNext.kt`, akce `watch_next`): rozkoukaná videa
+aktivního profilu se zapisují do řady „Pokračovat ve sledování“ Android TV. Odkaz otevírá
+`LinkActivity`, která přijme jen přehrání (`play`, `ivys_play`), nic jiného.
+
+**Přehrávač**: horní lišta s názvem, časem konce a rychlou volbou zvuku a titulků; volba se pamatuje
+pro celý seriál (`track_prefs`, klíč `tracks:<seriál>`) a ukládá se jen to, co uživatel opravdu změnil.
+U videa rozkoukaného déle než minutu se přehrávač zeptá, jestli navázat, nebo začít znovu (ne
+u tlačítka Pokračovat). Ikony ovládání přebíjejí výchozí ikony Media3 (`res/values/player_icons.xml`).
+
+**Diagnostika** (Nástroje, akce `diagnostics`): verze, zařízení, úroveň Widevine, stav přihlášení,
+klíče TMDB a iVysílání a posledních pár chyb (`errors.json`; zapisuje je vstupní bod `call` a přehrávač).
+
+**Stažení celé řady**: u seriálu z katalogu dlaždice „Stáhnout N. řadu“ (`download_season`), u řady
+z Objevuj „Stáhnout celou řadu“ (`discover_download_season`, jedno hledání na díl). V Nastavení jde
+zapnout mazání staženého souboru po dokoukání.
+
+**Hlídání oblíbených** (`favorites_check`): film z Objevuj, který na Přehraj.to nebyl, se po startu
+aplikace občas znovu vyhledá (nejvýš jednou za 12 hodin, pár titulů); když se objeví, karta dostane
+štítek „Nově na Přehraj.to“.
+
+**Průvodce prvním spuštěním** (`WelcomeActivity`): účet, klíč TMDB a předvolby; nabídne se jen jednou.
 
 **Dostupnost** titulů z Objevuj se neověřuje hromadně sama: dlaždice „Ověřit dostupnost“ projde jednu
 stránku seznamu (jedno hledání na film) a výsledek se týden pamatuje jako štítek na kartě.

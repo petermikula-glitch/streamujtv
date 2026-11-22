@@ -40,6 +40,7 @@ object WatchNext {
             val resolver = context.contentResolver
             // aplikace vidí jen své položky: smazat a zapsat aktuální stav
             resolver.delete(TvContractCompat.WatchNextPrograms.CONTENT_URI, null, null)
+            var written = 0
             for (item in items) {
                 val link = Uri.Builder().scheme("mojevidea").authority("play")
                     .appendQueryParameter("call", item.optString("call"))
@@ -61,8 +62,11 @@ object WatchNext {
                     program.setPosterArtUri(Uri.parse(it))
                     program.setPosterArtAspectRatio(TvContractCompat.PreviewProgramColumns.ASPECT_RATIO_16_9)
                 }
-                resolver.insert(TvContractCompat.WatchNextPrograms.CONTENT_URI, program.build().toContentValues())
+                if (resolver.insert(TvContractCompat.WatchNextPrograms.CONTENT_URI, program.build().toContentValues()) != null) {
+                    written += 1
+                }
             }
+            Log.i(TAG, "watch next: zapsáno $written z ${items.size}")
         } catch (error: Exception) {
             // zařízení bez televizního poskytovatele, nebo bez oprávnění: řada prostě nebude
             Log.w(TAG, "watch next: ${error.javaClass.simpleName}: ${error.message}")
