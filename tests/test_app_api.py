@@ -331,8 +331,9 @@ def test_connection_failures_are_marked_for_the_offline_illustration(api, monkey
     monkeypatch.setitem(app_api.ACTIONS, "a", unreachable)
     monkeypatch.setitem(app_api.ACTIONS, "b", translated)
     monkeypatch.setitem(app_api.ACTIONS, "c", refused)
-    assert api.raw("a")["offline"] is True
-    assert api.raw("b") == {"ok": False, "error": "Server neodpovídá.", "offline": True}
+    plain = api.raw("a")                                   # uživatel dostane srozumitelnou hlášku, detail jde do logu
+    assert plain["offline"] is True and plain["error"] == app_api.OFFLINE_TEXT and "unreachable" in plain["detail"]
+    assert api.raw("b") == {"ok": False, "error": app_api.OFFLINE_TEXT, "offline": True, "detail": "Server neodpovídá."}
     assert "offline" not in api.raw("c") and "offline" not in api.raw("neexistuje")   # odpověď serveru není výpadek
 
 

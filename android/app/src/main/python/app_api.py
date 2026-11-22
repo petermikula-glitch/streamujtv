@@ -1403,10 +1403,14 @@ def _offline(error):
     return False
 
 
+OFFLINE_TEXT = "Nepodařilo se připojit k serveru. Zkontrolujte připojení k internetu a zkuste to znovu."
+
+
 def _failure(text, error):
     result = {"ok": False, "error": text}
     if _offline(error):
-        result["offline"] = True   # aplikace k hlášce ukáže ilustraci „bez připojení“
+        # srozumitelná hláška a ilustrace „bez připojení“; technický popis jde jen do logu
+        result.update(error=OFFLINE_TEXT, offline=True, detail=text)
     return json.dumps(result, ensure_ascii=False)
 
 

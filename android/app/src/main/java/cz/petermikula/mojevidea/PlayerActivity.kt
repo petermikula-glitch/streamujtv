@@ -174,6 +174,7 @@ class PlayerActivity : FragmentActivity() {
         playerView.player = exo
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
+                if (player !== exo) return  // přehrávač, který už byl nahrazen dalším videem
                 if (state == Player.STATE_READY) {
                     message.visibility = View.GONE
                     spinner.visibility = View.GONE
@@ -188,6 +189,9 @@ class PlayerActivity : FragmentActivity() {
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // Uvolňovaný přehrávač umí ohlásit chybu ještě po nahrazení (např. když se uvolnění
+                // protáhne): nesmí shodit video, které už hraje místo něj.
+                if (player !== exo) return
                 // Zapamatovaná adresa souboru mohla vypršet: jednou ji zahodit a načíst novou.
                 if (!retried && !live && track.isNotEmpty() && !track.startsWith("ivys:")) {
                     retried = true
@@ -323,9 +327,10 @@ class PlayerActivity : FragmentActivity() {
 
     private fun release() {
         handler.removeCallbacks(saver)
-        player?.release()
-        player = null
+        val old = player
+        player = null  // nejdřív odpojit: posluchač uvolňovaného přehrávače už nic neřídí
         playerView.player = null
+        old?.release()
     }
 
     override fun onPause() {

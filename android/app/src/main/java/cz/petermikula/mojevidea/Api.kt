@@ -61,7 +61,8 @@ object Api {
                 ApiResult(json.optJSONObject("data") ?: JSONObject(), null)
             } else {
                 val message = json.optString("error", "Neznámá chyba")
-                Log.w(TAG, "$action: $message")  // dohledatelné přes adb logcat -s MojeVidea
+                // dohledatelné přes adb logcat -s MojeVidea; u výpadku spojení i technický popis
+                Log.w(TAG, "$action: " + json.optString("detail").ifEmpty { message })
                 ApiResult(null, message, json.optBoolean("offline"))
             }
         } catch (error: Throwable) {
