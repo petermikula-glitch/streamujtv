@@ -1084,15 +1084,16 @@ def ivys_play(params):
             "position": point[0] if point and not params.get("restart") else 0, "title": title,
             "track": IVYS + idec, "live": False, "hls": not stream.get("dash"), "dash": bool(stream.get("dash")),
             "drm": stream.get("drm"),
-            # chráněný pořad bez údajů o licenci: přehrávač při chybě ukáže, co rozhraní vrátilo
-            "diagnostic": (stream.get("shape") or "") if stream.get("dash") and not stream.get("drm") else ""}
+            # chráněný pořad: když se nepřehraje, přehrávač ukáže, co rozhraní vrátilo (jen názvy polí)
+            "diagnostic": (stream.get("shape") or "") if stream.get("dash") else ""}
 
 
 def _ivys_stream(client, idec):
     """Stream pořadu; chráněný pořad se zkusí přes vestavěný Widevine zařízení.
 
-    Nejdřív běžný (nechráněný) stream. Když ho ČT nevydá, zkusí se chráněný – ale jen s adresou
-    licence, kterou rozhraní samo vrátí. Územní omezení se neobchází: taková odpověď se rovnou předá.
+    Nejdřív běžný (nechráněný) stream. Když ho ČT nevydá, zkusí se chráněný (DASH). Licenci si
+    přehrávač vyžádá jen na adrese, kterou dodá ČT: v odpovědi rozhraní, nebo přímo v manifestu
+    streamu. Územní omezení se neobchází: taková odpověď se rovnou předá.
     """
     try:
         return client.vod(idec)
@@ -1102,15 +1103,14 @@ def _ivys_stream(client, idec):
         try:
             stream = client.vod(idec, drm=True)
         except ivysilani.NotPlayable as protected:
-            raise ApiError(str(protected))
+            # ani chráněný stream ČT nevydala: k její hlášce přidat označení stavu, ať je vidět proč
+            status = " / ".join(part for part in (getattr(plain, "status", ""), getattr(protected, "status", ""))
+                                if part)
+            raise ApiError(str(protected) + ("\n\n(iVysílání: %s)" % status if status else ""))
         except ivysilani.IvysilaniError as error:
             raise ApiError(str(error))
-        if not stream.get("drm") and ".mpd" not in stream["url"].split("?")[0]:
-            raise ApiError(str(plain))
-        if not stream.get("drm"):
-            # DASH bez údajů o licenci: nechráněný pořad se přehraje, chráněný skončí chybou přehrávače.
-            # Názvy polí odpovědi jdou do logu, aby šlo podporu doladit podle skutečné odpovědi.
-            _STATE["ivys_shape"] = stream.get("shape") or ""
+        # Adresa licence z odpovědi, je-li tam; jinak ji přehrávač vezme z manifestu streamu.
+        stream["drm"] = stream.get("drm") or {"license": ""}
         return stream
     except ivysilani.IvysilaniError as error:
         raise ApiError(str(error))

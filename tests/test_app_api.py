@@ -871,6 +871,16 @@ def test_protected_ivysilani_programme_uses_device_widevine(api, monkeypatch):
     del calls[:]
     monkeypatch.setattr(app_api, "_ivys", lambda timeout=None: Client(protected, ivysilani.NotPlayable("Nelze.")))
     assert api("ivys_play", idec="123")["error"] == "Nelze."
-    hls = dict(stream, url="https://cdn/film/master.m3u8", drm=None)
-    monkeypatch.setattr(app_api, "_ivys", lambda timeout=None: Client(protected, hls))
-    assert "chráněný obsah" in api("ivys_play", idec="123")["error"]     # bez licence a bez DASH nejde nic
+    refused = ivysilani.NotPlayable("Nainstalujte si prohlížeč, který ochranu DRM podporuje.", "DRM_REQUIRED")
+    monkeypatch.setattr(app_api, "_ivys", lambda timeout=None: Client(refused, refused))
+    assert api("ivys_play", idec="123")["error"] == (                    # stav podle ČT je vidět na obrazovce
+        "Nainstalujte si prohlížeč, který ochranu DRM podporuje.\n\n(iVysílání: DRM_REQUIRED / DRM_REQUIRED)")
+
+    # Skutečná adresa streamu nekončí na .mpd a odpověď licenci nést nemusí: pořad se i tak předá
+    # přehrávači jako DASH s Widevine; adresu licence si vezme z manifestu.
+    bare = dict(stream, url="https://cdn/cdn/uri/get/?token=x&streamType=dash&drmOnly=true", drm=None,
+                shape="{streams[{url}]}; adresa: token, streamType, drmOnly=true")
+    monkeypatch.setattr(app_api, "_ivys", lambda timeout=None: Client(protected, bare))
+    result = api("ivys_play", idec="123")
+    assert (result["dash"], result["hls"], result["drm"]) == (True, False, {"license": ""})
+    assert result["diagnostic"] == "{streams[{url}]}; adresa: token, streamType, drmOnly=true"

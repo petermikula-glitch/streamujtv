@@ -149,13 +149,14 @@ class PlayerActivity : FragmentActivity() {
         val item = MediaItem.Builder().setUri(source(stream.optString("url"))).setSubtitleConfigurations(subtitles)
         if (stream.optBoolean("hls")) item.setMimeType(MimeTypes.APPLICATION_M3U8)
         if (stream.optBoolean("dash")) item.setMimeType(MimeTypes.APPLICATION_MPD)
-        // Chráněný pořad: dešifruje vestavěný Widevine zařízení, licenci vydává server,
-        // jehož adresu vrátilo rozhraní poskytovatele. Nic se neukládá ani neobchází.
+        // Chráněný pořad: dešifruje vestavěný Widevine zařízení. Licenci vydává server, jehož adresu
+        // dodal poskytovatel – v odpovědi rozhraní, nebo přímo v manifestu streamu (pak se tu žádná
+        // nenastavuje a přehrávač použije tu z manifestu). Nic se neukládá ani neobchází.
         diagnostic = stream.optString("diagnostic")
-        stream.optJSONObject("drm")?.optString("license")?.takeIf { it.isNotEmpty() }?.let { license ->
-            item.setDrmConfiguration(
-                MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID).setLicenseUri(license).setMultiSession(true).build()
-            )
+        stream.optJSONObject("drm")?.let { drm ->
+            val config = MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID).setMultiSession(true)
+            drm.optString("license").takeIf { it.isNotEmpty() }?.let { config.setLicenseUri(it) }
+            item.setDrmConfiguration(config.build())
         }
 
         release()
@@ -310,8 +311,10 @@ class PlayerActivity : FragmentActivity() {
                 "Chráněný pořad se nepodařilo přehrát: licenci server nevydal, nebo ji zařízení nepřijalo."
             else -> "Přehrávání selhalo."
         }
-        // u chráněného pořadu bez údajů o licenci pomůže vidět, co rozhraní vrátilo (jen názvy polí)
-        val detail = if (diagnostic.isEmpty()) "" else "\n\nDiagnostika: ${diagnostic.take(400)}"
+        // u chráněného pořadu pomůže vidět příčinu a to, co rozhraní vrátilo (jen názvy polí)
+        val causes = generateSequence(error.cause) { it.cause }.take(3)
+            .joinToString(" ← ") { "${it.javaClass.simpleName}: ${it.message.orEmpty().take(90)}" }
+        val detail = if (diagnostic.isEmpty()) "" else "\n\nDiagnostika: $causes\n${diagnostic.take(500)}"
         return "$text\n(${error.errorCodeName})$detail"
     }
 

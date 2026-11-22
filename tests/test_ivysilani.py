@@ -553,6 +553,10 @@ def test_protected_stream_request_and_licence_detection():
     assert "canPlayDrm=false" in ivysilani.Client._stream_query() and "streamType=hls" in ivysilani.Client._stream_query()
     protected = ivysilani.Client._stream_query(True)
     assert "canPlayDrm=true" in protected and "streamType=dash" in protected
+    assert "canPlayDRM=true" in protected                                    # oba zápisy: název není zdokumentovaný
+    refusal = {"message": {"status": {"name": "UNSUPPORTED_GEOLOCATION"}, "labels": {"textLong": "Nelze"}}}
+    assert ivysilani._playability_status(refusal) == "UNSUPPORTED_GEOLOCATION"
+    assert ivysilani._playability_status({}) == "" and ivysilani.NotPlayable("x").status == ""
     # adresa licence se bere jen z odpovědi rozhraní a jen pro Widevine
     listed = {"url": "https://cdn/x.mpd", "drm": [{"type": "fairplay", "laUrl": "https://fp/lic"},
                                                   {"type": "widevine", "laUrl": "https://wv/lic?t=1"}]}

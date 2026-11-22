@@ -76,7 +76,14 @@ class IvysilaniError(Exception):
 
 
 class NotPlayable(IvysilaniError):
-    """Česká televize stream nevydala (práva pro území, vypršelá licence, chráněný obsah)."""
+    """Česká televize stream nevydala (práva pro území, vypršelá licence, chráněný obsah).
+
+    ``status`` je označení stavu z odpovědi rozhraní (např. ``UNSUPPORTED_GEOLOCATION``), je-li známé.
+    """
+
+    def __init__(self, message, status=""):
+        super(NotPlayable, self).__init__(message)
+        self.status = status
 
 
 def _image(images, *names):
@@ -131,6 +138,13 @@ def _playability_message(payload):
             if _text(labels.get(key)):
                 return _text(labels[key])
     return ""
+
+
+def _playability_status(payload):
+    """Označení stavu z chybové odpovědi (``message.status.name``) – pro diagnostiku."""
+    message = payload.get("message") if isinstance(payload, dict) else None
+    status = (message or {}).get("status") if isinstance(message, dict) else None
+    return _text(status.get("name")) if isinstance(status, dict) else ""
 
 
 def drm_license(payload):
@@ -224,7 +238,7 @@ class Client(object):
                 e.close()
             reason = _playability_message(detail)
             if reason:
-                raise NotPlayable(reason) from e
+                raise NotPlayable(reason, _playability_status(detail)) from e
             raise IvysilaniError("iVysílání odpovědělo chybou HTTP %s" % e.code) from e
         except (OSError, http.client.HTTPException) as e:
             raise IvysilaniError("iVysílání je nedostupné: %s" % e) from e
@@ -370,14 +384,20 @@ class Client(object):
     # --- přehrání ---------------------------------------------------------
     @staticmethod
     def _stream_query(drm=False):
-        return "?" + urllib.parse.urlencode({"canPlayDrm": "true" if drm else "false", "quality": "web",
-                                             "streamType": "dash" if drm else "hls"})
+        if drm:
+            # Název parametru není zdokumentovaný a u volných pořadů se oba zápisy chovají stejně,
+            # proto se posílají oba; neznámý parametr rozhraní přechází.
+            return "?" + urllib.parse.urlencode([("canPlayDRM", "true"), ("canPlayDrm", "true"),
+                                                 ("quality", "web"), ("streamType", "dash")])
+        return "?" + urllib.parse.urlencode({"canPlayDrm": "false", "quality": "web", "streamType": "hls"})
 
     def vod(self, idec, drm=False):
         """{"url", "subtitles": [adresy .vtt], "duration", "title"} nebo NotPlayable.
 
         ``drm=True`` žádá o stream DASH i pro chráněné pořady; výsledek pak nese navíc ``"dash": True``,
-        ``"drm"`` (``{"license": adresa}`` nebo ``None``) a ``"shape"`` – názvy polí odpovědi pro diagnostiku.
+        ``"drm"`` (``{"license": adresa}`` nebo ``None``) a ``"shape"`` – názvy polí odpovědi a parametrů
+        adresy streamu pro diagnostiku (bez hodnot). Adresa streamu nekončí na ``.mpd``: manifest se
+        pozná až podle typu obsahu, proto se formát řídí tím, o co se žádalo.
         """
         if not str(idec).isdigit():
             raise IvysilaniError("neplatné číslo pořadu")
@@ -393,8 +413,13 @@ class Client(object):
                 if isinstance(item, dict) and item.get("format") == "vtt" and _text(item.get("url")):
                     subtitles.append(_text(item["url"]))
         playability = data.get("playability") if isinstance(data.get("playability"), dict) else {}
-        protection = {"dash": True, "drm": drm_license(stream) or drm_license(data),
-                      "shape": response_shape(data)} if drm else {}
+        protection = {}
+        if drm:
+            query = urllib.parse.parse_qsl(urllib.parse.urlsplit(_text(stream["url"])).query)
+            # z adresy jen názvy parametrů a příznak drmOnly – žádné tokeny
+            names = ", ".join("%s=%s" % (key, value) if key == "drmOnly" else key for key, value in query)
+            protection = {"dash": True, "drm": drm_license(stream) or drm_license(data),
+                          "shape": "%s; adresa: %s" % (response_shape(data), names)}
         return dict(protection, **{"url": _text(stream["url"]), "subtitles": subtitles,
                 "duration": _int(stream.get("duration") or data.get("duration")), "title": _text(data.get("title")),
                 "show_title": _text(data.get("showTitle")),
