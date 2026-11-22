@@ -173,6 +173,8 @@ class PlayerActivity : FragmentActivity() {
                         resolve()
                     }
                 } else {
+                    // verze, která nejde přehrát ani s novou adresou: příště se nenabídne jako první
+                    if (!live && track.isNotEmpty()) Api.send("play_failed", JSONObject().put("track", track))
                     fail(describe(error))
                 }
             }

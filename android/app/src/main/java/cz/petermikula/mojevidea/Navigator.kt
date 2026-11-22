@@ -36,6 +36,12 @@ object Navigator {
                     .putExtra(EXTRA_PARAMS, target.params.toString())
                     .putExtra(EXTRA_TITLE, target.title.ifEmpty { title })
             )
+            "title" -> activity.startActivity(
+                Intent(activity, TitleActivity::class.java)
+                    .putExtra(EXTRA_CALL, target.call)
+                    .putExtra(EXTRA_PARAMS, target.params.toString())
+                    .putExtra(EXTRA_TITLE, target.title.ifEmpty { title })
+            )
             "play" -> activity.startActivity(
                 Intent(activity, PlayerActivity::class.java)
                     .putExtra(EXTRA_CALL, target.call)

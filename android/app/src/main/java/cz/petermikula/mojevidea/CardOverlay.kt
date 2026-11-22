@@ -7,13 +7,21 @@ import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
 
-/** Vrstva přes obrázek karty: proužek rozkoukanosti dole a značka zhlédnutí v rohu. */
+/** Vrstva přes obrázek karty: štítky (jazyk, kvalita) vlevo nahoře, proužek rozkoukanosti dole a značka zhlédnutí. */
 class CardOverlay(
     private val progress: Int,
     private val watched: Boolean,
     private val density: Float,
     accent: Int,
+    private val badges: List<String> = emptyList(),
 ) : Drawable() {
+    private val chip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE60B1220.toInt() }
+    private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt()
+        textSize = 11 * density
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+    }
+
     private val track = Paint().apply { color = 0xB3000000.toInt() }
     private val bar = Paint().apply { color = accent }
     private val disc = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD90B1220.toInt() }
@@ -27,6 +35,16 @@ class CardOverlay(
 
     override fun draw(canvas: Canvas) {
         val area = bounds
+        var left = area.left + 6 * density
+        val top = area.top + 6 * density
+        val height = 18 * density
+        for (badge in badges) {
+            val width = label.measureText(badge) + 10 * density
+            if (left + width > area.right - 30 * density) break  // místo vpravo patří značce zhlédnutí
+            canvas.drawRoundRect(left, top, left + width, top + height, 3 * density, 3 * density, chip)
+            canvas.drawText(badge, left + 5 * density, top + height - 5 * density, label)
+            left += width + 4 * density
+        }
         if (progress > 0) {
             val height = 4 * density
             val top = area.bottom - height

@@ -30,6 +30,8 @@ class SettingsFragment : GuidedStepSupportFragment() {
         const val BACK = 6L
         const val STORAGE = 7L
         const val UPDATE = 8L
+        const val LANGUAGE = 9L
+        const val QUALITY = 10L
     }
 
     override fun onCreateGuidance(savedInstanceState: Bundle?): GuidanceStylist.Guidance {
@@ -68,6 +70,8 @@ class SettingsFragment : GuidedStepSupportFragment() {
             GuidedAction.Builder(context).id(SYNC).title("Synchronizovat s účtem")
                 .description("Načte nahraná videa a doplní metadata").build()
         )
+        actions.add(GuidedAction.Builder(context).id(LANGUAGE).title("Přehraj.to: jazyk").description("").build())
+        actions.add(GuidedAction.Builder(context).id(QUALITY).title("Přehraj.to: kvalita").description("").build())
         actions.add(
             GuidedAction.Builder(context).id(STORAGE).title("Úložiště pro stahování")
                 .description("Zjišťuji…").build()
@@ -80,6 +84,34 @@ class SettingsFragment : GuidedStepSupportFragment() {
     }
 
     private var downloadDir = ""
+    private var choices = JSONObject()
+
+    /** Předvolba přehrávání z Přehraj.to: popis aktuální hodnoty a výběr z nabídky. */
+    private fun showChoice(id: Long, list: String, key: String) {
+        val options = choices.optJSONArray(list) ?: return
+        val current = choices.optString(key)
+        for (index in 0 until options.length()) {
+            val option = options.optJSONObject(index) ?: continue
+            if (option.optString("id") == current) setText(id, option.optString("title"))
+        }
+    }
+
+    private fun choose(id: Long, list: String, key: String, title: String) {
+        val options = choices.optJSONArray(list) ?: return
+        val names = (0 until options.length()).map { options.optJSONObject(it)?.optString("title").orEmpty() }
+        android.app.AlertDialog.Builder(requireContext())
+            .setTitle(title)
+            .setItems(names.toTypedArray()) { _, which ->
+                val value = options.optJSONObject(which)?.optString("id").orEmpty()
+                Api.call("settings_set", JSONObject().put(key, value)) { result ->
+                    val data = result.data
+                    if (!isAdded || data == null) return@call
+                    choices = data
+                    showChoice(id, list, key)
+                }
+            }
+            .show()
+    }
 
     /** Popis zvoleného úložiště; bez volby se použije první připojený USB disk. */
     private fun showStorage() {
@@ -116,6 +148,9 @@ class SettingsFragment : GuidedStepSupportFragment() {
             setText(TMDB, data.optString("tmdb_key"))
             downloadDir = data.optString("download_dir")
             showStorage()
+            choices = data
+            showChoice(LANGUAGE, "languages", "prefer_language")
+            showChoice(QUALITY, "qualities", "prefer_quality")
             if (data.optBoolean("has_password")) {
                 findActionById(PASSWORD)?.title = "Heslo (uložené – vyplňte jen při změně)"
                 notifyActionChanged(findActionPositionById(PASSWORD))
@@ -152,6 +187,8 @@ class SettingsFragment : GuidedStepSupportFragment() {
             SYNC -> save {
                 Navigator.runCommand(activity, "Synchronizace", Target("command", "sync", JSONObject(), "")) {}
             }
+            LANGUAGE -> choose(LANGUAGE, "languages", "prefer_language", "Čemu dát přednost")
+            QUALITY -> choose(QUALITY, "qualities", "prefer_quality", "Jakou kvalitu přehrávat")
             STORAGE -> chooseStorage()
             UPDATE -> Updater.check(activity, force = true)
             BACK -> activity.finish()

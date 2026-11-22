@@ -100,8 +100,8 @@ class CardPresenter(var poster: Boolean = false, private val onMenu: ((Card) -> 
             view.isLongClickable = false
             view.setOnKeyListener(null)
         }
-        view.mainImageView.foreground = if (card.progress > 0 || card.watched) {
-            CardOverlay(card.progress, card.watched, density, ContextCompat.getColor(context, R.color.accent))
+        view.mainImageView.foreground = if (card.progress > 0 || card.watched || card.badges.isNotEmpty()) {
+            CardOverlay(card.progress, card.watched, density, ContextCompat.getColor(context, R.color.accent), card.badges)
         } else {
             null
         }

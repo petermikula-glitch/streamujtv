@@ -4,19 +4,37 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <EditText
-        android:id="@+id/search_text"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginStart="56dp"
         android:layout_marginTop="27dp"
         android:layout_marginEnd="56dp"
-        android:hint="Hledat film, seriál nebo pořad"
-        android:imeOptions="actionSearch"
-        android:importantForAutofill="no"
-        android:inputType="text"
-        android:singleLine="true"
-        android:textSize="22sp" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <!-- hlasové zadání: psaní ovladačem je pomalé -->
+        <ImageButton
+            android:id="@+id/search_voice"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/button_bg"
+            android:contentDescription="Hledat hlasem"
+            android:src="@drawable/ic_mic" />
+
+        <EditText
+            android:id="@+id/search_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="Hledat film, seriál nebo pořad"
+            android:imeOptions="actionSearch"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:singleLine="true"
+            android:textSize="22sp" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/search_message"

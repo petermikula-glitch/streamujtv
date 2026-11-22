@@ -108,6 +108,25 @@ otevření titulu, ne u celého seznamu.
 **Oblíbené** jsou jen v aplikaci (`favorites.json`): film či seriál z katalogu, nebo titul z Objevuj.
 Přidávají se z nabídky karty (podržení OK).
 
+**Stránka titulu** (`TitleActivity`, data z `discover_title`): údaje z TMDB, tlačítka a řady karet.
+U filmu první tlačítko přehraje nejlepší verzi podle předvoleb a řady nabízejí ostatní verze; u seriálu
+jsou v řadě jeho série a tlačítko Pokračovat vede do naposledy otevřené.
+
+**Předvolby přehrávání** (Nastavení): jazyk (český dabing / originál s titulky / jedno) a kvalita
+(nejvyšší / 1080p / 720p / nejmenší soubor). Řídí pořadí verzí (`_version_rank`) i výběr varianty
+souboru při přehrání (`_pick_stream`).
+
+**Čištění verzí** (`_find_versions`): hledá se více variantami názvu a dvě stránky výsledků; soubor
+výrazně kratší než film (délka z TMDB) jde do řady „Ukázky a neúplné soubory“, kino kopie a verze,
+které se nepodařilo přehrát, až na konec, opakovaně nahraný stejný soubor se slučuje. Verzi, kterou si
+uživatel pustil sám, si aplikace u titulu pamatuje a nabídne ji příště první.
+
+**Dostupnost** titulů z Objevuj se neověřuje hromadně sama: dlaždice „Ověřit dostupnost“ projde jednu
+stránku seznamu (jedno hledání na film) a výsledek se týden pamatuje jako štítek na kartě.
+
+**Hledání**: řada titulů z TMDB (plakáty), naposledy hledané výrazy a hlasové zadání přes systémové
+rozpoznávání řeči (kde ho zařízení má).
+
 ## Chráněné pořady iVysílání
 
 Zahraniční pořady vydává ČT jen s ochranou DRM. Aplikace nejdřív žádá o běžný stream; když ho ČT

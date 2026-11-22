@@ -32,13 +32,14 @@ class Card(
     val icon: String,
     val target: Target,
     val menu: List<MenuItem>,
+    val badges: List<String>,
 ) {
     /** Totožnost karty (kam vede) – nezávisle na tom, jak je zrovna vykreslená. */
     val key: String get() = target.type + "|" + target.call + "|" + target.params + "|" + title
 
     fun sameLook(other: Card): Boolean = title == other.title && subtitle == other.subtitle &&
         image == other.image && progress == other.progress && wide == other.wide && watched == other.watched &&
-        icon == other.icon
+        icon == other.icon && badges == other.badges
 
     companion object {
         /** Při obnově výpisu se překreslí jen změněné karty a výběr zůstane na místě. */
@@ -65,6 +66,9 @@ class Card(
                 icon = json.optString("icon"),
                 target = Target.from(json.optJSONObject("target")),
                 menu = menu,
+                badges = json.optJSONArray("badges")?.let { list ->
+                    (0 until list.length()).map { list.optString(it) }.filter { it.isNotEmpty() }
+                } ?: emptyList(),
             )
         }
 

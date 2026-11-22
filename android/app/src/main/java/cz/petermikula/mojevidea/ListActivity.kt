@@ -83,6 +83,7 @@ class ListFragment : VerticalGridSupportFragment() {
     private fun reload(quiet: Boolean = false) {
         if (loading) return
         loading = true
+        if (!quiet && cards.size() == 0) showMessage("Načítám…")
         Api.call(call, params) { result ->
             loading = false
             if (!isAdded) return@call
