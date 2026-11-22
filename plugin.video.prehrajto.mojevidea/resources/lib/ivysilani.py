@@ -194,16 +194,94 @@ def drm_license(payload):
                     return found
         return ""
 
-    found = walk(payload)
+    found = walk(payload) or _plain_license(payload)
     return {"license": found} if found else None
+
+
+def _plain_license(node):
+    """Záložně: adresa pod polem pojmenovaným po licenci, i když se objekt nehlásí k Widevine.
+
+    Větve označené jinou ochranou (FairPlay, PlayReady) se přeskakují.
+    """
+    if isinstance(node, dict):
+        text = " ".join(str(key).lower() for key in node) + " " + " ".join(
+            value.lower() for value in node.values() if isinstance(value, str))
+        if ("fairplay" in text or "playready" in text) and "widevine" not in text:
+            return ""
+        for key, value in node.items():
+            name = str(key).lower()
+            if isinstance(value, str) and value.startswith("https://") and (
+                    "licen" in name or name in ("laurl", "la_url")):
+                return value
+        for key, value in node.items():
+            if str(key).lower() not in ("subtitles", "analytics", "adocean"):
+                found = _plain_license(value)
+                if found:
+                    return found
+    elif isinstance(node, list):
+        for value in node:
+            found = _plain_license(value)
+            if found:
+                return found
+    return ""
+
+
+PROTECTION_SCHEMES = {"edef8ba9-79d6-4ace-a3c8-27dcd51d21ed": "widevine", "9a04f079-9840-4286-ab92-e65be0885f95": "playready",
+                      "94ce86fb-07ff-4f43-adb8-93d2fa968ca2": "fairplay", "urn:mpeg:dash:mp4protection:2011": "cenc",
+                      "e2719d58-a985-b3c9-781a-b030af78d30e": "clearkey"}
+
+
+def manifest_protection(text):
+    """Co o ochraně říká manifest DASH: ``({"license": adresa} | None, popis pro diagnostiku)``.
+
+    Adresa licence se bere jen z prvku ochrany Widevine (nebo společného), z podprvku či atributu
+    pojmenovaného po licenci. Popis nese jen názvy schémat, prvků a atributů, žádné hodnoty.
+    """
+    import xml.etree.ElementTree as ET
+
+    def local(name):
+        return name.rsplit("}", 1)[-1]
+
+    try:
+        root = ET.fromstring(text)
+    except (ET.ParseError, ValueError, TypeError):
+        return None, "manifest nejde přečíst"
+    license_url, seen = "", []
+    for element in root.iter():
+        if local(element.tag) != "ContentProtection":
+            continue
+        scheme = (element.get("schemeIdUri") or "").lower().replace("urn:uuid:", "")
+        name = PROTECTION_SCHEMES.get(scheme, scheme[-12:] or "?")
+        parts = sorted({local(child.tag) for child in element.iter() if child is not element}
+                       | {"@" + local(key) for key in element.attrib if local(key) not in ("schemeIdUri", "value")})
+        summary = "%s(%s)" % (name, ", ".join(parts)) if parts else name
+        if summary not in seen:
+            seen.append(summary)
+        if license_url or name in ("playready", "fairplay"):
+            continue
+        for node in element.iter():
+            candidates = [(local(key), value) for key, value in node.attrib.items()]
+            candidates.append((local(node.tag), (node.text or "").strip()))
+            for key, value in candidates:
+                key = key.lower()
+                if value.startswith("https://") and ("licen" in key or key in ("laurl", "la_url")):
+                    license_url = value
+                    break
+            if license_url:
+                break
+    if not seen:
+        return None, "manifest bez ochrany"
+    return ({"license": license_url} if license_url else None), "manifest: " + "; ".join(seen)
 
 
 def response_shape(payload, depth=0):
     """Jen názvy polí odpovědi (bez hodnot) – pro diagnostiku, když se chráněný pořad nepřehraje."""
     if isinstance(payload, dict) and depth < 7:
+        # streamy první, měření a reklama vůbec: na obrazovku se vejde jen začátek
         return "{%s}" % ", ".join(
             "%s%s" % (key, response_shape(value, depth + 1) if isinstance(value, (dict, list)) else "")
-            for key, value in sorted(payload.items()) if key not in ("subtitles", "chapters", "audioTracks"))
+            for key, value in sorted(payload.items(), key=lambda item: (item[0] != "streams", item[0]))
+            if key not in ("subtitles", "chapters", "audioTracks", "analytics", "adOcean", "availableQualities"))
     if isinstance(payload, list) and payload and depth < 7:
         return "[%s]" % response_shape(payload[0], depth + 1)
     return ""
@@ -390,6 +468,19 @@ class Client(object):
             return "?" + urllib.parse.urlencode([("canPlayDRM", "true"), ("canPlayDrm", "true"),
                                                  ("quality", "web"), ("streamType", "dash")])
         return "?" + urllib.parse.urlencode({"canPlayDrm": "false", "quality": "web", "streamType": "hls"})
+
+    def manifest(self, url, limit=512 * 1024):
+        """Text manifestu streamu (pro zjištění, co říká o ochraně)."""
+        self.log("ivysilani: GET manifest")
+        try:
+            resp = self.opener.open(urllib.request.Request(url, headers={"User-Agent": USER_AGENT}),
+                                    timeout=self.timeout)
+            try:
+                return resp.read(limit).decode("utf-8", "replace")
+            finally:
+                resp.close()
+        except (OSError, http.client.HTTPException) as e:
+            raise IvysilaniError("manifest se nepodařilo načíst: %s" % e) from e
 
     def vod(self, idec, drm=False):
         """{"url", "subtitles": [adresy .vtt], "duration", "title"} nebo NotPlayable.

@@ -247,12 +247,82 @@ def discover(params):
         state = api._state(lib)
         state["available"] = _availability(lib, kind, [item["id"] for item in items])
     cards = [_item_card(item, kind, state) for item in items]
+    following = {"call": "discover", "params": dict(params, page=page + 1)} if page < pages and cards else None
     if kind == "movie" and cards and len(state["available"]) < len(cards):
         # dostupnost se neověřuje sama u celého seznamu (desítky hledání), jen na požádání
         cards.insert(0, api._card("Ověřit dostupnost", api._target("command", "discover_check", dict(params, page=page)),
                                   "Které z těchto filmů jsou na Přehraj.to", icon="search"))
-    following = {"call": "discover", "params": dict(params, page=page + 1)} if page < pages and cards else None
+    if page == 1:
+        # filtr je vždy první – i u prázdného výběru, aby šel změnit
+        base = {key: value for key, value in params.items() if key != "page"}
+        cards.insert(0, api._card("Filtr", {"type": "filter", "call": "discover_filters", "params": base},
+                                  _filter_summary(base) or "Žánr, období, hodnocení, řazení", icon="settings:search"))
     return {"items": cards, "next": following, "empty": "V tomto výběru TMDB nic nenabízí."}
+
+
+RATINGS = (("", "Vše"), ("60", "60 % a víc"), ("70", "70 % a víc"), ("80", "80 % a víc"))
+SORTS = (("popular", "Nejoblíbenější"), ("rating", "Nejlépe hodnocené"), ("new", "Nejnovější"))
+FILTER_KEYS = ("genre", "year", "origin", "rating", "sort")
+
+
+def _default_sort(params):
+    return {"top_rated": "rating", "recent": "new"}.get(params.get("category") or "", "popular")
+
+
+def _periods():
+    """Roky a desetiletí nabízené ve filtru (stejné jako dlaždice Podle roku)."""
+    year = time.localtime().tm_year
+    values = [(str(value), str(value)) for value in range(year, year - 8, -1)]
+    values += [("%ds" % start, "%d–%d" % (start, start + 9)) for start in range((year - 8) // 10 * 10, 1920, -10)]
+    return values
+
+
+def _filter_summary(params):
+    """Krátký popis nastavených filtrů pro kartu Filtr (bez dotazu na TMDB)."""
+    parts = []
+    if params.get("genre"):
+        parts.append("žánr")
+    if params.get("year"):
+        parts.append(dict(_periods()).get(str(params["year"]), str(params["year"])))
+    if params.get("rating"):
+        parts.append("%s %%+" % params["rating"])
+    if params.get("origin"):
+        parts.append("ČR a SR" if params["origin"] == CZECHOSLOVAK else str(params["origin"]))
+    if params.get("sort") and params["sort"] != _default_sort(params):
+        parts.append(dict(SORTS).get(params["sort"], "").lower())
+    return " · ".join(part for part in parts if part)
+
+
+def discover_filters(params):
+    """Filtry seznamu z Objevuj: ``{"filters": [{"title", "value", "options": [{"title", "params", "current"}]}],
+    "reset": parametry bez filtrů | None}``. Každá volba nese celé parametry pro nový výpis."""
+    kind = _kind(params)
+    base = {key: value for key, value in params.items() if key != "page"}
+
+    def options(key, choices, current):
+        return [{"title": title, "current": str(value) == str(current),
+                 "params": dict({k: v for k, v in base.items() if k != key}, **({key: value} if value else {}))}
+                for value, title in choices]
+
+    try:
+        genres = [(str(genre["id"]), genre["name"]) for genre in _tmdb().genres(kind)
+                  if isinstance(genre, dict) and genre.get("id") and genre.get("name")]
+    except TmdbError:
+        genres = []
+    sort = base.get("sort") or _default_sort(base)
+    groups = [("Žánr", "genre", [("", "Vše")] + genres, base.get("genre") or ""),
+              ("Období", "year", [("", "Vše")] + _periods(), base.get("year") or ""),
+              ("Hodnocení", "rating", list(RATINGS), base.get("rating") or ""),
+              ("Země", "origin", [("", "Vše"), (CZECHOSLOVAK, "Česko a Slovensko")], base.get("origin") or ""),
+              ("Řazení", "sort", list(SORTS), sort)]
+    filters = []
+    for title, key, choices, current in groups:
+        listed = options(key, choices, current)
+        value = next((option["title"] for option in listed if option["current"]), "Vše")
+        filters.append({"title": title, "value": value, "options": listed})
+    active = any(base.get(key) for key in FILTER_KEYS if key != "sort") or sort != _default_sort(base)
+    reset = {key: value for key, value in base.items() if key not in FILTER_KEYS} if active else None
+    return {"title": "Filtr", "filters": filters, "reset": reset}
 
 
 def _list_items(params):
@@ -261,19 +331,35 @@ def _list_items(params):
     page = max(1, api._offset({"offset": params.get("page")}))
     client = _tmdb()
     category = params.get("category") or ""
-    if category in ("popular", "top_rated"):
+    filtered = any(params.get(key) for key in FILTER_KEYS)
+    if category in ("popular", "top_rated") and not filtered:
         return client.browse(kind, category, page)
-    if category == "recent":
+    if category == "recent" and not filtered:
         # novinky: filmy za poslední tři měsíce, u seriálů právě vysílané
         return client.browse(kind, "recent" if kind == "movie" else "on_the_air", page)
+    date = "primary_release_date" if kind == "movie" else "first_air_date"
     filters = {"with_genres": params.get("genre") or "", "with_origin_country": params.get("origin") or "",
                "with_cast": params.get("cast") or ""}
     start, end = search_results.period(str(params.get("year") or ""))
     if start and start == end:
         filters["primary_release_year" if kind == "movie" else "first_air_date_year"] = start
     elif start:
-        field = "primary_release_date" if kind == "movie" else "first_air_date"
-        filters[field + ".gte"], filters[field + ".lte"] = "%d-01-01" % start, "%d-12-31" % end
+        filters[date + ".gte"], filters[date + ".lte"] = "%d-01-01" % start, "%d-12-31" % end
+    rating = str(params.get("rating") or "")
+    if rating.isdigit():
+        # hodnocení od pár hlasujících nic neříká
+        filters["vote_average.gte"], filters["vote_count.gte"] = int(rating) / 10.0, 50
+    sort = params.get("sort") or (_default_sort(params) if filtered else "popular")
+    today = time.strftime("%Y-%m-%d")
+    if sort == "rating":
+        filters["sort_by"] = "vote_average.desc"
+        filters["vote_count.gte"] = 200
+    elif sort == "new":
+        filters["sort_by"] = date + ".desc"
+        filters.setdefault(date + ".lte", today)   # bez titulů ohlášených na příští roky
+    if category == "recent" and kind == "movie" and not start:
+        filters[date + ".gte"] = time.strftime("%Y-%m-%d", time.localtime(time.time() - 90 * 86400))
+        filters.setdefault(date + ".lte", today)
     return client.discover(kind, page, **filters)
 
 
@@ -905,7 +991,54 @@ def search_rows(query, state):
         return []
     cards = [_item_card(item, "tv" if item.get("media_type") == "tv" else "movie", state)
              for item in items[:20] if isinstance(item, dict) and item.get("id")]
-    return [{"title": "Filmy a seriály", "items": cards}] if cards else []
+    rows = [{"title": "Filmy a seriály", "items": cards}] if cards else []
+    try:
+        people, _pages = client.search_people(query)
+    except TmdbError:
+        people = []
+    persons = []
+    for person in people[:12]:
+        photo = person.get("profile_path") or ""
+        persons.append(api._card(
+            person["name"], api._target("list", "discover_person", {"id": person["id"], "name": person["name"]},
+                                        person["name"]),
+            DEPARTMENTS.get(person.get("known_for_department") or "", ""),
+            IMG + "w185" + photo if isinstance(photo, str) and photo.startswith("/") else "",
+            wide=not photo, icon="movies"))
+    if persons:
+        rows.append({"title": "Herci a režiséři", "items": persons})
+    return rows
+
+
+DEPARTMENTS = {"Acting": "herectví", "Directing": "režie", "Writing": "scénář", "Production": "produkce"}
+PERSON_PAGE = 40
+
+
+def discover_person(params):
+    """Filmy a seriály jedné osoby: nejdřív ty, které režírovala, pak ty, kde hraje; od nejnovějších."""
+    person_id = int(params.get("id") or 0)
+    if not person_id:
+        raise api.ApiError("Chybí osoba.")
+    offset = api._offset(params)
+    client = _tmdb()
+    credits, seen = [], set()
+    for role, items in (("režie", client.directing_credits(person_id)), ("", client.acting_credits(person_id))):
+        for item in items:
+            key = (item.get("media_type"), item.get("id"))
+            if key not in seen:
+                seen.add(key)
+                credits.append((role or item.get("character") or "", item))
+    with api._library() as lib:
+        state = api._state(lib)
+    cards = []
+    for role, item in credits[offset:offset + PERSON_PAGE]:
+        card = _item_card(item, "tv" if item.get("media_type") == "tv" else "movie", state)
+        card["subtitle"] = " · ".join(part for part in (card["subtitle"], role) if part)
+        cards.append(card)
+    following = {"call": "discover_person", "params": dict(params, offset=offset + PERSON_PAGE)} \
+        if offset + PERSON_PAGE < len(credits) else None
+    return {"title": params.get("name") or "", "items": cards, "next": following,
+            "empty": "TMDB u této osoby neuvádí žádné filmy ani seriály."}
 
 
 ACTIONS = {
@@ -914,5 +1047,6 @@ ACTIONS = {
     "discover_czechoslovak": discover_czechoslovak, "discover_title": discover_title,
     "discover_season": discover_season, "discover_episode": discover_episode, "discover_check": discover_check,
     "play_next": play_next, "title_csfd": title_csfd, "favorites_check": favorites_check,
-    "discover_download_season": discover_download_season,
+    "discover_download_season": discover_download_season, "discover_filters": discover_filters,
+    "discover_person": discover_person,
 }

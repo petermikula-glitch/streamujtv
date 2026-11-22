@@ -27,10 +27,14 @@ class ListActivity : FragmentActivity() {
      * Mřížka výpisu v daném tvaru. Počet sloupců se u hotové mřížky měnit nedá (knihovna na tom padá),
      * proto se pro jiný tvar karet vytvoří mřížka nová a už načtená první stránka se jí předá.
      */
-    fun show(poster: Boolean, first: JSONObject?) {
+    fun show(poster: Boolean, first: JSONObject?, params: JSONObject? = null) {
         if (isFinishing || isDestroyed) return
         val fragment = ListFragment().apply {
-            arguments = Bundle(intent.extras ?: Bundle()).apply { putBoolean(ListFragment.ARG_POSTER, poster) }
+            arguments = Bundle(intent.extras ?: Bundle()).apply {
+                putBoolean(ListFragment.ARG_POSTER, poster)
+                // výpis se změněným filtrem: nová mřížka pokračuje s jeho parametry
+                if (params != null) putString(Navigator.EXTRA_PARAMS, params.toString())
+            }
             initial = first
         }
         supportFragmentManager.beginTransaction().replace(android.R.id.content, fragment).commitAllowingStateLoss()
@@ -71,7 +75,9 @@ class ListFragment : VerticalGridSupportFragment() {
         }
         adapter = cards
         onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
-            (item as? Card)?.let { Navigator.open(requireActivity(), it) { reload() } }
+            val card = item as? Card ?: return@OnItemViewClickedListener
+            if (card.target.type == "filter") showFilters(card.target)
+            else Navigator.open(requireActivity(), card) { reload() }
         }
         setOnItemViewSelectedListener(OnItemViewSelectedListener { _, item, _, _ ->
             val index = cards.indexOf(item)
@@ -143,7 +149,7 @@ class ListFragment : VerticalGridSupportFragment() {
         loaded = true
         if (list.isNotEmpty() && CardPresenter.posterShape(list) != presenter.poster) {
             handler.removeCallbacks(refresh)
-            (activity as? ListActivity)?.show(!presenter.poster, data)
+            (activity as? ListActivity)?.show(!presenter.poster, data, params)
             return
         }
         data.optString("title").takeIf { it.isNotEmpty() && title.isNullOrEmpty() }?.let { title = it }
@@ -211,6 +217,52 @@ class ListFragment : VerticalGridSupportFragment() {
         message = null
         again = null
         super.onDestroyView()
+    }
+
+    /** Filtr výpisu: nabídka filtrů s jejich hodnotami, po výběru hodnoty se výpis načte znovu. */
+    private fun showFilters(target: Target) {
+        Api.call(target.call, target.params) { result ->
+            if (!isAdded) return@call
+            val data = result.data
+            val filters = data?.optJSONArray("filters")
+            if (data == null || filters == null) {
+                Toast.makeText(requireContext(), result.error ?: "Filtr se nepodařilo načíst.", Toast.LENGTH_LONG).show()
+                return@call
+            }
+            val groups = (0 until filters.length()).mapNotNull { filters.optJSONObject(it) }
+            val reset = data.optJSONObject("reset")
+            val names = groups.map { "${it.optString("title")}: ${it.optString("value")}" } +
+                (if (reset != null) listOf("Zrušit filtry") else emptyList())
+            android.app.AlertDialog.Builder(requireContext())
+                .setTitle(data.optString("title").ifEmpty { "Filtr" })
+                .setItems(names.toTypedArray()) { _, which ->
+                    if (which >= groups.size) applyFilter(reset ?: return@setItems) else chooseFilter(groups[which])
+                }
+                .show()
+        }
+    }
+
+    private fun chooseFilter(group: JSONObject) {
+        val list = group.optJSONArray("options") ?: return
+        val options = (0 until list.length()).mapNotNull { list.optJSONObject(it) }
+        android.app.AlertDialog.Builder(requireContext())
+            .setTitle(group.optString("title"))
+            .setSingleChoiceItems(options.map { it.optString("title") }.toTypedArray(),
+                options.indexOfFirst { it.optBoolean("current") }) { dialog, which ->
+                dialog.dismiss()
+                options[which].optJSONObject("params")?.let { applyFilter(it) }
+            }
+            .show()
+    }
+
+    /** Stejný výpis s jinými parametry, od začátku. */
+    private fun applyFilter(chosen: JSONObject) {
+        handler.removeCallbacks(refresh)
+        params = JSONObject(chosen.toString())
+        next = null
+        loaded = false
+        loading = false
+        reload()
     }
 
     private fun loadNext() {

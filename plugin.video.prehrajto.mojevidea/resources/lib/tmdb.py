@@ -203,6 +203,17 @@ class Tmdb(object):
         return sorted(entries.values(), key=lambda item: item.get("release_date") or item.get("first_air_date") or "",
                       reverse=True)
 
+    def directing_credits(self, person_id):
+        """Filmy a seriály, které osoba režírovala (stejný dotaz jako ``acting_credits``)."""
+        data = self._get("/person/%d/combined_credits" % person_id)
+        entries = {}
+        for item in data.get("crew") or []:
+            key = item.get("media_type"), item.get("id")
+            if item.get("job") == "Director" and key[0] in ("movie", "tv") and key[1] and not item.get("adult"):
+                entries.setdefault(key, item)
+        return sorted(entries.values(), key=lambda item: item.get("release_date") or item.get("first_air_date") or "",
+                      reverse=True)
+
     def search(self, query, want_series=False):
         """Seznam kandidátů pro ruční výběr: [{id, title, year, orig_title}]."""
         data = self._get("/search/" + ("tv" if want_series else "movie"), query=query,

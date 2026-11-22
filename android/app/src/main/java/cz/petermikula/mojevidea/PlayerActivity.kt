@@ -61,6 +61,7 @@ class PlayerActivity : FragmentActivity() {
     private var diagnostic = ""
     private var started = false
     private var retried = false
+    private var inspected = false   // u chráněného pořadu už proběhl pokus najít adresu licence v manifestu
     private lateinit var top: View
     private lateinit var endTime: TextView
     private lateinit var audioButton: ImageButton
@@ -163,7 +164,8 @@ class PlayerActivity : FragmentActivity() {
     private fun play(stream: JSONObject) {
         val position = (stream.optDouble("position", 0.0) * 1000).toLong()
         val asks = position >= ASK_RESUME_AFTER_MS && !stream.optBoolean("live") &&
-            !params.optBoolean("resume") && !params.optBoolean("fresh") && !params.optBoolean("online")
+            !params.optBoolean("resume") && !params.optBoolean("fresh") && !params.optBoolean("online") &&
+            !params.optBoolean("inspect")
         if (!asks) {
             begin(stream, position)
             return
@@ -298,6 +300,14 @@ class PlayerActivity : FragmentActivity() {
                 // Uvolňovaný přehrávač umí ohlásit chybu ještě po nahrazení (např. když se uvolnění
                 // protáhne): nesmí shodit video, které už hraje místo něj.
                 if (player !== exo) return
+                if (!inspected && track.startsWith("ivys:") && error.errorCode in 6000..6999) {
+                    // Chráněný pořad a přehrávač licenci nezískal: logika se podívá do manifestu sama
+                    // (zná víc zápisů adresy licence) a zkusí se to ještě jednou.
+                    inspected = true
+                    params.put("inspect", true)
+                    resolve()
+                    return
+                }
                 // Zapamatovaná adresa souboru mohla vypršet: jednou ji zahodit a načíst novou.
                 if (!retried && !live && track.isNotEmpty() && !track.startsWith("ivys:")) {
                     retried = true
@@ -478,6 +488,7 @@ class PlayerActivity : FragmentActivity() {
             params = target.params
             started = false
             retried = false
+            inspected = false
             resolve()
         } else {
             Navigator.open(this, target, "")
@@ -508,9 +519,14 @@ class PlayerActivity : FragmentActivity() {
             else -> "Přehrávání selhalo."
         }
         // u chráněného pořadu pomůže vidět příčinu a to, co rozhraní vrátilo (jen názvy polí)
-        val causes = generateSequence(error.cause) { it.cause }.take(3)
-            .joinToString(" ← ") { "${it.javaClass.simpleName}: ${it.message.orEmpty().take(90)}" }
-        val detail = if (diagnostic.isEmpty()) "" else "\n\nDiagnostika: $causes\n${diagnostic.take(500)}"
+        val chain = generateSequence(error.cause) { it.cause }.take(4).toList()
+        // nejhlubší příčina říká nejvíc; obalující výjimky jen opakují její text
+        val cause = chain.lastOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty().take(120)}" }.orEmpty()
+        val detail = if (diagnostic.isEmpty()) "" else "\n\nDiagnostika: $cause\n${diagnostic.take(600)}"
+        if (chain.any { it.message.orEmpty().contains("No license URL") }) {
+            return "Česká televize k tomuto pořadu neposlala adresu licenčního serveru – není v odpovědi " +
+                "rozhraní ani v popisu streamu. Bez ní aplikace chráněný pořad přehrát neumí.$detail"
+        }
         return "$text\n(${error.errorCodeName})$detail"
     }
 

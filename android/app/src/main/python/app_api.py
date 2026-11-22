@@ -148,7 +148,7 @@ def _cached(key, ttl, load):
 # Karty
 # ---------------------------------------------------------------------------
 
-POSTER_LISTS = ("discover", "favorites", "movies", "shows", "profiles", "profile_avatars")
+POSTER_LISTS = ("discover", "favorites", "movies", "shows", "profiles", "profile_avatars", "discover_person")
 
 
 def _target(kind, call=None, params=None, title=None):
@@ -546,27 +546,92 @@ def _next(call, params, offset, shown, total):
     return None
 
 
+ORDERS = (("title", "Podle názvu"), ("added", "Nově přidané"), ("rating", "Podle hodnocení"), ("year", "Podle roku"))
+CATALOG_RATINGS = (("", "Vše"), ("60", "60 % a víc"), ("70", "70 % a víc"), ("80", "80 % a víc"))
+
+
+def _catalog_filter(params):
+    """Platné filtry výpisu vlastního katalogu: řazení, žánr, desetiletí, nejnižší hodnocení."""
+    order = params.get("order") if params.get("order") in dict(ORDERS) else "title"
+    chosen = {"order": order}
+    if params.get("genre"):
+        chosen["genre"] = str(params["genre"])
+    if str(params.get("decade") or "").isdigit():
+        chosen["decade"] = str(params["decade"])
+    if str(params.get("rating") or "").isdigit():
+        chosen["rating"] = str(params["rating"])
+    return chosen
+
+
+def _catalog_filter_card(call, chosen):
+    parts = [chosen.get("genre") or "", "%s–%d" % (chosen["decade"], int(chosen["decade"]) + 9) if chosen.get("decade") else "",
+             "%s %%+" % chosen["rating"] if chosen.get("rating") else ""]
+    summary = " · ".join(part for part in parts if part)
+    return _card("Filtr", {"type": "filter", "call": "catalog_filters", "params": dict(chosen, list=call)},
+                 summary or "Žánr, období, hodnocení, řazení", icon="settings:search")
+
+
+def catalog_filters(params):
+    """Filtry výpisu filmů nebo seriálů z vlastního katalogu (stejný tvar jako ``discover_filters``)."""
+    call = "shows" if params.get("list") == "shows" else "movies"
+    kind = "show" if call == "shows" else "movie"
+    chosen = _catalog_filter(params)
+    with _library() as lib:
+        genres = [("", "Vše")] + [(name, "%s (%d)" % (name, count)) for name, count in lib.genres(kind)]
+        decades = [("", "Vše")] + [(str(decade), "%d–%d (%d)" % (decade, decade + 9, count))
+                                   for decade, count in lib.decades(kind) if decade]
+
+    def options(key, choices, current):
+        return [{"title": title, "current": str(value) == str(current),
+                 "params": dict({k: v for k, v in chosen.items() if k != key}, **({key: value} if value else {}))}
+                for value, title in choices]
+
+    groups = [("Žánr", "genre", genres, chosen.get("genre", ""))]
+    if call == "movies":
+        groups.append(("Období", "decade", decades, chosen.get("decade", "")))
+    groups += [("Hodnocení", "rating", list(CATALOG_RATINGS), chosen.get("rating", "")),
+               ("Řazení", "order", list(ORDERS), chosen["order"])]
+    filters = []
+    for title, key, choices, current in groups:
+        listed = options(key, choices, current)
+        filters.append({"title": title, "value": next((o["title"] for o in listed if o["current"]), "Vše"),
+                        "options": listed})
+    active = any(chosen.get(key) for key in ("genre", "decade", "rating"))
+    return {"title": "Filtr", "filters": filters, "reset": {"order": chosen["order"]} if active else None}
+
+
 def movies(params):
-    order = params.get("order") if params.get("order") in ("title", "added", "rating", "year") else "title"
+    chosen = _catalog_filter(params)
     offset = _offset(params)
+    decade = int(chosen["decade"]) if chosen.get("decade") else None
+    limits = {"genre": chosen.get("genre"), "year_from": decade, "year_to": decade + 9 if decade is not None else None,
+              "min_rating": int(chosen["rating"]) if chosen.get("rating") else None}
     with _library() as lib:
         state = _state(lib)
-        total = lib.count_movies()
-        items = lib.movies(order=order, limit=PAGE, offset=offset)
+        total = lib.count_movies(**limits)
+        items = lib.movies(order=chosen["order"], limit=PAGE, offset=offset, **limits)
         versions = lib.videos_grouped([m["key"] for m in items if (m.get("video_count") or 1) > 1])
         cards = [_movie_card(meta, state, versions) for meta in items]
-    return {"items": cards, "next": _next("movies", {"order": order}, offset, len(cards), total)}
+    following = _next("movies", chosen, offset, len(cards), total)
+    if not offset:
+        cards.insert(0, _catalog_filter_card("movies", chosen))
+    return {"items": cards, "next": following}
 
 
 def shows(params):
-    order = params.get("order") if params.get("order") in ("title", "added", "rating", "year") else "title"
+    chosen = _catalog_filter(params)
+    chosen.pop("decade", None)
     offset = _offset(params)
     with _library() as lib:
-        items = lib.shows(order=order)
+        items = lib.shows(genre=chosen.get("genre"), min_rating=int(chosen["rating"]) if chosen.get("rating") else None,
+                          order=chosen["order"])
         state = _state(lib)
     page = items[offset:offset + PAGE]
-    return {"items": [_show_card(meta, state) for meta in page],
-            "next": _next("shows", {"order": order}, offset, len(page), len(items))}
+    cards = [_show_card(meta, state) for meta in page]
+    following = _next("shows", chosen, offset, len(page), len(items))
+    if not offset:
+        cards.insert(0, _catalog_filter_card("shows", chosen))
+    return {"items": cards, "next": following}
 
 
 def show(params):
@@ -1136,7 +1201,7 @@ def ivys_play(params):
         return {"url": stream["url"], "headers": {}, "subtitles": [], "position": 0, "title": stream["title"],
                 "track": "", "live": True, "hls": True}
     idec = str(params.get("idec") or "") or _ivys_call(lambda: client.show(str(params.get("show") or "")))["idec"]
-    stream = _ivys_stream(client, idec)
+    stream = _ivys_stream(client, idec, inspect=bool(params.get("inspect")))
     with _library() as lib:
         lib.ivys_touch(idec, stream["show_id"], stream["episode_title"] or stream["title"], stream["show_title"],
                        stream["image"])
@@ -1151,7 +1216,7 @@ def ivys_play(params):
             "diagnostic": (stream.get("shape") or "") if stream.get("dash") else ""}
 
 
-def _ivys_stream(client, idec):
+def _ivys_stream(client, idec, inspect=False):
     """Stream pořadu; chráněný pořad se zkusí přes vestavěný Widevine zařízení.
 
     Nejdřív běžný (nechráněný) stream. Když ho ČT nevydá, zkusí se chráněný (DASH). Licenci si
@@ -1172,6 +1237,19 @@ def _ivys_stream(client, idec):
             raise ApiError(str(protected) + ("\n\n(iVysílání: %s)" % status if status else ""))
         except ivysilani.IvysilaniError as error:
             raise ApiError(str(error))
+        if inspect and not stream.get("drm"):
+            # Přehrávač adresu licence nenašel: podívat se do manifestu samy (umí víc zápisů než
+            # přehrávač) a ke zprávě přidat, co manifest o ochraně říká.
+            try:
+                found, summary = ivysilani.manifest_protection(client.manifest(stream["url"]))
+            except ivysilani.IvysilaniError as error:
+                found, summary = None, str(error)
+            shape = "%s; %s" % (summary, stream.get("shape") or "")
+            try:
+                stream = client.vod(idec, drm=True)   # čerstvá adresa pro přehrávač
+            except ivysilani.IvysilaniError:
+                pass
+            stream["drm"], stream["shape"] = stream.get("drm") or found, shape
         # Adresa licence z odpovědi, je-li tam; jinak ji přehrávač vezme z manifestu streamu.
         stream["drm"] = stream.get("drm") or {"license": ""}
         return stream
@@ -1573,4 +1651,4 @@ def call(action, params_json="{}"):
         return _failure(text, error)
 
 
-_register(diagnostics=diagnostics, log_error=log_error)
+_register(diagnostics=diagnostics, log_error=log_error, catalog_filters=catalog_filters)
