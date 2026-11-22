@@ -20,7 +20,7 @@ import org.json.JSONObject
 class ListActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) show(poster = false, first = null)
+        if (savedInstanceState == null) show(intent.getBooleanExtra(Navigator.EXTRA_POSTER, false), first = null)
     }
 
     /**
@@ -55,6 +55,7 @@ class ListFragment : VerticalGridSupportFragment() {
     private var params = JSONObject()
     private var next: JSONObject? = null
     private var loading = false
+    private var loaded = false  // už se zobrazil skutečný obsah (ne jen zástupné karty)
     private var backdrop: Backdrop? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -109,17 +110,23 @@ class ListFragment : VerticalGridSupportFragment() {
     private fun reload(quiet: Boolean = false) {
         if (loading) return
         loading = true
-        if (!quiet && cards.size() == 0) showMessage("Načítám…")
+        if (!loaded) {
+            // místo textu „Načítám…“ obrysy karet v budoucím tvaru
+            showMessage("")
+            cards.setItems(Card.skeletons(if (presenter.poster) 10 else 8), null)
+        }
         Api.call(call, params) { result ->
             loading = false
             if (!isAdded) return@call
             val data = result.data
             if (data == null) {
                 // prázdná obrazovka s chybou musí říct, co se stalo; přes plný výpis stačí krátké upozornění
-                if (cards.size() == 0) {
+                if (!loaded) {
+                    cards.clear()
                     showMessage(
-                        (result.error ?: "Výpis se nepodařilo načíst.") + "\n\nZkuste to znovu tlačítkem Zpět.",
+                        result.error ?: "Výpis se nepodařilo načíst.",
                         if (result.offline) EmptyArt.OFFLINE else "",
+                        retry = true,
                     )
                 } else if (!quiet) {
                     Toast.makeText(requireContext(), result.error, Toast.LENGTH_LONG).show()
@@ -133,6 +140,7 @@ class ListFragment : VerticalGridSupportFragment() {
     /** Zobrazí první stránku výpisu; karty jiného tvaru, než má tahle mřížka, předá mřížce nové. */
     private fun fill(data: JSONObject) {
         val list = Card.list(data.optJSONArray("items"))
+        loaded = true
         if (list.isNotEmpty() && CardPresenter.posterShape(list) != presenter.poster) {
             handler.removeCallbacks(refresh)
             (activity as? ListActivity)?.show(!presenter.poster, data)
@@ -151,23 +159,45 @@ class ListFragment : VerticalGridSupportFragment() {
     }
 
     private var message: TextView? = null
+    private var again: android.widget.Button? = null
 
-    /** Text uprostřed obrazovky (prázdný výpis, chyba); prázdný text ho skryje. */
-    private fun showMessage(text: String, art: String = "") {
+    /** Text uprostřed obrazovky (prázdný výpis, chyba); prázdný text ho skryje. U chyby i „Zkusit znovu“. */
+    private fun showMessage(text: String, art: String = "", retry: Boolean = false) {
         val root = view as? ViewGroup ?: return
-        val label = message ?: TextView(requireContext()).apply {
-            gravity = Gravity.CENTER
-            textSize = 20f
-            setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
-            val side = (96 * resources.displayMetrics.density).toInt()
-            setPadding(side, 0, side, 0)
-            root.addView(this, FrameLayout.LayoutParams(
+        if (message == null) {
+            val context = requireContext()
+            val density = resources.displayMetrics.density
+            val box = android.widget.LinearLayout(context).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+            }
+            val label = TextView(context).apply {
+                gravity = Gravity.CENTER
+                textSize = 20f
+                setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
+                val side = (96 * density).toInt()
+                setPadding(side, 0, side, 0)
+            }
+            val button = android.widget.Button(android.view.ContextThemeWrapper(context, R.style.TitleButton), null, 0).apply {
+                this.text = "Zkusit znovu"
+                setOnClickListener { reload() }
+            }
+            box.addView(label)
+            box.addView(button, android.widget.LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = (20 * density).toInt()
+            })
+            root.addView(box, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-            message = this
+            message = label
+            again = button
         }
+        val label = message ?: return
         label.text = text
         EmptyArt.show(label, if (text.isEmpty()) "" else art)
-        label.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+        (label.parent as? View)?.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+        again?.visibility = if (retry && text.isNotEmpty()) View.VISIBLE else View.GONE
+        if (retry && text.isNotEmpty()) again?.requestFocus()
     }
 
     override fun onPause() {
@@ -177,6 +207,7 @@ class ListFragment : VerticalGridSupportFragment() {
 
     override fun onDestroyView() {
         message = null
+        again = null
         super.onDestroyView()
     }
 

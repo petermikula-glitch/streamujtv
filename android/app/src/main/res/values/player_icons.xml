@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ovládání přehrávače kreslí vlastní sada ikon; názvy přebíjejí výchozí ikony knihovny Media3. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="UnusedResources">
+    <drawable name="exo_styled_controls_play">@drawable/ic_player_play</drawable>
+    <drawable name="exo_styled_controls_pause">@drawable/ic_player_pause</drawable>
+    <drawable name="exo_styled_controls_next">@drawable/ic_player_next</drawable>
+    <drawable name="exo_styled_controls_previous">@drawable/ic_player_previous</drawable>
+    <drawable name="exo_styled_controls_subtitle_on">@drawable/ic_player_subtitles</drawable>
+    <drawable name="exo_styled_controls_subtitle_off">@drawable/ic_player_subtitles_off</drawable>
+    <drawable name="exo_styled_controls_settings">@drawable/ic_player_quality</drawable>
+    <drawable name="exo_styled_controls_audiotrack">@drawable/ic_player_audio</drawable>
+</resources>

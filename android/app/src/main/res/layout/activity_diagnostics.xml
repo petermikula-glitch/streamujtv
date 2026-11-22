@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Diagnostika: stav aplikace, účtu a připojení a poslední chyby – na jednu fotku. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/app_background"
+    android:orientation="vertical"
+    android:paddingStart="56dp"
+    android:paddingTop="27dp"
+    android:paddingEnd="56dp"
+    android:paddingBottom="27dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-condensed"
+        android:text="Diagnostika"
+        android:textColor="@color/text_primary"
+        android:textSize="30sp" />
+
+    <ScrollView
+        android:id="@+id/diag_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:layout_weight="1"
+        android:focusable="true"
+        android:scrollbars="vertical">
+
+        <TextView
+            android:id="@+id/diag_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:lineSpacingMultiplier="1.25"
+            android:textColor="@color/text_primary"
+            android:textSize="17sp" />
+    </ScrollView>
+
+    <Button
+        android:id="@+id/diag_again"
+        style="@style/TitleButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Zkontrolovat znovu" />
+</LinearLayout>

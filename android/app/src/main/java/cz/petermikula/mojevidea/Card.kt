@@ -5,7 +5,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Kam karta vede; o cíli rozhoduje logika v Pythonu. */
-class Target(val type: String, val call: String, val params: JSONObject, val title: String) {
+class Target(
+    val type: String,
+    val call: String,
+    val params: JSONObject,
+    val title: String,
+    /** Výpis plakátů: mřížka se rovnou připraví v tomto tvaru. */
+    val poster: Boolean = false,
+) {
     companion object {
         fun from(json: JSONObject?): Target {
             val target = json ?: JSONObject()
@@ -14,6 +21,7 @@ class Target(val type: String, val call: String, val params: JSONObject, val tit
                 call = target.optString("call"),
                 params = target.optJSONObject("params") ?: JSONObject(),
                 title = target.optString("title"),
+                poster = target.optBoolean("poster"),
             )
         }
     }
@@ -70,6 +78,13 @@ class Card(
                     (0 until list.length()).map { list.optString(it) }.filter { it.isNotEmpty() }
                 } ?: emptyList(),
             )
+        }
+
+        const val SKELETON = "skeleton"
+
+        /** Zástupné karty na dobu načítání: obrys bez obsahu, nikam nevedou. */
+        fun skeletons(count: Int): List<Card> = (1..count).map { index ->
+            from(JSONObject().put("title", " ".repeat(index)).put("icon", SKELETON))
         }
 
         fun list(items: JSONArray?): List<Card> {

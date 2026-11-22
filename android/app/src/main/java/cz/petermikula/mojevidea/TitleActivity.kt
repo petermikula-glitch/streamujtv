@@ -31,6 +31,8 @@ class TitleActivity : FragmentActivity() {
     private var params = JSONObject()
     private var shown = ""
     private var loadedOnce = false
+    private var meta = ""
+    private var csfd = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,7 +77,16 @@ class TitleActivity : FragmentActivity() {
     private fun bind(data: JSONObject) {
         val detail = data.optJSONObject("detail") ?: JSONObject()
         detail.optString("title").takeIf { it.isNotEmpty() }?.let { findViewById<TextView>(R.id.title_name).text = it }
-        findViewById<TextView>(R.id.title_meta).text = detail.optString("meta")
+        meta = detail.optString("meta")
+        showMeta()
+        if (!loadedOnce) {
+            // hodnocení ČSFD se ptá zvlášť, aby stránku nezdržovalo (ČSFD dotazy často odmítá)
+            Api.call("title_csfd", params) { result ->
+                if (isFinishing || isDestroyed) return@call
+                csfd = result.data?.optString("text").orEmpty()
+                showMeta()
+            }
+        }
         plot.text = detail.optString("plot")
         val glide = Glide.with(applicationContext)
         detail.optString("poster").takeIf { it.isNotEmpty() }?.let {
@@ -120,6 +131,10 @@ class TitleActivity : FragmentActivity() {
             fresh.add(ListRow(HeaderItem(index.toLong(), row.optString("title")), cards))
         }
         rows.setItems(fresh, null)
+    }
+
+    private fun showMeta() {
+        findViewById<TextView>(R.id.title_meta).text = listOf(meta, csfd).filter { it.isNotEmpty() }.joinToString(" · ")
     }
 
     override fun onDestroy() {

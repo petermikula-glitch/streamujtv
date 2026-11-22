@@ -68,7 +68,21 @@ class CardPresenter(var poster: Boolean = false, private val onMenu: ((Card) -> 
         // Glide se váže na kontext aplikace: karty se uvolňují i při zavírání obrazovky,
         // kdy by požadavek vázaný na zaniklou aktivitu shodil aplikaci.
         val glide = Glide.with(context.applicationContext)
-        if (card.image.isNotEmpty()) {
+        view.setMainImageScaleType(android.widget.ImageView.ScaleType.CENTER_CROP)
+        if (card.icon == Card.SKELETON) {
+            view.titleText = ""
+            view.contentText = ""
+            glide.clear(view.mainImageView)
+            view.setMainImage(SkeletonDrawable(ContextCompat.getColor(context, R.color.surface)), false)
+        } else if (card.image.startsWith("res:")) {
+            // obrázek z aplikace (avatar profilu): celý, neoříznutý
+            view.titleText = card.title
+            view.contentText = detail
+            glide.clear(view.mainImageView)
+            val id = context.resources.getIdentifier(card.image.substring(4), "drawable", context.packageName)
+            view.setMainImageScaleType(android.widget.ImageView.ScaleType.FIT_CENTER)
+            view.setMainImage(if (id != 0) ContextCompat.getDrawable(context, id) else null, false)
+        } else if (card.image.isNotEmpty()) {
             view.titleText = card.title
             view.contentText = detail
             // výchozí limit Glide (2,5 s) je na pomalé síti krátký

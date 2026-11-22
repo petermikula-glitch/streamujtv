@@ -32,6 +32,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
         const val UPDATE = 8L
         const val LANGUAGE = 9L
         const val QUALITY = 10L
+        const val CLEANUP = 11L
     }
 
     override fun onCreateGuidance(savedInstanceState: Bundle?): GuidanceStylist.Guidance {
@@ -77,6 +78,9 @@ class SettingsFragment : GuidedStepSupportFragment() {
                 .description("Zjišťuji…").build()
         )
         actions.add(
+            GuidedAction.Builder(context).id(CLEANUP).title("Mazat stažené po dokoukání").description("").build()
+        )
+        actions.add(
             GuidedAction.Builder(context).id(UPDATE).title("Zkontrolovat aktualizace")
                 .description("Verze ${Updater.currentVersion(context)}").build()
         )
@@ -85,6 +89,11 @@ class SettingsFragment : GuidedStepSupportFragment() {
 
     private var downloadDir = ""
     private var choices = JSONObject()
+    private var cleanup = false
+
+    private fun showCleanup() {
+        setText(CLEANUP, if (cleanup) "Zapnuto – dokoukaný soubor se z disku smaže" else "Vypnuto")
+    }
 
     /** Předvolba přehrávání z Přehraj.to: popis aktuální hodnoty a výběr z nabídky. */
     private fun showChoice(id: Long, list: String, key: String) {
@@ -151,6 +160,8 @@ class SettingsFragment : GuidedStepSupportFragment() {
             choices = data
             showChoice(LANGUAGE, "languages", "prefer_language")
             showChoice(QUALITY, "qualities", "prefer_quality")
+            cleanup = data.optBoolean("delete_watched")
+            showCleanup()
             if (data.optBoolean("has_password")) {
                 findActionById(PASSWORD)?.title = "Heslo (uložené – vyplňte jen při změně)"
                 notifyActionChanged(findActionPositionById(PASSWORD))
@@ -190,6 +201,12 @@ class SettingsFragment : GuidedStepSupportFragment() {
             LANGUAGE -> choose(LANGUAGE, "languages", "prefer_language", "Čemu dát přednost")
             QUALITY -> choose(QUALITY, "qualities", "prefer_quality", "Jakou kvalitu přehrávat")
             STORAGE -> chooseStorage()
+            CLEANUP -> Api.call("settings_set", JSONObject().put("delete_watched", !cleanup)) { result ->
+                val data = result.data
+                if (!isAdded || data == null) return@call
+                cleanup = data.optBoolean("delete_watched")
+                showCleanup()
+            }
             UPDATE -> Updater.check(activity, force = true)
             BACK -> activity.finish()
         }

@@ -1074,7 +1074,7 @@ def test_hero_and_watch_next_follow_the_last_unfinished_video(api):
     hero = sections["prehrajto"]["hero"]                                     # naposledy přehrané rozkoukané video
     assert (hero["title"], hero["label"], hero["progress"]) == ("Archa 1×01", "Pokračovat", 25)
     assert hero["subtitle"] == "CZ dabing · zbývá 15 min" and hero["image"] == ""
-    assert hero["target"] == {"type": "play", "call": "play", "params": {"vid": "11:archa:%016x" % 11}}
+    assert hero["target"] == {"type": "play", "call": "play", "params": {"vid": "11:archa:%016x" % 11, "resume": True}}
     television = sections["ivysilani"]["hero"]
     assert (television["title"], television["subtitle"]) == ("Vyprávěj · Díl 3", "iVysílání · zbývá 40 min")
     assert television["image"] == "https://img/v.jpg" and "hero" not in sections["tools"]

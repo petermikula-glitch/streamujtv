@@ -254,7 +254,7 @@ def hero(lib, state, section):
             row["title"] or row["show_title"]
         return {"title": title, "subtitle": " · ".join(part for part in ("iVysílání", _remaining(point)) if part),
                 "image": row["image"] or "", "progress": api._percent(point), "label": "Pokračovat",
-                "target": api._target("play", "ivys_play", {"idec": row["idec"]})}
+                "target": api._target("play", "ivys_play", {"idec": row["idec"], "resume": True})}
     videos = lib.history_videos(in_progress=True, limit=1, include_search=True)
     if not videos:
         return None
@@ -264,7 +264,8 @@ def hero(lib, state, section):
     details = " · ".join(part for part in (video.get("lang"), video.get("quality"), _remaining(point)) if part)
     return {"title": api._video_title(video, meta), "subtitle": details, "image": meta.get("fanart") or "",
             "progress": api._percent(point), "label": "Pokračovat",
-            "target": api._target("play", "play", {"vid": video["id"]})}
+            # „Pokračovat“ naváže rovnou, přehrávač se na to už neptá
+            "target": api._target("play", "play", {"vid": video["id"], "resume": True})}
 
 
 def watch_next(params):

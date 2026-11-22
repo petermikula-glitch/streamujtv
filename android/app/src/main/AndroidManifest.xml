@@ -37,6 +37,7 @@
         <activity android:name=".TitleActivity" />
         <activity android:name=".SearchActivity" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".SettingsActivity" android:theme="@style/AppTheme.GuidedStep" />
+        <activity android:name=".DiagnosticsActivity" />
         <activity
             android:name=".PlayerActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout"
