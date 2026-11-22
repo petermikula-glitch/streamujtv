@@ -1181,7 +1181,7 @@ def test_discover_lists_can_be_filtered(api, monkeypatch):
 
     chosen = dict(genre["params"], year="1990s", rating="70", origin="CZ|SK|XC", sort="new")
     listing = api("discover", **chosen)
-    assert listing["items"][0]["subtitle"] == "žánr · 1990–1999 · 70 %+ · ČR a SR · nejnovější"
+    assert listing["items"][0]["subtitle"] == "Komedie · 1990–1999 · 70 %+ · ČR a SR · nejnovější"
     path, sent = calls[-1]
     assert (sent["primary_release_date.gte"], sent["primary_release_date.lte"]) == ("1990-01-01", "1999-12-31")
     assert (sent["vote_average.gte"], sent["sort_by"]) == (7.0, "primary_release_date.desc")

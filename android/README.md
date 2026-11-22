@@ -178,6 +178,14 @@ aplikace občas znovu vyhledá (nejvýš jednou za 12 hodin, pár titulů); kdy�
 
 **Průvodce prvním spuštěním** (`WelcomeActivity`): účet, klíč TMDB a předvolby; nabídne se jen jednou.
 
+**Filtry výpisů**: výpisy z Objevuj i filmy a seriály vlastního katalogu začínají kartou Filtr (cíl
+typu `filter`). Aplikace si zavolá `discover_filters` nebo `catalog_filters`, ukáže skupiny (žánr,
+období, hodnocení, země, řazení) a po výběru hodnoty načte stejný výpis s parametry, které volba nese.
+
+**Hledání osob**: hledání nabízí i řadu Herci a režiséři (TMDB); karta osoby vede na její filmy
+a seriály (`discover_person`) – nejdřív ty, které režírovala. Vlastní katalog se podle herců a režisérů
+prohledává také.
+
 **Dostupnost** titulů z Objevuj se neověřuje hromadně sama: dlaždice „Ověřit dostupnost“ projde jednu
 stránku seznamu (jedno hledání na film) a výsledek se týden pamatuje jako štítek na kartě.
 
@@ -186,12 +194,19 @@ rozpoznávání řeči (kde ho zařízení má).
 
 ## Chráněné pořady iVysílání
 
-Zahraniční pořady vydává ČT jen s ochranou DRM. Aplikace nejdřív žádá o běžný stream; když ho ČT
-nevydá, požádá o chráněný (`vod(idec, drm=True)`: DASH) a přehraje ho vestavěným Widevine zařízení
-(Media3, `DrmConfiguration`). Adresu licence bere výhradně z odpovědi rozhraní (`drm_license`);
-když v ní není, přehrávač při chybě ukáže názvy polí odpovědi, aby šlo podporu doladit. Územní
-omezení se neobchází a chráněný obsah se neukládá. **Tvar odpovědi u chráněných pořadů nebylo možné
-ověřit mimo Česko** – rozhoduje zkouška na zařízení v ČR.
+Zahraniční a licencované pořady (i některé české, např. StarDance) vydává ČT jen s ochranou DRM.
+Aplikace nejdřív žádá o běžný stream; když ho ČT nevydá, požádá o chráněný (`vod(idec, drm=True)`:
+DASH) a přehraje ho vestavěným Widevine zařízení (Media3, `DrmConfiguration`). Adresu licence bere
+výhradně z toho, co ČT sama pošle: z odpovědi rozhraní (`drm_license`), nebo z manifestu streamu –
+tu si přehrávač najde sám, a když ne, podívá se do manifestu logika (`manifest_protection`,
+parametr `inspect`) a přehrání se zkusí ještě jednou. Územní omezení se neobchází a chráněný obsah
+se neukládá.
+
+**Stav (zkouška na zařízení v ČR, 0.7.0):** ČT chráněný stream vydá, ale adresu licence v odpovědi
+rozhraní ani v manifestu přehrávač nenašel („No license URL“). Pokud ji nenajde ani hledání
+v manifestu, zbývala by jen adresa a přístupový údaj opsané z oficiálního přehrávače, což pravidla
+projektu vylučují – chráněné pořady pak v aplikaci přehrát nejdou. Při chybě přehrávač ukáže, co
+manifest o ochraně říká a která pole odpověď má (jen názvy, žádné hodnoty).
 
 ## Stahování na disk
 

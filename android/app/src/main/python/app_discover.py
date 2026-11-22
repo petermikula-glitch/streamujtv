@@ -278,10 +278,16 @@ def _periods():
 
 
 def _filter_summary(params):
-    """Krátký popis nastavených filtrů pro kartu Filtr (bez dotazu na TMDB)."""
+    """Krátký popis nastavených filtrů pro kartu Filtr."""
     parts = []
     if params.get("genre"):
-        parts.append("žánr")
+        name = "žánr"
+        try:   # číselník žánrů je v mezipaměti; když není po ruce, stačí obecné slovo
+            name = next((genre["name"] for genre in _tmdb().genres(_kind(params))
+                         if isinstance(genre, dict) and str(genre.get("id")) == str(params["genre"])), name)
+        except (TmdbError, api.ApiError):
+            pass
+        parts.append(name)
     if params.get("year"):
         parts.append(dict(_periods()).get(str(params["year"]), str(params["year"])))
     if params.get("rating"):
