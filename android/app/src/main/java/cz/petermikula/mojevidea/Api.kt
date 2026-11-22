@@ -10,7 +10,7 @@ import org.json.JSONObject
 import java.util.concurrent.Executors
 
 /** Výsledek volání logiky: data, nebo text chyby určený uživateli. */
-class ApiResult(val data: JSONObject?, val error: String?) {
+class ApiResult(val data: JSONObject?, val error: String?, val offline: Boolean = false) {
     val ok: Boolean get() = error == null && data != null
 }
 
@@ -62,7 +62,7 @@ object Api {
             } else {
                 val message = json.optString("error", "Neznámá chyba")
                 Log.w(TAG, "$action: $message")  // dohledatelné přes adb logcat -s MojeVidea
-                ApiResult(null, message)
+                ApiResult(null, message, json.optBoolean("offline"))
             }
         } catch (error: Throwable) {
             Log.e(TAG, action, error)

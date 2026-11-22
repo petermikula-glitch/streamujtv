@@ -107,21 +107,30 @@ class SearchActivity : FragmentActivity() {
         }
     }
 
+    /** Hlášení pod hledacím polem; s ilustrací (prázdný výsledek, výpadek spojení) se vystředí. */
+    private fun note(text: String, art: String = "") {
+        message.text = text
+        message.gravity = if (art.isEmpty()) android.view.Gravity.START else android.view.Gravity.CENTER_HORIZONTAL
+        val density = resources.displayMetrics.density
+        message.setPadding(0, if (art.isEmpty()) 0 else (40 * density).toInt(), if (art.isEmpty()) 0 else (56 * density).toInt(), 0)
+        EmptyArt.show(message, art)
+    }
+
     private fun search(query: String) {
         if (query.isEmpty()) return
         val searchId = ++latestSearch
-        message.text = "Hledám…"
+        note("Hledám…")
         Api.call("search", JSONObject().put("q", query)) { result ->
             if (isFinishing || isDestroyed || searchId != latestSearch) return@call
             val data = result.data
             if (data == null) {
-                message.text = result.error
+                showRows(null)
+                note(result.error.orEmpty(), if (result.offline) EmptyArt.OFFLINE else "")
                 return@call
             }
             val count = showRows(data.optJSONArray("rows"))
-            message.text = data.optString("notice").ifEmpty {
-                if (count == 0) "Nic jsem nenašel." else ""
-            }
+            val notice = data.optString("notice")
+            if (count == 0) note(notice.ifEmpty { "Nic jsem nenašel." }, EmptyArt.NOTHING) else note(notice)
             if (count > 0) findViewById<android.view.View>(R.id.search_rows).requestFocus()
         }
     }

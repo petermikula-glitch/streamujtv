@@ -32,6 +32,7 @@ class ListActivity : FragmentActivity() {
 class ListFragment : VerticalGridSupportFragment() {
     private val presenter = CardPresenter(false) { card -> Navigator.menu(requireActivity(), card) { reload() } }
     private var emptyText = "Nic tu není."
+    private var emptyArt = EmptyArt.NOTHING
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val refresh = Runnable { if (isResumed) reload(quiet = true) }
     private val cards = ArrayObjectAdapter(presenter)
@@ -91,7 +92,10 @@ class ListFragment : VerticalGridSupportFragment() {
             if (data == null) {
                 // prázdná obrazovka s chybou musí říct, co se stalo; přes plný výpis stačí krátké upozornění
                 if (cards.size() == 0) {
-                    showMessage((result.error ?: "Výpis se nepodařilo načíst.") + "\n\nZkuste to znovu tlačítkem Zpět.")
+                    showMessage(
+                        (result.error ?: "Výpis se nepodařilo načíst.") + "\n\nZkuste to znovu tlačítkem Zpět.",
+                        if (result.offline) EmptyArt.OFFLINE else "",
+                    )
                 } else if (!quiet) {
                     Toast.makeText(requireContext(), result.error, Toast.LENGTH_LONG).show()
                 }
@@ -100,6 +104,7 @@ class ListFragment : VerticalGridSupportFragment() {
             data.optString("title").takeIf { it.isNotEmpty() && title.isNullOrEmpty() }?.let { title = it }
             val list = Card.list(data.optJSONArray("items"))
             data.optString("empty").takeIf { it.isNotEmpty() }?.let { emptyText = it }
+            data.optString("empty_art").takeIf { it.isNotEmpty() }?.let { emptyArt = it }
             // výpis, který se mění sám (stahování), si říká o obnovení po pár sekundách
             handler.removeCallbacks(refresh)
             val seconds = data.optInt("refresh")
@@ -107,14 +112,14 @@ class ListFragment : VerticalGridSupportFragment() {
             applyShape(list)
             cards.setItems(list, Card.DIFF)
             next = data.optJSONObject("next")
-            showMessage(if (cards.size() == 0) emptyText else "")
+            showMessage(if (cards.size() == 0) emptyText else "", emptyArt)
         }
     }
 
     private var message: TextView? = null
 
     /** Text uprostřed obrazovky (prázdný výpis, chyba); prázdný text ho skryje. */
-    private fun showMessage(text: String) {
+    private fun showMessage(text: String, art: String = "") {
         val root = view as? ViewGroup ?: return
         val label = message ?: TextView(requireContext()).apply {
             gravity = Gravity.CENTER
@@ -127,6 +132,7 @@ class ListFragment : VerticalGridSupportFragment() {
             message = this
         }
         label.text = text
+        EmptyArt.show(label, if (text.isEmpty()) "" else art)
         label.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
     }
 

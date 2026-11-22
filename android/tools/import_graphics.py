@@ -3,9 +3,10 @@
 
     python3 android/tools/import_graphics.py <složka s podklady> [android/app/src/main/res]
 
-Složka s podklady: ``dlazdice/*.png`` (800 × 450, bez textu), ``ikony/*.svg`` (obrysové, výřez 24 × 24,
-skupina s ``fill="none" stroke="white"``) a ``znacka/`` (Ikona-aplikace.png, Banner-Android-TV.png,
-Logo.png, Pozadi.png). Chybějící soubory se přeskočí. Potřebuje knihovnu Pillow.
+Složka s podklady: ``dlazdice/``, ``objevuj/`` a ``zanry/`` (PNG 800 × 450, bez textu), ``ikony/*.svg``
+(obrysové, výřez 24 × 24, skupina s ``fill="none"`` a bílou linkou), ``prazdne-stavy/`` (PNG s průhledným
+pozadím) a ``znacka/`` (Ikona-aplikace.png, Banner-Android-TV.png, Logo.png, Pozadi.png). Chybějící
+soubory se přeskočí. Potřebuje knihovnu Pillow.
 """
 import os
 import sys
@@ -17,6 +18,16 @@ TILES = {"Archiv": "archive", "Dokumenty": "docs", "Filmy": "movies", "Historie"
          "Priroda": "nature", "Pro-deti": "kids", "Rady-a-recepty": "advice", "Serialy": "series",
          "Spiritualita": "spirit", "Spolecnost": "society", "Sport": "sport", "Zabava": "fun",
          "Zive-vysilani": "live", "Zpravodajstvi": "news"}
+# Dlaždice řad „Objevuj“ a žánrů; žánry nesou číslo žánru v TMDB (seriálové žánry bez vlastní
+# ilustrace přiřazuje app_discover.GENRE_ART k nejbližší filmové).
+DISCOVER = {"Novinky": "discover_new", "Popularni": "discover_popular", "Nejlepe-hodnocene": "discover_top",
+            "Podle-roku": "discover_year", "Podle-zanru": "discover_genre", "Ceskoslovenske": "discover_czechoslovak"}
+GENRES = {"Akcni": 28, "Dobrodruzny": 12, "Animovany": 16, "Komedie": 35, "Krimi": 80, "Dokumentarni": 99,
+          "Drama": 18, "Rodinny": 10751, "Fantasy": 14, "Historicky": 36, "Horor": 27, "Hudebni": 10402,
+          "Mysteriozni": 9648, "Romanticky": 10749, "Sci-fi": 878, "Televizni-film": 10770, "Thriller": 53,
+          "Valecny": 10752, "Western": 37}
+EMPTY = {"Bez-pripojeni": "empty_offline", "Nic-nenalezeno": "empty_nothing", "Prazdne-oblibene": "empty_favorites"}
+SECTIONS = {"Prehraj-to": "ic_section_prehrajto", "iVysilani": "ic_section_ivysilani", "Nastroje": "ic_section_tools"}
 ICONS = {"Doplnit-plakaty": "enrich", "Hledat": "search", "Moje-porady": "favorites", "Naposledy-prehrane": "history",
          "Nastaveni": "settings", "Podle-hodnoceni": "rating", "Podle-roku": "year", "Prihlaseni": "login",
          "Slozka": "folder", "Synchronizovat": "sync", "Vsechny-porady": "all", "Stahovani": "download"}
@@ -88,11 +99,29 @@ def main(source, res):
             image = Image.open(path).convert("RGB").resize((480, 270), Image.LANCZOS)
             image.save(os.path.join(res, "drawable-nodpi", "tile_%s.webp" % key), "WEBP", quality=90, method=6)
             done.append("tile_" + key)
+    for folder, names in (("objevuj", DISCOVER), ("zanry", {name: "genre_%d" % number for name, number in GENRES.items()})):
+        for name, key in names.items():
+            path = os.path.join(source, folder, name + ".png")
+            if os.path.exists(path):
+                image = Image.open(path).convert("RGB").resize((480, 270), Image.LANCZOS)
+                image.save(os.path.join(res, "drawable-nodpi", "tile_%s.webp" % key), "WEBP", quality=90, method=6)
+                done.append("tile_" + key)
+    for name, key in EMPTY.items():
+        path = os.path.join(source, "prazdne-stavy", name + ".png")
+        if os.path.exists(path):
+            image = Image.open(path).convert("RGBA").resize((480, 320), Image.LANCZOS)
+            image.save(os.path.join(res, "drawable-nodpi", key + ".webp"), "WEBP", lossless=True, method=6)
+            done.append(key)
     for name, key in ICONS.items():
         path = os.path.join(source, "ikony", name + ".svg")
         if os.path.exists(path):
             icon(path, os.path.join(res, "drawable", "ic_tile_%s.xml" % key))
             done.append("ic_tile_" + key)
+    for name, key in SECTIONS.items():
+        path = os.path.join(source, "ikony", name + ".svg")
+        if os.path.exists(path):
+            icon(path, os.path.join(res, "drawable", key + ".xml"))
+            done.append(key)
     brand = os.path.join(source, "znacka")
     if os.path.exists(os.path.join(brand, "Pozadi.png")):
         Image.open(os.path.join(brand, "Pozadi.png")).convert("RGB").save(

@@ -75,6 +75,8 @@ Grafiku lze vyměnit bez zásahu do kódu – stačí soubor se správným názv
 | Pozadí obrazovek | `res/drawable-nodpi/app_background_image.webp` | 1920 × 1080 px |
 | Ilustrace dlaždice | `res/drawable-nodpi/tile_<název>.webp` | 480 × 270 px, bez textu, motiv vpravo |
 | Ikona dlaždice | `res/drawable/ic_tile_<název>.xml` | obrysová, bílá, výřez 24 × 24 |
+| Ikona sekce v postranní nabídce | `res/drawable/ic_section_<název>.xml` | obrysová, bílá, výřez 24 × 24 |
+| Ilustrace prázdné obrazovky | `res/drawable-nodpi/empty_<název>.webp` | 480 × 320 px, průhledné pozadí |
 
 Kterou dlaždici karta dostane, určuje `app_api.py` polem `icon`. Existuje-li ilustrace
 `tile_<název>`, vyplní dlaždici a název se vykreslí přes její ztmavený okraj; jinak se kreslí tmavě
@@ -82,9 +84,17 @@ modrý přechod se zlatou obrysovou ikonou `ic_tile_<název>`. Zápis `ikona:bar
 `folder:movies`) vezme ikonu jedné položky a odstín druhé – tak vypadají podkategorie.
 
 - Ilustrace mají: `live`, `series`, `movies`, `docs`, `news`, `sport`, `kids`, `fun`, `past`,
-  `culture`, `advice`, `nature`, `society`, `spirit`, `archive`.
+  `culture`, `advice`, `nature`, `society`, `spirit`, `archive`; dlaždice Objevuj `discover_new`,
+  `discover_popular`, `discover_top`, `discover_year`, `discover_genre`, `discover_czechoslovak`
+  a žánry `genre_<číslo žánru v TMDB>` (seriálové žánry bez vlastní ilustrace si berou nejbližší
+  filmovou, viz `GENRE_ART` v `app_discover.py`).
 - Ikony mají: `folder`, `all`, `search`, `sync`, `settings`, `login`, `enrich`, `history`,
   `favorites`, `rating`, `year`, `download`.
+- Sekce mají ikony `section_prehrajto`, `section_ivysilani`, `section_tools` (pole `icon` sekce,
+  kreslí `SectionHeaderPresenter`).
+- Prázdné obrazovky: `nothing` (nic nenalezeno), `favorites` (prázdné Oblíbené; výpis si ji vyžádá
+  polem `empty_art`) a `offline` – tu aplikace ukáže, když logika u chyby vrátí `"offline": true`
+  (výpadek spojení, ne odpověď serveru).
 
 Podklady (PNG 800 × 450, SVG) převádí do těchto souborů `tools/import_graphics.py`: ilustrace zmenší do WebP,
 z obrysových SVG udělá vektorové obrázky Androidu (`rect` a `circle` převede na cesty).
@@ -94,8 +104,8 @@ z obrysových SVG udělá vektorové obrázky Androidu (`rect` a `circle` převe
 Postranní nabídka má tři sekce; každá je stránka s vlastními řadami (`home` v `app_api.py` vrací
 `sections` → `rows` → karty, v aplikaci `MainFragment` a `SectionFragment`):
 
-- **Přehraj.to** – Rozkoukané, Oblíbené, Objevuj filmy, Objevuj seriály, Stažené na disku a Moje videa
-  (to, co je nahrané na účtu).
+- **Přehraj.to** – Rozkoukané, Další díly, Oblíbené, Objevuj filmy, Objevuj seriály, Stažené na disku
+  a Moje videa (to, co je nahrané na účtu).
 - **iVysílání** – živé kanály, rozkoukané pořady, Moje pořady a kategorie; nic jiného.
 - **Nástroje** – hledání, stahování, synchronizace, metadata, nastavení.
 
@@ -120,6 +130,15 @@ souboru při přehrání (`_pick_stream`).
 výrazně kratší než film (délka z TMDB) jde do řady „Ukázky a neúplné soubory“, kino kopie a verze,
 které se nepodařilo přehrát, až na konec, opakovaně nahraný stejný soubor se slučuje. Verzi, kterou si
 uživatel pustil sám, si aplikace u titulu pamatuje a nabídne ji příště první.
+
+**Po dokoukání** (`play_next` v `app_discover.py`, panel v `PlayerActivity`): přehrávač se zeptá, co
+dál. U dílu seriálu je to další díl – z vlastního katalogu, jinak vyhledaný na Přehraj.to (u seriálu
+z Objevuj podle TMDB, včetně přechodu do další řady) – a po deseti sekundách se spustí sám; odpočet
+zastaví přechod na Zavřít. U filmu je to další film stejné série podle TMDB (kolekce, pořadí podle
+data uvedení): hraje z katalogu nebo z Přehraj.to, a když tam není, nabídne se stránka titulu. Film se
+sám nespouští. Když nic dalšího není nebo to nejde zjistit, přehrávač se zavře jako dřív.
+Řada **Další díly** na hlavní obrazovce: po dokoukaném dílu z katalogu ten následující a seriály
+z Objevuj, které se naposledy přehrávaly (vedou na stránku seriálu s tlačítkem Pokračovat).
 
 **Dostupnost** titulů z Objevuj se neověřuje hromadně sama: dlaždice „Ověřit dostupnost“ projde jednu
 stránku seznamu (jedno hledání na film) a výsledek se týden pamatuje jako štítek na kartě.

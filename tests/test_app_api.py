@@ -310,7 +310,30 @@ def test_call_never_raises(api):
     assert api.raw("neexistuje") == {"ok": False, "error": "Neznámá akce: neexistuje"}
     assert json.loads(app_api.call("home", "[1]")) == {"ok": False, "error": "Neplatné parametry."}
     assert json.loads(app_api.call("home", "{rozbité"))["ok"] is False
-    assert set(app_api.ACTIONS) >= {"home", "play", "sync", "ivys_play", "progress_save"}
+    assert set(app_api.ACTIONS) >= {"home", "play", "sync", "ivys_play", "progress_save", "play_next"}
+
+
+def test_connection_failures_are_marked_for_the_offline_illustration(api, monkeypatch):
+    import urllib.error
+
+    def unreachable(params):
+        raise urllib.error.URLError("Network is unreachable")
+
+    def translated(params):
+        try:
+            unreachable(params)
+        except OSError:
+            raise app_api.ApiError("Server neodpovídá.")
+
+    def refused(params):
+        raise urllib.error.HTTPError("https://x", 404, "Not Found", None, None)
+
+    monkeypatch.setitem(app_api.ACTIONS, "a", unreachable)
+    monkeypatch.setitem(app_api.ACTIONS, "b", translated)
+    monkeypatch.setitem(app_api.ACTIONS, "c", refused)
+    assert api.raw("a")["offline"] is True
+    assert api.raw("b") == {"ok": False, "error": "Server neodpovídá.", "offline": True}
+    assert "offline" not in api.raw("c") and "offline" not in api.raw("neexistuje")   # odpověď serveru není výpadek
 
 
 def test_configure_passes_the_system_proxy_to_urllib(tmp_path, monkeypatch):
@@ -530,7 +553,7 @@ def test_discover_lists_come_from_tmdb(api, monkeypatch):
     decade = next(item for item in years if item["title"] == "1990–1999")
     assert decade["target"]["params"] == {"kind": "movie", "year": "1990s"}
     genres = api("discover_genres", kind="movie", origin="CZ|SK|XC")["items"]
-    assert _titles(genres) == ["Komedie", "Drama"] and genres[0]["icon"] == "folder:movies"
+    assert _titles(genres) == ["Komedie", "Drama"] and genres[0]["icon"] == "genre_35:movies"   # ilustrace žánru
     assert genres[0]["target"]["params"] == {"kind": "movie", "genre": "35", "origin": "CZ|SK|XC"}
     special = api("discover_czechoslovak", kind="tv")["items"]
     assert _titles(special) == ["Nejoblíbenější", "Podle roku", "Podle žánru"]
@@ -664,6 +687,106 @@ def test_series_page_seasons_episodes_and_continue(api, monkeypatch):
     resume = api("discover_title", **show)["actions"][0]                     # stránka seriálu nabídne pokračování
     assert (resume["title"], resume["subtitle"]) == ("Pokračovat", "1. řada")
     assert resume["target"]["params"]["season"] == 1
+
+
+def test_next_episode_from_the_catalogue_follows_a_finished_one(api):
+    _fill(3)
+    first, second, third = ["%d:archa:%016x" % (10 + n, 10 + n) for n in (1, 2, 3)]
+    assert "Další díly" not in _section(api, "prehrajto")
+    following = api("play_next", track=first)["next"]
+    assert following == {"title": "Další díl", "subtitle": "Archa 1×02", "auto": True,
+                         "target": {"type": "play", "call": "play", "params": {"vid": second}}}
+    assert api("play_next", track=third)["next"] is None                    # poslední díl: není co nabídnout
+    assert api("play_next", track="")["next"] is None and api("play_next", track=REF)["next"] is None
+
+    api("progress_save", track=first, position=1190, total=1200, ended=True)
+    row = _section(api, "prehrajto")["Další díly"]                          # po dokoukání čeká další díl na hlavní obrazovce
+    assert len(row) == 1 and row[0]["target"]["params"] == {"vid": second}
+    assert row[0]["subtitle"].startswith("Další díl")
+    api("progress_save", track=second, position=300, total=1200, started=True)
+    assert "Další díly" not in _section(api, "prehrajto")                   # rozkoukaný díl je už v Rozkoukaných
+    assert _section(api, "prehrajto")["Rozkoukané"][0]["target"]["params"] == {"vid": second}
+
+
+def test_next_episode_of_a_discovered_series_is_searched(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    asked = _catalogue_search(monkeypatch, {
+        "Archa S01E01": [_web(40, "Archa S01E01 CZ")],
+        "Archa S01E02": [_web(41, "Archa S01E02 EN"), _web(42, "Archa S01E02 CZ"), _web(43, "Archa S01E03 CZ")],
+        "Archa S02E01": [_web(44, "Archa S02E01 CZ")]})
+    _fake_tmdb(monkeypatch, {
+        "/tv/77": {"id": 77, "name": "Archa", "seasons": [{"season_number": 1, "name": "1. řada"},
+                                                          {"season_number": 2, "name": "2. řada"}]},
+        "/tv/77/season/1": {"episodes": [{"episode_number": 1, "name": "Pilot"},
+                                          {"episode_number": 2, "name": "Druhý"}]},
+        "/tv/77/season/2": {"episodes": [{"episode_number": 1, "name": "Návrat"}]},
+    })
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/v.mp4", {}))
+    episode = {"kind": "tv", "id": 77, "title": "Archa", "year": 1996, "poster": "https://img/a.jpg", "orig": "",
+               "season": 1, "episode": 1}
+    version = api("discover_episode", **episode)["items"][0]
+    stream = api("play", **version["target"]["params"])
+    following = api("play_next", track=stream["track"], choice="tv:77:1:1")["next"]
+    assert (following["title"], following["subtitle"], following["auto"]) == ("Další díl", "Archa 1×02 · Druhý", True)
+    assert following["target"]["params"]["choice"] == "tv:77:1:2"
+    assert following["target"]["params"]["vid"] == _web(42, "")["id"]         # česká verze podle předvoleb
+    assert asked[-1] == ("Archa S01E02", 1)
+    api("play", **following["target"]["params"])
+    crossing = api("play_next", track=following["target"]["params"]["vid"], choice="tv:77:1:2")["next"]
+    assert crossing["subtitle"] == "Archa 2×01 · Návrat"                     # po posledním dílu řady první díl další
+    assert crossing["target"]["params"]["choice"] == "tv:77:2:1"
+    assert api("play_next", track="x", choice="tv:77:2:1")["next"] is None   # konec seriálu
+    assert api("play_next", track="x", choice="tv:99:1:1")["next"] is None   # neznámý seriál
+
+    row = _section(api, "prehrajto")["Další díly"]                           # rozkoukaný seriál z Objevuj
+    assert _titles(row) == ["Archa"] and row[0]["subtitle"] == "Pokračovat ve sledování"
+    assert row[0]["target"]["type"] == "title" and row[0]["target"]["params"]["id"] == 77
+    resume = api("discover_title", kind="tv", id=77, title="Archa")["actions"][0]
+    assert (resume["title"], resume["subtitle"]) == ("Pokračovat", "1. řada")
+
+
+def test_next_film_of_a_series_follows_a_finished_one(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    hour = 3600
+    asked = _catalogue_search(monkeypatch, {
+        "Pelíšky 2 2010": [_web(51, "Pelisky 2 2010 CZ 1080p", 2 * hour, "4 GB"),
+                           _web(52, "Pelisky 2 2010 EN", 2 * hour, "2 GB")]})
+    saga = {"parts": [{"id": 13, "title": "Pelíšky 3", "release_date": "2020-01-01", "poster_path": "/p3.jpg"},
+                      {"id": 11, "title": "Pelíšky", "release_date": "1999-04-08"},
+                      {"id": 12, "title": "Pelíšky 2", "original_title": "Pelisky 2", "release_date": "2010-05-05"}]}
+    _fake_tmdb(monkeypatch, {
+        "/movie/11": dict(FILM_DETAIL, belongs_to_collection={"id": 900}),
+        "/movie/12": {"id": 12, "title": "Pelíšky 2", "belongs_to_collection": {"id": 900}},
+        "/movie/13": {"id": 13, "title": "Pelíšky 3", "belongs_to_collection": {"id": 900}},
+        "/movie/14": {"id": 14, "title": "Samotář"},
+        "/collection/900": saga,
+    })
+    following = api("play_next", track="x", choice="movie:11")["next"]       # film spuštěný ze stránky titulu
+    assert (following["title"], following["subtitle"], following["auto"]) == (
+        "Další film série", "Pelíšky 2 (2010)", False)
+    assert following["target"]["type"] == "play" and following["target"]["params"] == {
+        "vid": _web(51, "")["id"], "web_result": _web(51, "Pelisky 2 2010 CZ 1080p", 2 * hour, "4 GB"),
+        "choice": "movie:12"}
+    assert asked == [("Pelíšky 2 2010", 1)]
+    missing = api("play_next", track="x", choice="movie:12")["next"]         # další díl na Přehraj.to není: stránka titulu
+    assert missing["subtitle"] == "Pelíšky 3 (2020)" and missing["target"]["type"] == "title"
+    assert missing["target"]["params"] == {"kind": "movie", "id": 13, "title": "Pelíšky 3", "year": 2020,
+                                           "poster": "https://image.tmdb.org/t/p/w342/p3.jpg", "orig": ""}
+    assert api("play_next", track="x", choice="movie:13")["next"] is None    # poslední film série
+    assert api("play_next", track="x", choice="movie:14")["next"] is None    # film bez pokračování
+    assert api("play_next", track="x", choice="movie:15")["next"] is None    # TMDB neodpověděl: žádný návrh, žádná chyba
+
+    _fill(0)                                                                 # film z vlastního katalogu s číslem TMDB
+    with app_api._library() as lib:
+        lib.update_meta("movie:pelisky|1999", {"status": "ok", "title": "Pelíšky", "year": 1999, "tmdb_id": 11})
+        lib.upsert_video("7:pelisky-2:0000000000000077", "Pelisky.2.2010.CZ", "account",
+                         nameparser.parse("Pelisky.2.2010.CZ"))
+        key = lib.find_video("7:pelisky-2:0000000000000077")["meta_key"]
+        lib.update_meta(key, {"status": "ok", "title": "Pelíšky 2", "year": 2010, "tmdb_id": 12})
+    own = api("play_next", track=REF)["next"]                                # pokračování mám v katalogu: hraje odtud
+    assert own["subtitle"] == "Pelíšky 2 (2010)" and own["target"]["params"] == {"vid": "7:pelisky-2:0000000000000077"}
+    api("settings_set", tmdb_key="")
+    assert api("play_next", track=REF)["next"] is None                       # bez klíče TMDB se série nepozná
 
 
 def test_availability_check_marks_discovered_films(api, monkeypatch):

@@ -22,6 +22,10 @@ CZECHOSLOVAK = "CZ|SK|XC"        # Česko, Slovensko a někdejší Českoslovens
 AVAILABLE_PREFIX = "avail:"      # kolik verzí titulu se na Přehraj.to naposledy našlo
 AVAILABLE_TTL = 7 * 24 * 3600
 CHECK_BATCH = 20                 # kolik titulů ověří jedno „Ověřit dostupnost“
+# seriálové žánry TMDB bez vlastní ilustrace: nejbližší filmová, nebo dlaždice z iVysílání
+GENRE_ART = {10759: "genre_28", 10765: "genre_878", 10768: "genre_10752", 10762: "kids", 10763: "news"}
+TITLE_PREFIX = "title:"          # název a plakát titulu z Objevuj (pro další díl a pokračování)
+RECENT_SERIES = "recent_series"  # naposledy sledované seriály z Objevuj
 KIND_NAMES = {"movie": "film", "tv": "seriál"}
 _LOCK = threading.RLock()
 
@@ -107,7 +111,7 @@ def favorite_cards(lib, state, limit=None):
 def favorites(params):
     with api._library() as lib:
         cards = favorite_cards(lib, api._state(lib))
-    return {"title": "Oblíbené", "items": cards, "next": None,
+    return {"title": "Oblíbené", "items": cards, "next": None, "empty_art": "favorites",
             "empty": "Zatím nemáte nic oblíbeného.\n\nPodržte tlačítko OK na filmu nebo seriálu "
                      "a zvolte „Přidat do oblíbených“."}
 
@@ -257,9 +261,11 @@ def discover_years(params):
 def discover_genres(params):
     kind = _kind(params)
     extra = {"origin": params["origin"]} if params.get("origin") else {}
-    icon = "folder:series" if kind == "tv" else "folder:movies"
+    tint = "series" if kind == "tv" else "movies"
+    # ilustrace žánru (tile_genre_<číslo>); žánr bez ilustrace dostane složku v barvě sekce
     cards = [api._card(genre["name"], api._target("list", "discover", dict(extra, kind=kind, genre=str(genre["id"])),
-                                                  "%s – %s" % (_plural(kind), genre["name"])), icon=icon)
+                                                  "%s – %s" % (_plural(kind), genre["name"])),
+                       icon="%s:%s" % (GENRE_ART.get(genre["id"], "genre_%s" % genre["id"]), tint))
              for genre in _tmdb().genres(kind) if isinstance(genre, dict) and genre.get("id") and genre.get("name")]
     return {"items": cards, "next": None}
 
@@ -289,18 +295,18 @@ def home_tiles(kind):
     return [
         api._card("Novinky", api._target("list", "discover", {"kind": kind, "category": "recent"},
                                          "%s – novinky" % name), "Právě vysílané" if kind == "tv" else "Poslední 3 měsíce",
-                  icon=icon),
+                  icon="discover_new:" + icon),
         api._card("Populární", api._target("list", "discover", {"kind": kind, "category": "popular"},
-                                           "%s – populární" % name), icon="all"),
+                                           "%s – populární" % name), icon="discover_popular:" + icon),
         api._card("Nejlépe hodnocené", api._target("list", "discover", {"kind": kind, "category": "top_rated"},
-                                                   "%s – nejlépe hodnocené" % name), icon="rating"),
+                                                   "%s – nejlépe hodnocené" % name), icon="discover_top:" + icon),
         api._card("Podle roku", api._target("list", "discover_years", {"kind": kind}, "%s podle roku" % name),
-                  icon="year"),
+                  icon="discover_year:" + icon),
         api._card("Podle žánru", api._target("list", "discover_genres", {"kind": kind}, "%s podle žánru" % name),
-                  icon="folder:" + icon),
+                  icon="discover_genre:" + icon),
         api._card("Československé", api._target("list", "discover_czechoslovak", {"kind": kind},
                                                 "Československé %s" % name.lower()), "Česko a Slovensko",
-                  icon="folder:past"),
+                  icon="discover_czechoslovak:" + icon),
     ]
 
 
@@ -491,6 +497,38 @@ def discover_season(params):
     return {"items": cards, "next": None, "empty": "TMDB u této řady neuvádí žádné díly."}
 
 
+def _remember_title(lib, kind, params):
+    if params.get("id"):
+        lib.set_kv(TITLE_PREFIX + "%s:%s" % (kind, params["id"]), json.dumps({
+            key: params.get(key) or "" for key in ("id", "title", "orig", "year", "poster")}))
+
+
+def _title_info(lib, kind, tmdb_id):
+    try:
+        info = json.loads(lib.get_kv(TITLE_PREFIX + "%s:%s" % (kind, tmdb_id)) or "null")
+    except ValueError:
+        info = None
+    return info if isinstance(info, dict) and info.get("title") else None
+
+
+def _recent_series(lib):
+    try:
+        recent = json.loads(lib.get_kv(RECENT_SERIES) or "[]")
+    except ValueError:
+        recent = []
+    return [item for item in recent if isinstance(item, (int, str))] if isinstance(recent, list) else []
+
+
+def remember_series(lib, choice):
+    """Přehrává se díl seriálu z Objevuj (``tv:<id>:<řada>:<díl>``): seriál patří mezi rozkoukané."""
+    _prefix, tmdb_id, season = (choice.split(":") + ["", ""])[:3]
+    if not tmdb_id.isdigit() or not season.isdigit():
+        return
+    lib.set_kv("last_season:%s" % tmdb_id, season)
+    recent = [item for item in _recent_series(lib) if str(item) != tmdb_id]
+    lib.set_kv(RECENT_SERIES, json.dumps(([int(tmdb_id)] + recent)[:10]))
+
+
 def discover_episode(params):
     season, episode = int(params.get("season") or 0), int(params.get("episode") or 0)
     tmdb_id = params.get("id") or 0
@@ -498,6 +536,7 @@ def discover_episode(params):
         state = api._state(lib)
         if tmdb_id:
             lib.set_kv("last_season:%s" % tmdb_id, str(season))  # pro „Pokračovat“ na stránce seriálu
+            _remember_title(lib, "tv", params)
     choice = "tv:%s:%s:%s" % (tmdb_id, season, episode) if tmdb_id else ""
     versions = _find_versions(_names(params), 0, (season, episode), state, choice=choice)
     cards = [_version_card(version, state, choice) for version in versions]
@@ -506,6 +545,169 @@ def discover_episode(params):
         cards = [api._card("Na Přehraj.to jsem tento díl nenašel", api._target("search", "search", {"q": query}),
                            "Zkuste hledat ručně", icon="search")]
     return {"items": cards, "next": None}
+
+
+# ---------------------------------------------------------------------------
+# Po dokoukání: další díl seriálu, nebo další film série
+# ---------------------------------------------------------------------------
+
+def _next_item(title, subtitle, target, auto=False):
+    """Návrh pro přehrávač; ``auto`` = spustit sám po odpočtu (jen další díl, ne celý další film)."""
+    return {"title": title, "subtitle": subtitle, "target": target, "auto": auto}
+
+
+def _catalogue_next_episode(lib, video, state):
+    """Další díl seriálu z vlastního katalogu (nejlepší verze podle předvoleb)."""
+    best = {}
+    for other in lib.videos_for_meta(video["meta_key"]):
+        if not other["episode"]:
+            continue
+        position = (other["season"], other["episode"])
+        rank = api._version_rank(other, state["prefs"], state["bad"])
+        if position not in best or rank < best[position][0]:
+            best[position] = (rank, other)
+    later = sorted(position for position in best if position > (video["season"], video["episode"]))
+    if not later:
+        return None
+    following = best[later[0]][1]
+    return following, _episode_label(lib, following)
+
+
+def _episode_label(lib, video, position=None):
+    season, episode = position or (video["season"], video["episode"])
+    meta = lib.get_meta(video["meta_key"]) or {}
+    return "%s %d×%02d" % (api._display_title(meta) or video["title"], season, episode)
+
+
+def _searched_next_episode(lib, video, state):
+    """Další díl seriálu, který v katalogu není: vyhledá se na Přehraj.to podle názvu seriálu."""
+    following = (video["season"], video["episode"] + 1)
+    meta = lib.get_meta(video["meta_key"]) or {}
+    names = [api._display_title(meta) or video["title"], meta.get("orig_title") or "", video["title"]]
+    versions = [version for version in _find_versions(names, 0, following, state, pages=1) if not version["short"]]
+    if not versions:
+        return None
+    return _next_item("Další díl", _episode_label(lib, video, following),
+                      _version_card(versions[0], state)["target"], auto=True)
+
+
+def _tmdb_next_episode(lib, choice, state):
+    """Další díl seriálu z Objevuj: stejná řada, nebo první díl následující."""
+    _prefix, tmdb_id, season, episode = (choice.split(":") + ["", "", ""])[:4]
+    info = _title_info(lib, "tv", tmdb_id)
+    if not info or not season.isdigit() or not episode.isdigit():
+        return None
+    client = _tmdb()
+    season, episode = int(season), int(episode)
+    following, episodes = (season, episode + 1), client.season_episodes(int(tmdb_id), season)
+    if str(episode + 1) not in episodes:
+        if not any(item["number"] == season + 1 for item in client.seasons(int(tmdb_id))):
+            return None
+        following, episodes = (season + 1, 1), client.season_episodes(int(tmdb_id), season + 1)
+        if "1" not in episodes:
+            return None
+    new_choice = "tv:%s:%d:%d" % (tmdb_id, following[0], following[1])
+    versions = [version for version in _find_versions([info["title"], info.get("orig") or ""], 0, following, state,
+                                                      choice=new_choice) if not version["short"]]
+    if not versions:
+        return None
+    card = _version_card(versions[0], state, new_choice)
+    label = "%s %d×%02d" % (info["title"], following[0], following[1])
+    name = (episodes.get(str(following[1])) or {}).get("title")
+    return _next_item("Další díl", " · ".join(part for part in (label, name) if part), card["target"], auto=True)
+
+
+def _next_film(lib, tmdb_id, state):
+    """Další film stejné série (kolekce v TMDB) podle data uvedení."""
+    client = _tmdb()
+    collection = client.details(int(tmdb_id)).get("collection_id")
+    if not collection:
+        return None
+    parts = client.collection_movies(collection)
+    index = next((i for i, part in enumerate(parts) if part["id"] == int(tmdb_id)), None)
+    if index is None or index + 1 >= len(parts):
+        return None
+    part = parts[index + 1]
+    date = part.get("release_date") or ""
+    year = int(date[:4]) if date[:4].isdigit() else 0
+    names = [part["title"], part.get("original_title") or ""]
+    choice = "movie:%s" % part["id"]
+    label = "%s (%d)" % (part["title"], year) if year else part["title"]
+    # nejdřív vlastní katalog, pak hledání na Přehraj.to; když není nikde, nabídne se stránka titulu
+    wanted = search_results.aliases(*names)
+    for meta in lib.search(part["title"])[0]:
+        if search_results.normalize(api._display_title(meta)) in wanted and (not year or api._year(meta) == year):
+            versions = lib.videos_grouped([meta["key"]])
+            if versions.get(meta["key"]):
+                return _next_item("Další film série", label, api._movie_card(meta, state, versions)["target"])
+    found = [version for version in _find_versions(names, year, None, state, choice=choice) if not version["short"]]
+    if found:
+        return _next_item("Další film série", label, _version_card(found[0], state, choice)["target"])
+    poster = part.get("poster_path") or ""
+    return _next_item("Další film série", label, api._target("title", "discover_title", {
+        "kind": "movie", "id": part["id"], "title": part["title"], "year": year,
+        "poster": IMG + "w342" + poster if poster.startswith("/") else "",
+        "orig": part.get("original_title") or ""}, part["title"]))
+
+
+def play_next(params):
+    """Co nabídnout po dokoukání videa: ``{"next": {"title", "subtitle", "target"} | None}``.
+
+    Díl seriálu → další díl (z katalogu, nebo u seriálu z Objevuj vyhledaný na Přehraj.to).
+    Film → další film stejné série podle TMDB. Když nic dalšího není nebo to nejde zjistit, nic.
+    """
+    track = str(params.get("track") or "")
+    choice = str(params.get("choice") or "")
+    try:
+        with api._library() as lib:
+            state = api._state(lib)
+            video = lib.find_video(track) if track else None
+            if choice.startswith("tv:"):
+                return {"next": _tmdb_next_episode(lib, choice, state)}
+            if video and video["kind"] == "episode" and video["episode"]:
+                found = _catalogue_next_episode(lib, video, state)
+                if found:
+                    return {"next": _next_item("Další díl", found[1],
+                                               api._target("play", "play", {"vid": found[0]["id"]}), auto=True)}
+                return {"next": _searched_next_episode(lib, video, state)}
+            tmdb_id = choice[len("movie:"):] if choice.startswith("movie:") else ""
+            if not tmdb_id and video and api._tmdb().enabled:
+                meta = lib.get_meta(video["meta_key"]) or {}
+                tmdb_id = meta.get("tmdb_id") or ""
+                if not tmdb_id and meta.get("status") != "ok":
+                    # film z hledání bez metadat: dohledat podle názvu a roku ze jména souboru
+                    found = api._tmdb().find(video["title"], video["year"] or 0)
+                    tmdb_id = (found or {}).get("tmdb_id") or ""
+            if str(tmdb_id).isdigit() and int(tmdb_id) > 0:
+                return {"next": _next_film(lib, tmdb_id, state)}
+    except (api.ApiError, TmdbError):
+        pass  # návrh je jen pohodlí: když se nepovede, přehrávač se prostě zavře
+    return {"next": None}
+
+
+def next_up_cards(lib, state, limit=10):
+    """Karty „Další díly“: po dokoukaném dílu seriálu z katalogu ten následující, u seriálů z Objevuj stránka."""
+    cards, seen = [], set()
+    for video in lib.history_videos(limit=40, include_search=True):
+        if video["kind"] != "episode" or not video["episode"] or video["meta_key"] in seen:
+            continue
+        seen.add(video["meta_key"])      # rozhoduje naposledy přehraný díl seriálu
+        if video["id"] not in state["watched"]:
+            continue
+        found = _catalogue_next_episode(lib, video, state)
+        if found and found[0]["id"] not in state["watched"] and not state["resume"].get(found[0]["id"]):
+            meta = lib.get_meta(video["meta_key"])
+            card = api._video_card(found[0], meta, state)
+            card["subtitle"] = " · ".join(part for part in ("Další díl", card["subtitle"]) if part)
+            cards.append(card)
+    for tmdb_id in _recent_series(lib):
+        info = _title_info(lib, "tv", tmdb_id)
+        if info:
+            card = _title_card("tv", info.get("id") or tmdb_id, info["title"], int(info.get("year") or 0),
+                               info.get("poster") or "", info.get("orig") or "", state)
+            card["subtitle"] = "Pokračovat ve sledování"
+            cards.append(card)
+    return cards[:limit]
 
 
 def search_rows(query, state):
@@ -527,4 +729,5 @@ ACTIONS = {
     "discover": discover, "discover_years": discover_years, "discover_genres": discover_genres,
     "discover_czechoslovak": discover_czechoslovak, "discover_title": discover_title,
     "discover_season": discover_season, "discover_episode": discover_episode, "discover_check": discover_check,
+    "play_next": play_next,
 }

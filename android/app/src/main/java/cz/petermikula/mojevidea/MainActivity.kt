@@ -12,6 +12,8 @@ import androidx.leanback.widget.ListRowPresenter
 import androidx.leanback.widget.OnItemViewClickedListener
 import androidx.leanback.widget.OnItemViewSelectedListener
 import androidx.leanback.widget.PageRow
+import androidx.leanback.widget.Presenter
+import androidx.leanback.widget.PresenterSelector
 import org.json.JSONArray
 
 class MainActivity : FragmentActivity() {
@@ -30,7 +32,7 @@ class MainActivity : FragmentActivity() {
  * stránka s vlastními řadami karet. Obsah i názvy sekcí dodává logika v Pythonu (akce `home`).
  */
 class MainFragment : BrowseSupportFragment() {
-    private class Section(val title: String, val rows: JSONArray)
+    private class Section(val title: String, val icon: String, val rows: JSONArray)
 
     private val pages = ArrayObjectAdapter(ListRowPresenter())
     private var sections = emptyList<Section>()
@@ -49,6 +51,11 @@ class MainFragment : BrowseSupportFragment() {
         mainFragmentRegistry.registerFragment(PageRow::class.java, object : FragmentFactory<SectionFragment>() {
             override fun createFragment(row: Any?): SectionFragment =
                 SectionFragment.create((row as PageRow).headerItem.id.toInt())
+        })
+        // postranní nabídka: u každé sekce její ikona
+        val header = SectionHeaderPresenter { id -> sections.getOrNull(id.toInt())?.icon.orEmpty() }
+        setHeaderPresenterSelector(object : PresenterSelector() {
+            override fun getPresenter(item: Any?): Presenter = header
         })
         adapter = pages
         setOnSearchClickedListener {
@@ -104,7 +111,9 @@ class MainFragment : BrowseSupportFragment() {
             shown = raw
             val list = data.optJSONArray("sections")
             val fresh = (0 until (list?.length() ?: 0)).mapNotNull { index ->
-                list!!.optJSONObject(index)?.let { Section(it.optString("title"), it.optJSONArray("rows") ?: JSONArray()) }
+                list!!.optJSONObject(index)?.let {
+                    Section(it.optString("title"), it.optString("icon"), it.optJSONArray("rows") ?: JSONArray())
+                }
             }
             val sameMenu = loadedOnce && fresh.map { it.title } == sections.map { it.title }
             sections = fresh

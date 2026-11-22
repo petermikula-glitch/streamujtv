@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.widget.Button
 import android.widget.TextView
 import androidx.annotation.OptIn
 import androidx.fragment.app.FragmentActivity
@@ -31,6 +32,7 @@ import java.io.File
 class PlayerActivity : FragmentActivity() {
     private companion object {
         const val SAVE_EVERY_MS = 15_000L
+        const val NEXT_COUNTDOWN = 10  // sekund, než se další díl spustí sám
     }
 
     private var player: ExoPlayer? = null
@@ -47,6 +49,23 @@ class PlayerActivity : FragmentActivity() {
     private var diagnostic = ""
     private var started = false
     private var retried = false
+    private lateinit var nextPanel: View
+    private lateinit var nextPlay: Button
+    private var nextTarget: Target? = null
+    private var countdown = 0
+
+    /** Odpočet do samočinného spuštění dalšího dílu. */
+    private val tick = object : Runnable {
+        override fun run() {
+            if (countdown <= 0) {
+                startNext()
+                return
+            }
+            nextPlay.text = "Přehrát ($countdown)"
+            countdown -= 1
+            handler.postDelayed(this, 1000)
+        }
+    }
 
     private val saver = object : Runnable {
         override fun run() {
@@ -62,6 +81,14 @@ class PlayerActivity : FragmentActivity() {
         message = findViewById(R.id.player_message)
         spinner = findViewById(R.id.player_spinner)
         heading = findViewById(R.id.player_title)
+        nextPanel = findViewById(R.id.next_panel)
+        nextPlay = findViewById(R.id.next_play)
+        nextPlay.setOnClickListener { startNext() }
+        findViewById<Button>(R.id.next_close).apply {
+            setOnClickListener { finish() }
+            // kdo přejde na Zavřít, chce se rozhodnout sám: odpočet se zastaví
+            setOnFocusChangeListener { _, focused -> if (focused) stopCountdown() }
+        }
         // název videa se ukazuje spolu s ovládáním
         playerView.setControllerVisibilityListener(
             PlayerView.ControllerVisibilityListener { visibility ->
@@ -156,7 +183,7 @@ class PlayerActivity : FragmentActivity() {
                     }
                 } else if (state == Player.STATE_ENDED) {
                     saveProgress(ended = true)
-                    finish()
+                    offerNext()
                 }
             }
 
@@ -199,6 +226,62 @@ class PlayerActivity : FragmentActivity() {
             JSONObject().put("track", track).put("position", exo.currentPosition / 1000.0)
                 .put("total", total / 1000.0).put("ended", ended).put("started", first),
         )
+    }
+
+    /** Po dokoukání: logika navrhne další díl seriálu nebo další film série; jinak se přehrávač zavře. */
+    private fun offerNext() {
+        if (live || track.isEmpty() || track.startsWith("ivys:")) {
+            finish()
+            return
+        }
+        handler.removeCallbacks(saver)
+        playerView.hideController()
+        playerView.useController = false
+        val ended = track
+        Api.call("play_next", JSONObject().put("track", ended).put("choice", params.optString("choice"))) { result ->
+            if (isFinishing || isDestroyed || ended != track) return@call
+            val next = result.data?.optJSONObject("next")
+            val target = next?.let { Target.from(it.optJSONObject("target")) }
+            if (next == null || target == null || target.type.isEmpty()) {
+                finish()
+                return@call
+            }
+            nextTarget = target
+            findViewById<TextView>(R.id.next_label).text = next.optString("title")
+            findViewById<TextView>(R.id.next_title).text = next.optString("subtitle")
+            val plays = target.type == "play"
+            nextPlay.text = if (plays) "Přehrát" else "Otevřít"
+            heading.visibility = View.GONE
+            nextPanel.visibility = View.VISIBLE
+            nextPlay.requestFocus()
+            countdown = if (plays && next.optBoolean("auto")) NEXT_COUNTDOWN else 0
+            if (countdown > 0) handler.post(tick)
+        }
+    }
+
+    private fun stopCountdown() {
+        handler.removeCallbacks(tick)
+        if (nextPlay.text.startsWith("Přehrát (")) nextPlay.text = "Přehrát"
+        countdown = 0
+    }
+
+    private fun startNext() {
+        val target = nextTarget ?: return
+        handler.removeCallbacks(tick)
+        countdown = 0
+        nextTarget = null
+        nextPanel.visibility = View.GONE
+        if (target.type == "play") {
+            // další video ve stejném přehrávači
+            call = target.call
+            params = target.params
+            started = false
+            retried = false
+            resolve()
+        } else {
+            Navigator.open(this, target, "")
+            finish()
+        }
     }
 
     private fun describe(error: PlaybackException): String {
@@ -247,6 +330,7 @@ class PlayerActivity : FragmentActivity() {
 
     override fun onPause() {
         super.onPause()
+        stopCountdown()  // na pozadí se nic samo nespouští
         player?.pause()
         saveProgress(ended = false)
     }
@@ -258,6 +342,7 @@ class PlayerActivity : FragmentActivity() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(tick)
         release()
         super.onDestroy()
     }

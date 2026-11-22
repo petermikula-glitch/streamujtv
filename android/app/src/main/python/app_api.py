@@ -15,9 +15,11 @@ Modul nesmí importovat nic z Androidu, aby šel testovat mimo něj.
 import json
 import os
 import re
+import socket
 import threading
 import time
 
+import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -416,9 +418,9 @@ def home(params):
               icon="settings"),
     ]}]
     # "pending": ve frontě něco čeká – aplikace po startu znovu spustí službu stahování
-    return {"sections": [{"id": "prehrajto", "title": "Přehraj.to", "rows": prehrajto},
-                         {"id": "ivysilani", "title": "iVysílání", "rows": television},
-                         {"id": "tools", "title": "Nástroje", "rows": tools}],
+    return {"sections": [{"id": "prehrajto", "title": "Přehraj.to", "icon": "section_prehrajto", "rows": prehrajto},
+                         {"id": "ivysilani", "title": "iVysílání", "icon": "section_ivysilani", "rows": television},
+                         {"id": "tools", "title": "Nástroje", "icon": "section_tools", "rows": tools}],
             "pending": any(entry.get("state") in ("queued", "downloading")
                            for entry in state["downloads"].values())}
 
@@ -433,6 +435,9 @@ def _prehrajto_rows(lib, state, settings):
     progress = _in_progress(lib, state)
     if progress:
         rows.append({"title": "Rozkoukané", "items": progress})
+    following = app_discover.next_up_cards(lib, state)
+    if following:
+        rows.append({"title": "Další díly", "items": following})
     favorites = app_discover.favorite_cards(lib, state, HOME_ROW)
     if len(state["favorites"]) > HOME_ROW:
         favorites.append(_card("Všechny oblíbené", _target("list", "favorites", {}, "Oblíbené"),
@@ -715,6 +720,7 @@ def play(params):
         if params.get("choice"):
             # verze spuštěná ze stránky titulu: příště bude první a u dílu seriálu nese stav zhlédnutí
             lib.set_kv(CHOICE_PREFIX + str(params["choice"]), vid)
+            app_discover.remember_series(lib, str(params["choice"]))
     title = _video_title(video, meta)
     position = point[0] if point and not params.get("restart") else 0
     entry = _downloads().get(vid)
@@ -1385,6 +1391,25 @@ ACTIONS.update({
 })
 
 
+def _offline(error):
+    """Chyba vznikla výpadkem spojení (i když ji mezitím kód přeložil do srozumitelné hlášky)."""
+    for _ in range(6):
+        if error is None:
+            break
+        if isinstance(error, (urllib.error.URLError, ConnectionError, socket.timeout, socket.gaierror)) \
+                and not isinstance(error, urllib.error.HTTPError):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
+
+
+def _failure(text, error):
+    result = {"ok": False, "error": text}
+    if _offline(error):
+        result["offline"] = True   # aplikace k hlášce ukáže ilustraci „bez připojení“
+    return json.dumps(result, ensure_ascii=False)
+
+
 def call(action, params_json="{}"):
     """Jediný vstup pro aplikaci; nikdy nevyhazuje výjimku."""
     try:
@@ -1395,10 +1420,7 @@ def call(action, params_json="{}"):
         if not isinstance(params, dict):
             raise ApiError("Neplatné parametry.")
         return json.dumps({"ok": True, "data": handler(params)}, ensure_ascii=False)
-    except ApiError as error:
-        return json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False)
-    except TmdbError as error:
-        return json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False)
+    except (ApiError, TmdbError) as error:
+        return _failure(str(error), error)
     except Exception as error:  # noqa: BLE001 – aplikace musí dostat odpověď, ne spadnout
-        return json.dumps({"ok": False, "error": "Neočekávaná chyba: %s: %s" % (type(error).__name__, error)},
-                          ensure_ascii=False)
+        return _failure("Neočekávaná chyba: %s: %s" % (type(error).__name__, error), error)
