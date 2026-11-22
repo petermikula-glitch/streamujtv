@@ -57,14 +57,17 @@ def _section(api, name):
 def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
     sections = api("home")["sections"]
     assert [(section["id"], section["title"]) for section in sections] == [
-        ("prehrajto", "Přehraj.to"), ("ivysilani", "iVysílání"), ("tools", "Nástroje")]
-    prehrajto = _section(api, "prehrajto")
-    assert list(prehrajto) == ["Začínáme", "Oblíbené", "Objevuj filmy", "Objevuj seriály"]
-    assert prehrajto["Začínáme"][0]["target"] == {"type": "settings"}
-    assert _titles(prehrajto["Objevuj filmy"]) == ["Novinky", "Populární", "Nejlépe hodnocené", "Podle roku",
-                                                    "Podle žánru", "Československé"]
-    assert prehrajto["Objevuj seriály"][3]["target"] == {"type": "list", "call": "discover_years",
-                                                         "params": {"kind": "tv"}, "title": "Seriály podle roku"}
+        ("movies", "Filmy"), ("series", "Seriály"), ("favorites", "Oblíbené"), ("progress", "Rozkoukané"),
+        ("ivysilani", "iVysílání"), ("tools", "Nástroje")]
+    films, series = _section(api, "movies"), _section(api, "series")
+    assert list(films) == ["Začínáme", "Objevuj filmy"] and list(series) == ["Objevuj seriály"]
+    assert films["Začínáme"][0]["target"] == {"type": "settings"}
+    assert _titles(films["Objevuj filmy"]) == ["Novinky", "Populární", "Nejlépe hodnocené", "Podle roku",
+                                                "Podle žánru", "Československé"]
+    assert series["Objevuj seriály"][3]["target"] == {"type": "list", "call": "discover_years",
+                                                      "params": {"kind": "tv"}, "title": "Seriály podle roku"}
+    assert _titles(_section(api, "favorites")["Oblíbené"]) == ["Zatím nic"]          # prázdné sekce napoví, co s nimi
+    assert _titles(_section(api, "progress")["Rozkoukané"]) == ["Nic rozkoukaného"]
     television = _section(api, "ivysilani")                  # jen věci z iVysílání
     assert list(television) == ["Živé vysílání", "Kategorie"]
     assert television["Živé vysílání"][0]["target"]["call"] == "ivys_play"
@@ -83,18 +86,20 @@ def test_catalogue_rows_lists_and_search(api):
     _fill()
     with app_api._library() as lib:
         lib.record_play(REF, 1200, 6000)
-    rows = _section(api, "prehrajto")
+    rows = _section(api, "movies")
     assert "Začínáme" not in rows
-    assert _titles(rows["Rozkoukané"]) == ["Pelíšky"] and rows["Rozkoukané"][0]["progress"] == 20
-    film = rows["Moje videa – nově přidané filmy"][0]
+    unfinished = _section(api, "progress")
+    assert list(unfinished) == ["Filmy", "Historie"]                         # rozkoukané mají vlastní sekci
+    assert _titles(unfinished["Filmy"]) == ["Pelíšky"] and unfinished["Filmy"][0]["progress"] == 20
+    film = rows["Moje filmy – nově přidané"][0]
     assert film == {"title": "Pelíšky", "subtitle": "1999 · 91 % · CZ dabing, EN", "image": "https://img/pelisky.jpg",
                     "progress": 20, "wide": False, "watched": False, "icon": "movies", "menu": film["menu"],
                     "target": {"type": "play", "call": "play", "params": {"vid": REF}}}  # česká verze ve vyšší kvalitě
     assert [item["title"] for item in film["menu"]] == ["Přehrát", "Přehrát od začátku", "Stáhnout na disk",
                                                         "Přidat do oblíbených"]
-    assert rows["Moje videa – nově přidané filmy"][-1]["target"]["call"] == "movies"
-    assert rows["Moje videa – nově přidané filmy"][-1]["icon"] == "movies"  # dlaždice bez obrázku nese ikonu
-    assert rows["Moje videa – seriály"][0]["target"] == {"type": "list", "call": "show", "params": {"key": "show:archa"},
+    assert rows["Moje filmy – nově přidané"][-1]["target"]["call"] == "movies"
+    assert rows["Moje filmy – nově přidané"][-1]["icon"] == "movies"  # dlaždice bez obrázku nese ikonu
+    assert _section(api, "series")["Moje seriály"][0]["target"] == {"type": "list", "call": "show", "params": {"key": "show:archa"},
                                             "title": "Archa"}
 
     listing = api("movies", order="title")
@@ -150,9 +155,9 @@ def test_web_search_reuses_playback_history_and_downloads(api, monkeypatch):
     assert stream["track"] == episode and stream["url"] == "https://cdn.x/video.mp4"
     api("progress_save", track=episode, position=300, total=1200)
     assert api("play", vid=episode)["position"] == 300
-    home = _section(api, "prehrajto")
+    home = _section(api, "progress")
     assert any(card["target"]["params"]["vid"] == episode and card["progress"] == 25
-               for card in home["Rozkoukané"])
+               for card in home["Seriály"])
     assert episode in [card["target"]["params"]["vid"] for card in api("played")["items"]]
     assert _titles(api("shows")["items"]) == ["Filtr", "Archa"]
 
@@ -302,7 +307,7 @@ def test_ivysilani_browsing_playback_and_my_shows(api):
     api("progress_save", track=stream["track"], position=400, total=1326)
     assert api("ivys_play", idec="211522160100014")["position"] == 400
     progress = _section(api, "ivysilani")["Rozkoukané"]                   # rozkoukané z iVysílání jen tady
-    assert "Rozkoukané" not in _section(api, "prehrajto")
+    assert "Filmy" not in _section(api, "progress") and "Seriály" not in _section(api, "progress")
     assert progress[0]["title"] == "Na plovárně · Terry Pratchett" and progress[0]["progress"] == 30
     live_stream = api("ivys_play", channel="CH_24", timeshift=True)
     assert live_stream["live"] and live_stream["url"].endswith("token=shift") and live_stream["track"] == ""
@@ -390,8 +395,8 @@ def test_download_queue_progress_local_playback_and_removal(api, tmp_path):
     card = api("downloads")["items"][0]
     assert (card["subtitle"], card["progress"]) == ("Stahuje se · 25 % z 0 MB", 25)
     assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zrušit stahování"]
-    rows = _section(api, "prehrajto")
-    assert _titles(rows["Stažené na disku"]) == ["Pelíšky"]
+    rows = _section(api, "movies")
+    assert _titles(rows["Stažené filmy"]) == ["Pelíšky"] and "Stažené díly" not in _section(api, "series")
     assert "1 ve frontě" in _section(api, "tools")["Nástroje"][1]["subtitle"]
 
     (disk / "Pelíšky.mkv").write_bytes(b"x" * 200)
@@ -399,8 +404,8 @@ def test_download_queue_progress_local_playback_and_removal(api, tmp_path):
     assert api("download_finish", vid=REF, size=200, subtitles=[job["subtitles"][0]["path"]]) == {"saved": True}
     stream = api("play", vid=REF)                                            # hraje z disku, bez přihlášení
     assert stream["local"] is True and stream["url"] == job["path"] and stream["subtitles"] == [str(disk / "Pelíšky.1.vtt")]
-    rows = _section(api, "prehrajto")
-    film = rows["Moje videa – nově přidané filmy"][0]
+    rows = _section(api, "movies")
+    film = rows["Moje filmy – nově přidané"][0]
     assert film["subtitle"].startswith("Staženo · ") and "Smazat stažený soubor" in _titles(film["menu"])
     assert "už je stažené" in api("download_add", vid=REF)["error"]
     assert api("download_progress", vid=REF, done=1, total=2) == {"cancel": True}   # hotové se už nestahuje
@@ -489,20 +494,21 @@ def test_update_check_finds_newer_release_and_throttles(api, monkeypatch):
 def test_favorites_from_catalogue_cards(api):
     _fill()
     assert "Zatím nemáte" in api("favorites")["empty"] and api("favorites")["items"] == []
-    placeholder = _section(api, "prehrajto")["Oblíbené"]
-    assert _titles(placeholder) == ["Oblíbené"] and placeholder[0]["target"]["call"] == "favorites"
-    film = _section(api, "prehrajto")["Moje videa – nově přidané filmy"][0]
+    placeholder = _section(api, "favorites")["Oblíbené"]
+    assert _titles(placeholder) == ["Zatím nic"] and placeholder[0]["target"]["call"] == "favorites"
+    film = _section(api, "movies")["Moje filmy – nově přidané"][0]
     add = film["menu"][-1]
     assert add["title"] == "Přidat do oblíbených" and add["target"]["type"] == "command"
     assert api(add["target"]["call"], **add["target"]["params"]) == {"message": "Přidáno do oblíbených: Pelíšky"}
-    series = _section(api, "prehrajto")["Moje videa – seriály"][0]
+    series = _section(api, "series")["Moje seriály"][0]
     assert _titles(series["menu"]) == ["Otevřít", "Přidat do oblíbených"]
     api(series["menu"][1]["target"]["call"], **series["menu"][1]["target"]["params"])
 
-    rows = _section(api, "prehrajto")                               # filmy a seriály mají každé svou řadu
-    assert "Oblíbené" not in rows
-    assert _titles(rows["Oblíbené filmy"]) == ["Pelíšky"] and _titles(rows["Oblíbené seriály"]) == ["Archa"]
-    favorites = rows["Oblíbené seriály"] + rows["Oblíbené filmy"]
+    rows = _section(api, "favorites")                               # vlastní sekce, filmy a seriály zvlášť
+    assert list(rows) == ["Filmy", "Seriály"]
+    assert _titles(rows["Filmy"]) == ["Pelíšky"] and _titles(rows["Seriály"]) == ["Archa"]
+    assert not any("Oblíbené" in name for name in list(_section(api, "movies")) + list(_section(api, "series")))
+    favorites = rows["Seriály"] + rows["Filmy"]
     assert favorites[1]["target"] == {"type": "play", "call": "play", "params": {"vid": REF}}
     assert favorites[0]["target"]["call"] == "show"
     assert _titles(api("favorites", kind="tv")["items"]) == ["Archa"] and api("favorites", kind="tv")["title"] == "Oblíbené seriály"
@@ -648,7 +654,7 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
     assert chosen["actions"][0]["subtitle"] == "EN · 720p"
 
     api(favourite["target"]["call"], **favourite["target"]["params"])        # oblíbený titul z Objevuj
-    favorite = _section(api, "prehrajto")["Oblíbené filmy"][0]
+    favorite = _section(api, "favorites")["Filmy"][0]
     assert favorite["title"] == "Pelíšky" and favorite["target"]["type"] == "title"
     assert favorite["target"]["params"]["id"] == 11 and favorite["menu"][-1]["title"] == "Odebrat z oblíbených"
     assert api("discover_title", **FILM)["actions"][1]["title"] == "Odebrat z oblíbených"
@@ -734,11 +740,11 @@ def test_favourite_that_appears_on_prehrajto_is_announced(api, monkeypatch):
     assert api("favorites_check") == {"found": []} and len(asked) == before  # podruhé se hned neptá
     found["Pelíšky 1999"] = [_web(61, "Pelisky 1999 CZ 1080p", 7000, "4 GB")]
     assert api("favorites_check", force=True) == {"found": ["Pelíšky"]}
-    card = _section(api, "prehrajto")["Oblíbené filmy"][0]
+    card = _section(api, "favorites")["Filmy"][0]
     assert card["badges"] == ["Nově na Přehraj.to"]
     assert api("favorites_check", force=True) == {"found": []}               # známý titul se znovu neohlašuje
     api("discover_title", **FILM)                                            # otevřením štítek zmizí
-    assert "badges" not in _section(api, "prehrajto")["Oblíbené filmy"][0]
+    assert "badges" not in _section(api, "favorites")["Filmy"][0]
 
 
 def test_web_results_of_one_title_are_grouped(api, monkeypatch):
@@ -838,7 +844,7 @@ def test_series_page_lists_episodes_that_play_at_once(api, monkeypatch):
 def test_next_episode_from_the_catalogue_follows_a_finished_one(api):
     _fill(3)
     first, second, third = ["%d:archa:%016x" % (10 + n, 10 + n) for n in (1, 2, 3)]
-    assert "Další díly" not in _section(api, "prehrajto")
+    assert "Další díly" not in _section(api, "series")
     following = api("play_next", track=first)["next"]
     assert following == {"title": "Další díl", "subtitle": "Archa 1×02", "auto": True,
                          "target": {"type": "play", "call": "play", "params": {"vid": second}}}
@@ -846,12 +852,12 @@ def test_next_episode_from_the_catalogue_follows_a_finished_one(api):
     assert api("play_next", track="")["next"] is None and api("play_next", track=REF)["next"] is None
 
     api("progress_save", track=first, position=1190, total=1200, ended=True)
-    row = _section(api, "prehrajto")["Další díly"]                          # po dokoukání čeká další díl na hlavní obrazovce
+    row = _section(api, "series")["Další díly"]                             # po dokoukání čeká další díl na hlavní obrazovce
     assert len(row) == 1 and row[0]["target"]["params"] == {"vid": second}
     assert row[0]["subtitle"].startswith("Další díl")
     api("progress_save", track=second, position=300, total=1200, started=True)
-    assert "Další díly" not in _section(api, "prehrajto")                   # rozkoukaný díl je už v Rozkoukaných
-    assert _section(api, "prehrajto")["Rozkoukané"][0]["target"]["params"] == {"vid": second}
+    assert "Další díly" not in _section(api, "series")                      # rozkoukaný díl je už v Rozkoukaných
+    assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": second}
 
 
 def test_next_episode_of_a_discovered_series_is_searched(api, monkeypatch):
@@ -884,7 +890,7 @@ def test_next_episode_of_a_discovered_series_is_searched(api, monkeypatch):
     assert api("play_next", track="x", choice="tv:77:2:1")["next"] is None   # konec seriálu
     assert api("play_next", track="x", choice="tv:99:1:1")["next"] is None   # neznámý seriál
 
-    row = _section(api, "prehrajto")["Další díly"]                           # rozkoukaný seriál z Objevuj
+    row = _section(api, "series")["Další díly"]                              # rozkoukaný seriál z Objevuj
     assert _titles(row) == ["Archa"] and row[0]["subtitle"] == "Pokračovat ve sledování"
     assert row[0]["target"]["type"] == "title" and row[0]["target"]["params"]["id"] == 77
     resume = api("discover_title", kind="tv", id=77, title="Archa")["actions"][0]
@@ -1065,25 +1071,24 @@ def test_profiles_keep_progress_favourites_and_preferences_apart(api, monkeypatc
     switched = api(owl["target"]["call"], **owl["target"]["params"])        # druhý profil začíná načisto
     assert switched == {"message": "", "close": True, "toast": "Dívá se: Jana"}
     assert api("home")["profile"] == {"name": "Jana", "avatar": "owl", "count": 2}
-    rows = _section(api, "prehrajto")
-    assert "Rozkoukané" not in rows and rows["Oblíbené"][0]["icon"] == "favorites"   # jen nápověda, nic oblíbeného
+    assert list(_section(api, "progress")) == ["Rozkoukané"]                 # jen nápověda, nic rozkoukaného
+    assert _titles(_section(api, "favorites")["Oblíbené"]) == ["Zatím nic"]  # ani oblíbeného
     assert api("settings_get")["prefer_language"] == "dub"
     assert "smazat nejde" in api("profile_delete", id=owl["target"]["params"]["id"])["error"]
     api("progress_save", track=first, position=300, total=1200, started=True)
     api("settings_set", prefer_quality="720")
-    assert _section(api, "prehrajto")["Rozkoukané"][0]["target"]["params"] == {"vid": first}
+    assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": first}
 
     main = api("profiles")["items"][0]
     api(main["target"]["call"], **main["target"]["params"])                 # zpět: původní stav je na místě
-    rows = _section(api, "prehrajto")
-    assert [item["target"]["params"] for item in rows["Rozkoukané"]] == [{"vid": REF}]
-    assert _titles(rows["Oblíbené filmy"]) == ["Pelíšky"]
+    assert [item["target"]["params"] for item in _section(api, "progress")["Filmy"]] == [{"vid": REF}]
+    assert _titles(_section(api, "favorites")["Filmy"]) == ["Pelíšky"]
     settings = api("settings_get")
     assert (settings["prefer_language"], settings["prefer_quality"]) == ("subs", "best")
     assert meta["key"] and _titles(api("movies")["items"]) == ["Filtr", "Pelíšky"]   # katalog je společný
 
     api(main["target"]["call"], **owl["target"]["params"])                  # a druhý profil má své
-    assert _section(api, "prehrajto")["Rozkoukané"][0]["target"]["params"] == {"vid": first}
+    assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": first}
     assert api("settings_get")["prefer_quality"] == "720"
     api(main["target"]["call"], **main["target"]["params"])
     assert "smazaný" in api("profile_delete", id=owl["target"]["params"]["id"])["message"]
@@ -1094,7 +1099,7 @@ def test_profiles_keep_progress_favourites_and_preferences_apart(api, monkeypatc
 def test_hero_and_watch_next_follow_the_last_unfinished_video(api):
     _fill(2)
     sections = {section["id"]: section for section in api("home")["sections"]}
-    assert "hero" not in sections["prehrajto"] and "hero" not in sections["ivysilani"]
+    assert not any("hero" in section for section in sections.values())
     assert api("watch_next") == {"items": []}
     with app_api._library() as lib:
         lib.update_meta("movie:pelisky|1999", {"status": "ok", "title": "Pelíšky", "year": 1999,
@@ -1104,7 +1109,9 @@ def test_hero_and_watch_next_follow_the_last_unfinished_video(api):
         lib.ivys_touch("777", "9", "Díl 3", "Vyprávěj", "https://img/v.jpg", now=3000)
         lib.ivys_record_play("777", 600, 3000, now=3000)
     sections = {section["id"]: section for section in api("home")["sections"]}
-    hero = sections["prehrajto"]["hero"]                                     # naposledy přehrané rozkoukané video
+    film = sections["movies"]["hero"]                                        # sekce Filmy: rozkoukaný film
+    assert (film["title"], film["image"], film["progress"]) == ("Pelíšky", "https://img/f.jpg", 25)
+    hero = sections["series"]["hero"]                                        # sekce Seriály: rozkoukaný díl
     assert (hero["title"], hero["label"], hero["progress"]) == ("Archa 1×01", "Pokračovat", 25)
     assert hero["subtitle"] == "CZ dabing · zbývá 15 min" and hero["image"] == ""
     assert hero["target"] == {"type": "play", "call": "play", "params": {"vid": "11:archa:%016x" % 11, "resume": True}}
@@ -1181,7 +1188,7 @@ def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):
     assert api("home")["welcome"] is True
     api("settings_set", onboarded=True)
     assert api("home")["welcome"] is False
-    tiles = _section(api, "prehrajto")
+    tiles = _section(api, "movies")
     assert tiles["Objevuj filmy"][0]["target"]["poster"] is True              # výpis plakátů
     assert "poster" not in tiles["Objevuj filmy"][3]["target"]               # Podle roku: dlaždice
     assert "poster" not in _section(api, "tools")["Nástroje"][1]["target"]
