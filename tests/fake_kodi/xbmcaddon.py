@@ -2,7 +2,7 @@ import os
 import re
 
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..",
-                    os.environ.get("FAKE_KODI_ADDON", "plugin.video.streamujtv"))
+                    os.environ.get("FAKE_KODI_ADDON", "plugin.video.prehrajto.mojevidea"))
 with open(os.path.join(ROOT, "addon.xml"), encoding="utf-8") as _f:
     ADDON_ID = re.search(r'<addon[^>]*\bid="([^"]+)"', _f.read()).group(1)
 SETTINGS = {}

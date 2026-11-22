@@ -16,7 +16,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-ADDONS = ["repository.petermikula", "plugin.video.streamujtv", "plugin.video.prehrajto.mojevidea"]
+ADDONS = ["repository.petermikula", "plugin.video.prehrajto.mojevidea"]
 REPO = os.path.join(ROOT, "repo")
 ZIPS = os.path.join(REPO, "zips")
 
@@ -85,7 +85,7 @@ def publish_docs():
     page = ("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>Repozitář petermikula</title></head>\n"
             "<body>\n<h1>Repozitář petermikula pro Kodi</h1>\n"
             "<p>V Kodi nainstalujte <b>repository.petermikula</b> (Doplňky → Instalovat ze ZIP souboru) "
-            "a doplňky pak instalujte z repozitáře.</p>\n" + rows + "\n</body></html>\n")
+            "a doplněk Přehraj.to – Moje videa pak instalujte z repozitáře.</p>\n" + rows + "\n</body></html>\n")
     with open(os.path.join(docs, "index.html"), "w", encoding="utf-8", newline="\n") as f:
         f.write(page)
     open(os.path.join(docs, ".nojekyll"), "a").close()

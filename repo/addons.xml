@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addons>
-<addon id="repository.petermikula" name="Repozitář petermikula (streamuj.tv, Přehraj.to)" version="1.0.0" provider-name="petermikula-glitch">
+<addon id="repository.petermikula" name="Repozitář petermikula (Přehraj.to)" version="1.0.1" provider-name="petermikula-glitch">
     <extension point="xbmc.addon.repository" name="Repozitář petermikula">
         <dir>
             <info compressed="false">https://raw.githubusercontent.com/petermikula-glitch/streamujtv/main/repo/addons.xml</info>
@@ -10,42 +10,16 @@
         </dir>
     </extension>
     <extension point="xbmc.addon.metadata">
-        <summary lang="cs_CZ">Doplňky Streamuj.tv – Moje videa a Přehraj.to – Moje videa s automatickými aktualizacemi</summary>
-        <summary lang="en_GB">Streamuj.tv and Přehraj.to "My videos" add-ons with automatic updates</summary>
-        <description lang="cs_CZ">Po instalaci najdete doplňky v Doplňky → Instalovat z repozitáře → Repozitář petermikula → Doplňky pro video. Nové verze se instalují automaticky.</description>
-        <description lang="en_GB">After installing, find the add-ons in Add-ons → Install from repository → Repozitář petermikula → Video add-ons. New versions are installed automatically.</description>
+        <summary lang="cs_CZ">Doplněk Přehraj.to – Moje videa s automatickými aktualizacemi</summary>
+        <summary lang="en_GB">The Přehraj.to "My videos" add-on with automatic updates</summary>
+        <description lang="cs_CZ">Po instalaci najdete doplněk v Doplňky → Instalovat z repozitáře → Repozitář petermikula → Doplňky pro video. Nové verze se instalují automaticky.</description>
+        <description lang="en_GB">After installing, find the add-on in Add-ons → Install from repository → Repozitář petermikula → Video add-ons. New versions are installed automatically.</description>
         <platform>all</platform>
         <license>GPL-2.0-or-later</license>
         <source>https://github.com/petermikula-glitch/streamujtv</source>
         <assets>
             <icon>icon.png</icon>
         </assets>
-    </extension>
-</addon>
-<addon id="plugin.video.streamujtv" name="Streamuj.tv – Moje videa" version="1.1.0" provider-name="petermikula-glitch">
-    <requires>
-        <import addon="xbmc.python" version="3.0.0"/>
-    </requires>
-    <extension point="xbmc.python.pluginsource" library="default.py">
-        <provides>video</provides>
-    </extension>
-    <extension point="xbmc.service" library="service.py"/>
-    <extension point="xbmc.addon.metadata">
-        <summary lang="cs_CZ">Přehrávání a katalog vlastních videí z premium účtu streamuj.tv</summary>
-        <summary lang="en_GB">Play and catalogue your own videos from a streamuj.tv premium account</summary>
-        <description lang="cs_CZ">Načte videa nahraná na váš účet streamuj.tv, roztřídí je na filmy a seriály, doplní hodnocení, popisy a plakáty z ČSFD (případně TMDB) a umožní je procházet podle žánru, roku, země a hodnocení, vyhledávat a řadit do vlastních kolekcí. Přehrává se v kvalitě vašeho premium účtu.</description>
-        <description lang="en_GB">Loads the videos uploaded to your streamuj.tv account, sorts them into movies and TV shows, adds ratings, plots and posters from ČSFD (or TMDB) and lets you browse them by genre, year, country and rating, search them and organise them into your own collections. Playback uses your premium account.</description>
-        <disclaimer lang="cs_CZ">Doplněk přehrává pouze obsah z vašeho vlastního účtu. Vyžaduje účet streamuj.tv s aktivním premium.</disclaimer>
-        <disclaimer lang="en_GB">The add-on only plays content from your own account. Requires a streamuj.tv account with active premium.</disclaimer>
-        <platform>all</platform>
-        <license>GPL-2.0-or-later</license>
-        <source>https://github.com/petermikula-glitch/streamujtv</source>
-        <news>1.1.0 – Rozkoukané a Naposledy přehrané s pokračováním ve sledování, diagnostika pro ladění, slučování duplicit; 1.0.2 – sdílený kód s doplňkem pro Přehraj.to; 1.0.1 – položka Všechna videa; 1.0.0 – první verze</news>
-        <assets>
-            <icon>icon.png</icon>
-            <fanart>fanart.jpg</fanart>
-        </assets>
-        <reuselanguageinvoker>false</reuselanguageinvoker>
     </extension>
 </addon>
 <addon id="plugin.video.prehrajto.mojevidea" name="Přehraj.to – Moje videa" version="1.3.7" provider-name="petermikula-glitch">

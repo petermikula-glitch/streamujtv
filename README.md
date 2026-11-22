@@ -1,24 +1,17 @@
-# Moje videa – doplňky pro Kodi (streamuj.tv a Přehraj.to)
+# Přehraj.to – Moje videa (doplněk pro Kodi)
 
-Dva doplňky pro Kodi 19+ (Matrix, Nexus, Omega, Piers) se stejným katalogem a obrazovkami:
+Doplněk **Přehraj.to – Moje videa** (`plugin.video.prehrajto.mojevidea`) pro Kodi 19+ (Matrix,
+Nexus, Omega, Piers). Instaluje se z Kodi repozitáře, který je přímo v tomto GitHub repozitáři
+(složka `repo/`) – viz [Instalace](#instalace).
 
-| Doplněk | Složka |
-|---|---|
-| **Streamuj.tv – Moje videa** | `plugin.video.streamujtv` |
-| **Přehraj.to – Moje videa** | `plugin.video.prehrajto.mojevidea` |
-
-Instalují se z Kodi repozitáře, který je přímo v tomto GitHub repozitáři (složka `repo/`) –
-viz [Instalace](#instalace).
-
-Oba po přihlášení načtou **videa nahraná na váš účet** a udělají z nich přehledný katalog filmů
-a seriálů s hodnocením a popisy z **ČSFD** (záložně z TMDB). Vše níže platí pro oba doplňky,
-rozdíly jsou v sekci [Přehraj.to](#přehrajto--rozdíly).
+Po přihlášení načte **videa nahraná na váš účet** a udělá z nich přehledný katalog filmů
+a seriálů s hodnocením a popisy z **ČSFD** (záložně z TMDB). Podrobnosti k práci s webem
+Přehraj.to jsou v sekci [Jak doplněk pracuje s Přehraj.to](#jak-doplněk-pracuje-s-přehrajto).
 
 ## Co umí
 
-- **Synchronizace s účtem** – načte všechna vaše videa ze stránky „Moje videa“ (volitelně i
-  oblíbená videa a playlisty, které se uloží jako kolekce). Na pozadí se umí synchronizovat
-  automaticky a videa smazaná z účtu z katalogu odebere.
+- **Synchronizace s účtem** – načte všechna vaše videa ze stránky „Nahraná videa“. Na pozadí
+  se umí synchronizovat automaticky a videa smazaná z účtu z katalogu odebere.
 - **Automatické třídění** – z názvů souborů (`Pelisky.1999.1080p.CZ.mkv`,
   `Hra o trůny S01E02 cz tit`, `Vyprávěj - díl 12`, `Ulice 4012. díl`, `Johnny English (2003) CZ` …)
   pozná název, rok, sérii a díl, jazyk (dabing/titulky) a kvalitu. Víc verzí téhož filmu (CZ / EN, 720p / 1080p) se sloučí
@@ -32,8 +25,8 @@ rozdíly jsou v sekci [Přehraj.to](#přehrajto--rozdíly).
 - **Katalogizace** – vlastní kolekce (např. „Chci vidět“, „Pro děti“), ruční oprava
   názvu/roku/zařazení (film ↔ díl seriálu), ruční přiřazení ČSFD/TMDB nebo hodnocení,
   skrývání videí, seznam nerozpoznaných titulů.
-- **Přehrávání** v kvalitě vašeho premium účtu, s volbou preferovaného jazyka a kvality
-  a s titulky, pokud je video má.
+- **Přehrávání** originálního souboru (s Premium) nebo nejlepší překódované verze, s volbou
+  preferovaného jazyka a kvality a s titulky, pokud je video má.
 - **Export do knihovny Kodi** (`.strm` + `.nfo` s hodnocením), takže se filmy a seriály
   objeví i v hlavní knihovně Kodi.
 - Ruční **import odkazů** (jeden odkaz, nebo textový soubor se seznamem odkazů). Stejné video
@@ -145,30 +138,32 @@ verze stejného filmu nebo epizody ve vlastním katalogu.
 ## Instalace
 
 Kodi neumí instalovat přímo z gitu, proto je tu **Kodi repozitář**. Nainstaluje se jednou
-a pak se z něj instalují oba doplňky – včetně automatických aktualizací.
+a pak se z něj instaluje doplněk – včetně automatických aktualizací.
 
 1. V Kodi: *Nastavení → Systém → Doplňky → povolit Neznámé zdroje*.
 2. Přidejte zdroj: *Nastavení → Správce souborů → Přidat zdroj → <Žádný>* a zadejte adresu
    **`https://petermikula-glitch.github.io/streamujtv/`**, pojmenujte ho třeba `petermikula`.
    (Adresa funguje, až je v GitHubu zapnuté GitHub Pages: *Settings → Pages → Deploy from a branch →
    `main` / `/docs`*.)
-3. *Doplňky → Instalovat ze ZIP souboru → petermikula* → `repository.petermikula-1.0.0.zip`.
+3. *Doplňky → Instalovat ze ZIP souboru → petermikula* → `repository.petermikula-1.0.1.zip`.
 
    Bez GitHub Pages: stáhněte
-   [repository.petermikula-1.0.0.zip](https://raw.githubusercontent.com/petermikula-glitch/streamujtv/main/repo/zips/repository.petermikula/repository.petermikula-1.0.0.zip)
+   [repository.petermikula-1.0.1.zip](https://raw.githubusercontent.com/petermikula-glitch/streamujtv/main/repo/zips/repository.petermikula/repository.petermikula-1.0.1.zip)
    jinde (počítač, telefon), nahrajte na USB disk / do sdílené složky a v kroku 3 vyberte ten disk.
 4. *Doplňky → Instalovat z repozitáře → Repozitář petermikula → Doplňky pro video* →
-   **Streamuj.tv – Moje videa** a/nebo **Přehraj.to – Moje videa** → *Instalovat*.
-5. Otevřete nastavení doplňku a vyplňte **přihlašovací údaje** (streamuj.tv: jméno a heslo,
-   Přehraj.to: e-mail a heslo).
+   **Přehraj.to – Moje videa** → *Instalovat*.
+5. Otevřete nastavení doplňku a vyplňte **přihlašovací údaje** (e-mail a heslo k Přehraj.to).
 6. Spusťte *Nástroje → Synchronizovat s účtem*.
 
-Doplňky jdou nainstalovat i samostatně ze ZIPu v `repo/zips/<doplněk>/`, pak se ale
-neaktualizují samy.
+Doplněk jde nainstalovat i samostatně ze ZIPu v `repo/zips/plugin.video.prehrajto.mojevidea/`,
+pak se ale neaktualizuje sám.
+
+Adresa repozitáře obsahuje z historických důvodů název `streamujtv` (jméno tohoto GitHub
+repozitáře). Doplněk pro streamuj.tv, který tu dříve byl, už součástí repozitáře není.
 
 V *Nástroje → Stav účtu* ověříte přihlášení a platnost premia.
 
-## Přehraj.to – rozdíly
+## Jak doplněk pracuje s Přehraj.to
 
 - Synchronizace čte stránku **Nahraná videa** (`/profil/nahrana-videa`) vašeho účtu.
   Další videa můžete přidat odkazem (`https://prehraj.to/<název>/<kód>`) přes *Nástroje → Přidat
@@ -184,7 +179,6 @@ V *Nástroje → Stav účtu* ověříte přihlášení a platnost premia.
   stažení originálu přes API).
 - Přihlášení se ukládá (cookies v profilu doplňku) – každé nové přihlášení totiž na Přehraj.to
   zakládá další záznam ve „Správě přihlášených zařízení“.
-- Oblíbená videa a playlisty Přehraj.to nemá, volby v nastavení proto chybí.
 - Ověřeno naostro: přihlašovací formulář a odmítnutí špatného hesla. Stránku nahraných videí
   a stránku videa s premium jsem bez vašeho účtu neviděl – parser je napsaný podle známého
   markupu webu a je tolerantní (bere všechny odkazy na videa na stránce).
@@ -207,15 +201,15 @@ Pokud ČSFD automatické dotazy pustí, čtou se z něj strukturovaná data (JSO
 
 | Část | Soubor | Poznámka |
 |---|---|---|
-| API přehrávače streamuj.tv | `resources/lib/streamuj.py` | `json_api_player.php?action=check-user` / `get-video-links`, mezilehlý odkaz → finální mp4 (ověřeno proti živému webu) |
-| Výpis vlastních videí | `resources/lib/streamuj.py` | přihlášení formulářem `/login`, čtení `/my_videos` včetně stránkování |
+| Klient Přehraj.to | `resources/lib/prehrajto.py` | přihlášení, výpis nahraných videí, hledání, odkazy na soubory |
 | Rozbor názvů | `resources/lib/nameparser.py` | film / seriál, rok, SxxEyy, jazyk, kvalita |
-| Katalog | `resources/lib/db.py` | SQLite v profilu doplňku |
+| Katalog | `resources/lib/db.py`, `catalog.py` | SQLite v profilu doplňku, synchronizace, doplnění metadat |
 | ČSFD / TMDB | `resources/lib/csfd.py`, `tmdb.py` | |
-| Obrazovky Kodi | `resources/lib/plugin.py` | |
-| Automatická synchronizace | `service.py` | |
+| Export do knihovny Kodi | `resources/lib/library_export.py`, `kodi_library.py` | |
+| Obrazovky Kodi | `resources/lib/plugin.py`, `ui.py`, `views_*.py`, `playback.py` | |
+| Sledování přehrávání a automatická synchronizace | `service.py` | |
 
-U doplňku Přehraj.to je `resources/lib/plugin.py` jen router: podle akce načte modul s danou
+`resources/lib/plugin.py` je jen router: podle akce načte modul s danou
 obrazovkou (`views_catalog`, `views_progress`, `views_discover`, `views_search`, `views_collections`,
 `views_tools`, `views_kodi`, `views_edit`, `playback`), společné prvky jsou v `ui.py`. Síťové knihovny
 se načítají až při prvním použití, takže obrazovky vlastního katalogu startují rychleji.
@@ -225,19 +219,13 @@ Heslo se do logu Kodi nikdy nezapisuje (ani jeho hash).
 
 ## Vývoj
 
-Sdílené soubory uvedené v `tools/sync_shared.py` se kopírují z `plugin.video.streamujtv`.
-Každý doplněk má vlastní router, službu přehrávání, katalog, databázi a klienty
-pro svou službu a TMDB. Překlady Přehraj.to se upravují v jeho souborech `strings.po`.
+Překlady se upravují přímo v souborech `resources/language/*/strings.po`.
 
 ```bash
-python3 -m pytest tests                  # testy streamuj.tv + sdíleného kódu (náhrada Kodi API)
-python3 -m pytest tests_prehrajto        # testy Přehraj.to (spouštět zvlášť)
-STREAMUJ_LIVE=1 python3 -m pytest tests -k live            # živý test API streamuj.tv
-PREHRAJTO_LIVE=1 python3 -m pytest tests_prehrajto -k live  # živý test přihlášení Přehraj.to
-python3 tools/bench_prehrajto.py         # rychlost obrazovek Přehraj.to nad syntetickým katalogem
-python3 tools/sync_shared.py             # po úpravě sdíleného kódu
+python3 -m pytest tests                  # všechny testy (náhrada Kodi API je v tests/fake_kodi)
+PREHRAJTO_LIVE=1 python3 -m pytest tests -k live  # živý test přihlášení Přehraj.to
+python3 tools/bench_prehrajto.py         # rychlost obrazovek nad syntetickým katalogem
 # nová verze doplňku: zvyšte version v addon.xml, spusťte build_zip.py a pushněte do main
-python3 tools/strings.py                 # vygeneruje strings.po (cs/en) pro Streamuj.tv
 python3 tools/build_zip.py               # sestaví Kodi repozitář do repo/ (ZIPy + addons.xml)
 ```
 
