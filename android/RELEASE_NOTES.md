@@ -1,1 +1,1 @@
-Nová grafika: ilustrované dlaždice kategorií, obrysové ikony, logo, pozadí, ikona a banner aplikace.
+V nabídce Nástroje → Hledat se nově zobrazují výsledky z online katalogu Přehraj.to. Najdete je v řadě „Videa na Přehraj.to“.
