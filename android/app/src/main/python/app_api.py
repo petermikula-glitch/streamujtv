@@ -153,7 +153,8 @@ def _target(kind, call=None, params=None, title=None):
     return target
 
 
-def _card(title, target, subtitle="", image="", progress=0, wide=False, watched=False, icon="", menu=None):
+def _card(title, target, subtitle="", image="", progress=0, wide=False, watched=False, icon="", menu=None,
+          badges=None):
     """Karta; ``icon`` je název ikony dlaždice pro karty bez obrázku (složky, nástroje).
 
     ``menu`` je nabídka po podržení tlačítka OK: seznam ``{"title", "target"}``.
@@ -162,6 +163,8 @@ def _card(title, target, subtitle="", image="", progress=0, wide=False, watched=
             "wide": bool(wide), "watched": bool(watched), "icon": icon or "", "target": target}
     if menu:
         card["menu"] = menu
+    if badges:
+        card["badges"] = [badge for badge in badges if badge]  # krátké štítky přes obrázek (jazyk, kvalita)
     return card
 
 
@@ -189,14 +192,90 @@ def _languages(values):
     return ", ".join(part for part in (values or "").split(",") if part)
 
 
-def _version_rank(video):
-    """Nejlepší verze filmu nebo dílu: český/slovenský dabing, pak vyšší kvalita."""
+LANGUAGE_CHOICES = (("dub", "Český dabing"), ("subs", "Originál s titulky"), ("any", "Je mi to jedno"))
+QUALITY_CHOICES = (("best", "Nejvyšší dostupná"), ("1080", "1080p"), ("720", "720p"),
+                   ("small", "Úsporná (nejmenší soubor)"))
+# kopie natočená v kině: obraz i zvuk jsou výrazně horší, nabízí se až jako poslední
+CAM_RE = re.compile(r"(?<![a-z0-9])(?:cam|camrip|hdcam|ts|hdts|telesync|tc|telecine|kinorip)(?![a-z0-9])", re.I)
+BAD_VIDEOS = "bad_videos"       # verze, které se nepodařilo přehrát
+CHOICE_PREFIX = "choice:"       # verze, kterou si uživatel u titulu sám vybral
+
+
+def _prefs(settings=None):
+    """Předvolby přehrávání z Přehraj.to: jazyk a kvalita."""
+    settings = _settings() if settings is None else settings
+    language, quality = settings.get("prefer_language"), settings.get("prefer_quality")
+    return {"language": language if language in dict(LANGUAGE_CHOICES) else "dub",
+            "quality": quality if quality in dict(QUALITY_CHOICES) else "best"}
+
+
+def _size_bytes(text):
+    match = re.match(r"\s*([\d.,]+)\s*([kmgt])?b?", str(text or "").lower())
+    if not match:
+        return 0
+    try:
+        value = float(match.group(1).replace(",", "."))
+    except ValueError:
+        return 0
+    return int(value * 1024 ** " kmgt".index(match.group(2) or " "))
+
+
+def _language_rank(lang, prefer):
+    parts = {part.strip() for part in (lang or "").split(",") if part.strip()}
+    dubbed = bool(parts & {"CZ", "CZ dabing", "SK", "SK dabing"})
+    subtitled = bool(parts & {"CZ titulky", "SK titulky"})
+    if prefer == "subs":   # původní zvuk s titulky, pak cokoli s titulky, dabing až nakonec
+        return 0 if subtitled and not dubbed else 1 if subtitled else 2 if not dubbed else 3
+    if prefer == "dub":
+        return 0 if dubbed else 1 if subtitled else 2
+    return 0
+
+
+def _quality_rank(quality, size, prefer):
     order = provider.QUALITY_ORDER
-    token = provider.quality_token(video.get("quality"))
-    quality = order.index(token) if token in order else len(order)
-    languages = {part.strip() for part in (video.get("lang") or "").split(",")}
-    dubbed = bool(languages & {"CZ", "CZ dabing", "SK", "SK dabing"})
-    return (not dubbed, quality, video.get("raw_title") or "")
+    token = provider.quality_token(quality)
+    index = order.index(token) if token in order else len(order)
+    if prefer == "small":
+        return _size_bytes(size) or (1 << 60)
+    if prefer in ("1080", "720"):
+        wanted = order.index("FHD" if prefer == "1080" else "HD")
+        if index == len(order) or token == "ORIG":
+            return 50                       # neznámé rozlišení až za známými
+        # přesná shoda, pak nejbližší nižší, vyšší až potom
+        return index - wanted if index >= wanted else 10 + (wanted - index)
+    return index
+
+
+def _version_rank(video, prefs=None, bad=()):
+    """Pořadí verzí filmu nebo dílu podle předvoleb; kino kopie a nefunkční verze až na konec."""
+    prefs = prefs or _prefs()
+    name = video.get("raw_title") or ""
+    return (bool(CAM_RE.search(name)), video.get("id") in bad, _language_rank(video.get("lang"), prefs["language"]),
+            _quality_rank(video.get("quality"), video.get("size"), prefs["quality"]), name)
+
+
+def _pick_stream(streams, prefs):
+    """Varianta souboru k přehrání (originál, 2160p, 1080p…) podle předvolené kvality."""
+    order = provider.QUALITY_ORDER
+    def rank(stream):
+        token = stream.get("quality")
+        index = order.index(token) if token in order else len(order)
+        if prefs["quality"] == "best":
+            return index
+        if prefs["quality"] == "small":
+            return -index if token != "ORIG" and index < len(order) else 1
+        wanted = order.index("FHD" if prefs["quality"] == "1080" else "HD")
+        if token == "ORIG" or index == len(order):
+            return 50
+        return index - wanted if index >= wanted else 10 + (wanted - index)
+    return min(streams, key=rank)
+
+
+def _bad_videos(lib):
+    try:
+        return set(json.loads(lib.get_kv(BAD_VIDEOS) or "[]"))
+    except (TypeError, ValueError):
+        return set()
 
 
 def _movie_card(meta, state, versions=None):
@@ -204,7 +283,8 @@ def _movie_card(meta, state, versions=None):
     rating = "%d %%" % meta["rating"] if meta.get("rating") else ""
     subtitle = " · ".join(part for part in (str(year) if year else "", rating, _languages(meta.get("langs"))) if part)
     videos = (versions or {}).get(meta["key"]) or []
-    vid = min(videos, key=_version_rank)["id"] if videos else meta.get("first_video")
+    vid = min(videos, key=lambda video: _version_rank(video, state.get("prefs"), state.get("bad", ())))["id"] \
+        if videos else meta.get("first_video")
     ids = [video["id"] for video in videos] or [vid]
     point = next((state["resume"][i] for i in ids if i in state["resume"]), None)
     saved = next((i for i in ids if _saved(state, i)), None)
@@ -256,7 +336,7 @@ def _video_card(video, meta, state, prefix="", web_result=None):
 
 def _state(lib):
     return {"resume": lib.resume_points(), "watched": lib.watched(), "downloads": _downloads(),
-            "favorites": app_discover.load_favorites()}
+            "favorites": app_discover.load_favorites(), "prefs": _prefs(), "bad": _bad_videos(lib)}
 
 
 def _saved(state, vid):
@@ -473,7 +553,8 @@ def show(params):
         best = {}
         for video in lib.videos_for_meta(key):
             position = (video["season"], video["episode"]) if video["episode"] else (video["season"], video["id"])
-            if position not in best or _version_rank(video) < _version_rank(best[position]):
+            if position not in best or _version_rank(video, state["prefs"], state["bad"]) < \
+                    _version_rank(best[position], state["prefs"], state["bad"]):
                 best[position] = video
     title = _display_title(meta)
     cards = []
@@ -514,6 +595,8 @@ def search(params):
         if found_shows:
             rows.append({"title": "Seriály v katalogu", "items": [_show_card(meta, state) for meta in found_shows[:PAGE]]})
     response = {"rows": rows}
+    _remember_search(query)
+    rows.extend(app_discover.search_rows(query, state))
     with ThreadPoolExecutor(max_workers=1) as pool:
         web = pool.submit(prehrajto_search, {"q": query})
         rows.extend(_ivys_search_rows(query))
@@ -530,6 +613,20 @@ def search(params):
             if cards:
                 rows.append({"title": "Videa na Přehraj.to", "items": cards})
     return response
+
+
+def _remember_search(query):
+    settings = _settings()
+    history = [item for item in settings.get("search_history") or [] if isinstance(item, str) and item != query]
+    settings["search_history"] = ([query] + history)[:12]
+    _save_settings(settings)
+
+
+def search_history(params):
+    """Naposledy hledané výrazy jako dlaždice (pro prázdnou obrazovku hledání)."""
+    history = [item for item in _settings().get("search_history") or [] if isinstance(item, str)]
+    cards = [_card(item, _target("search", "search", {"q": item}), icon="history") for item in history]
+    return {"rows": [{"title": "Naposledy hledané", "items": cards}] if cards else []}
 
 
 def _ivys_search_rows(query):
@@ -615,6 +712,9 @@ def play(params):
         vid = video["id"]
         meta = lib.get_meta(video["meta_key"]) or {}
         point = lib.resume_points([vid]).get(vid)
+        if params.get("choice"):
+            # verze spuštěná ze stránky titulu: příště bude první a u dílu seriálu nese stav zhlédnutí
+            lib.set_kv(CHOICE_PREFIX + str(params["choice"]), vid)
     title = _video_title(video, meta)
     position = point[0] if point and not params.get("restart") else 0
     entry = _downloads().get(vid)
@@ -649,8 +749,7 @@ def _stream_link(vid, fresh=False):
         streams, _message = client.get_streams(vid)
         if not streams:
             raise provider.VideoUnavailableError("Video nemá žádný přehratelný soubor")
-        order = provider.QUALITY_ORDER
-        stream = min(streams, key=lambda s: order.index(s["quality"]) if s["quality"] in order else len(order))
+        stream = _pick_stream(streams, _prefs())
         url = client.resolve(stream["url"])
         subtitles = stream.get("subtitles") or {}
     except provider.LoginError:
@@ -681,6 +780,17 @@ def progress_save(params):
     return {"saved": True}
 
 
+def play_failed(params):
+    """Verzi se nepodařilo přehrát ani napodruhé – příště se nenabídne jako první."""
+    track = params.get("track") or ""
+    if not track or track.startswith(IVYS):
+        return {"saved": False}
+    with _library() as lib:
+        bad = [vid for vid in _bad_videos(lib) if vid != track][-199:] + [track]
+        lib.set_kv(BAD_VIDEOS, json.dumps(bad))
+    return {"saved": True}
+
+
 def link_failed(params):
     """Přehrávač adresu nepřehrál – zapomenout ji, aby se příště načetla nová."""
     with _library() as lib:
@@ -694,13 +804,17 @@ def link_failed(params):
 
 def settings_get(params):
     settings = _settings()
+    prefs = _prefs(settings)
     return {"username": settings.get("username", ""), "has_password": bool(settings.get("password")),
-            "tmdb_key": settings.get("tmdb_key", ""), "download_dir": settings.get("download_dir", "")}
+            "tmdb_key": settings.get("tmdb_key", ""), "download_dir": settings.get("download_dir", ""),
+            "prefer_language": prefs["language"], "prefer_quality": prefs["quality"],
+            "languages": [{"id": key, "title": title} for key, title in LANGUAGE_CHOICES],
+            "qualities": [{"id": key, "title": title} for key, title in QUALITY_CHOICES]}
 
 
 def settings_set(params):
     settings = _settings()
-    for key in ("username", "password", "tmdb_key", "download_dir"):
+    for key in ("username", "password", "tmdb_key", "download_dir", "prefer_language", "prefer_quality"):
         if key in params and params[key] is not None:
             settings[key] = str(params[key]).strip()
     _save_settings(settings)
@@ -844,8 +958,11 @@ def ivys_live(params):
             parts.append("%s–%s" % (_clock(channel["starts"]), _clock(channel.get("ends"))))
         if channel.get("next_title"):
             parts.append("pak %s %s" % (_clock(channel.get("next_starts")), channel["next_title"]))
+        elapsed = 0
+        if channel.get("starts") and channel.get("ends") and channel["ends"] > channel["starts"]:
+            elapsed = max(1, min(100, int(100 * (time.time() - channel["starts"]) / (channel["ends"] - channel["starts"]))))
         cards.append(_card(title, _target("play", "ivys_play", {"channel": channel["channel"]}), " · ".join(parts),
-                           channel.get("image"), wide=True, icon="live"))
+                           channel.get("image"), elapsed, wide=True, icon="live"))
     return {"items": cards, "next": None}
 
 
@@ -1259,7 +1376,7 @@ ACTIONS.update({
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,
     "download_remove": download_remove, "update_check": update_check,
     "home": home, "movies": movies, "shows": shows, "show": show, "played": played, "search": search,
-    "prehrajto_search": prehrajto_search,
+    "prehrajto_search": prehrajto_search, "search_history": search_history, "play_failed": play_failed,
     "play": play, "progress_save": progress_save, "link_failed": link_failed,
     "settings_get": settings_get, "settings_set": settings_set, "account_status": account_status,
     "progress": progress, "sync": sync, "enrich": enrich,

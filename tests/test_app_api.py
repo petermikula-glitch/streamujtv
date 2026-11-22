@@ -199,7 +199,11 @@ def test_playback_resolves_remembers_link_and_tracks_progress(api, monkeypatch):
     _fill()
     assert "vyplňte e-mail" in api("play", vid=REF)["error"]
     api("settings_set", username="a@b.cz", password="heslo")
-    assert api("settings_get") == {"username": "a@b.cz", "has_password": True, "tmdb_key": "", "download_dir": ""}
+    settings = api("settings_get")
+    assert {key: settings[key] for key in ("username", "has_password", "tmdb_key", "download_dir")} == {
+        "username": "a@b.cz", "has_password": True, "tmdb_key": "", "download_dir": ""}
+    assert (settings["prefer_language"], settings["prefer_quality"]) == ("dub", "best")     # výchozí předvolby
+    assert [item["id"] for item in settings["languages"]] == ["dub", "subs", "any"]
     page = fixture("video_synthetic.html")
     clients = []
 
@@ -484,6 +488,8 @@ def _fake_tmdb(monkeypatch, answers):
 
     def fetch(self, path, timeout, params):
         calls.append((path, dict(params)))
+        if path not in answers:
+            raise app_api.TmdbError("TMDB: HTTP 404")   # jako skutečný klient u neznámé adresy
         return answers[path]
 
     monkeypatch.setattr(app_api.Tmdb, "_fetch", fetch)
@@ -501,11 +507,11 @@ def test_discover_lists_come_from_tmdb(api, monkeypatch):
         "/genre/movie/list": {"genres": [{"id": 35, "name": "Komedie"}, {"id": 18, "name": "Drama"}]},
     })
     listing = api("discover", kind="movie", category="popular")
-    card = listing["items"][0]
-    assert len(listing["items"]) == 1                                   # položka bez čísla TMDB se přeskočí
+    check, card = listing["items"]                                      # položka bez čísla TMDB se přeskočí
+    assert check["title"] == "Ověřit dostupnost" and check["target"]["call"] == "discover_check"
     assert (card["title"], card["subtitle"], card["wide"]) == ("Pelíšky", "1999 · 86 % · film", False)
     assert card["image"] == "https://image.tmdb.org/t/p/w342/p.jpg"
-    assert card["target"] == {"type": "list", "call": "discover_title", "title": "Pelíšky", "params": {
+    assert card["target"] == {"type": "title", "call": "discover_title", "title": "Pelíšky", "params": {
         "kind": "movie", "id": 11, "title": "Pelíšky", "year": 1999, "poster": card["image"], "orig": "Pelisky"}}
     assert _titles(card["menu"]) == ["Otevřít", "Přidat do oblíbených"]
     assert listing["next"] == {"call": "discover", "params": {"kind": "movie", "category": "popular", "page": 2}}
@@ -531,69 +537,182 @@ def test_discover_lists_come_from_tmdb(api, monkeypatch):
     assert special[0]["target"]["params"] == {"kind": "tv", "origin": "CZ|SK|XC"}
 
 
-def test_discovered_title_offers_versions_from_prehrajto_and_favourites(api, monkeypatch):
-    api("settings_set", tmdb_key="k" * 32)
+def _web(vid, title, duration=0, size="", quality=""):
+    return {"id": "%s:video-%s:%016x" % (vid, vid, vid), "title": title, "duration": duration, "size": size,
+            "quality": quality, "thumb": ""}
+
+
+def _catalogue_search(monkeypatch, found):
     asked = []
-    found = {
-        "Pelíšky 1999": [
-            {"id": "31:pelisky-1999-en-720p:00000000000000b1", "title": "Pelisky 1999 EN 720p", "size": "1 GB"},
-            {"id": "32:pelisky-1999-cz-1080p:00000000000000b2", "title": "Pelisky.1999.CZ.1080p", "size": "4 GB"},
-            {"id": "33:pelisky-2-2010:00000000000000b3", "title": "Pelisky 2 (2010) CZ"},          # jiný film
-            {"id": "34:pelisky-2005-cz:00000000000000b4", "title": "Pelisky 2005 CZ"},            # jiný rok
-        ],
-        "Archa S01E02": [
-            {"id": "41:archa-s01e02-cz:00000000000000c1", "title": "Archa S01E02 CZ"},
-            {"id": "42:archa-s01e03-cz:00000000000000c2", "title": "Archa S01E03 CZ"},            # jiný díl
-        ],
-    }
 
     def search_catalog(client, query, page, cursor):
-        asked.append(query)
+        asked.append((query, page))
         return found.get(query, []), ""
 
     monkeypatch.setattr(app_api.provider, "search_catalog", search_catalog)
-    title = {"kind": "movie", "id": 11, "title": "Pelíšky", "year": 1999, "poster": "https://img/p.jpg", "orig": "Pelisky"}
-    cards = api("discover_title", **title)["items"]
-    assert _titles(cards) == ["Pelisky.1999.CZ.1080p", "Pelisky 1999 EN 720p", "Přidat do oblíbených", "Hledat ručně"]
-    best = cards[0]["target"]                                           # český dabing ve vyšší kvalitě první
-    assert best["type"] == "play" and best["params"]["vid"] == "32:pelisky-1999-cz-1080p:00000000000000b2"
-    assert best["params"]["web_result"]["title"] == "Pelisky.1999.CZ.1080p"
-    assert "Stáhnout na disk" in _titles(cards[0]["menu"])
-    assert cards[3]["target"] == {"type": "search", "call": "search", "params": {"q": "Pelíšky"}}
-    assert asked == ["Pelíšky 1999"]
+    return asked
 
-    api(cards[2]["target"]["call"], **cards[2]["target"]["params"])        # oblíbený titul z Objevuj
+
+FILM = {"kind": "movie", "id": 11, "title": "Pelíšky", "year": 1999, "poster": "https://img/p.jpg", "orig": "Pelisky"}
+FILM_DETAIL = {"id": 11, "title": "Pelíšky", "original_title": "Pelisky", "release_date": "1999-04-08",
+               "vote_average": 8.6, "runtime": 116, "overview": "Rodinná komedie.", "poster_path": "/p.jpg",
+               "backdrop_path": "/b.jpg", "genres": [{"name": "Komedie"}, {"name": "Drama"}]}
+
+
+def test_title_page_cleans_and_orders_versions(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    hour = 3600
+    asked = _catalogue_search(monkeypatch, {"Pelíšky 1999": [
+        _web(31, "Pelisky 1999 EN 720p", 2 * hour, "1 GB"),
+        _web(32, "Pelisky.1999.CZ.1080p", 2 * hour, "4 GB"),
+        _web(33, "Pelisky 2 (2010) CZ", 2 * hour),                        # jiný film
+        _web(34, "Pelisky 2005 CZ", 2 * hour),                            # jiný rok
+        _web(35, "Pelisky 1999 CZ trailer", 120, "20 MB"),                # ukázka: mnohem kratší než film
+        _web(36, "Pelisky.1999.CZ.HDCAM", 2 * hour, "900 MB"),            # kino kopie
+        _web(37, "Pelisky 1999 CZ 1080p reup", 2 * hour, "4 GB", "1080p"),   # tentýž soubor nahraný znovu
+        _web(38, "Pelisky 1999 CZ tit 2160p", 2 * hour, "9 GB"),
+    ]})
+    page = api("discover_title", **FILM)
+    assert page["detail"] == {"title": "Pelíšky", "meta": "1999 · 86 % · 1 h 56 min · Komedie, Drama",
+                              "plot": "Rodinná komedie.", "poster": "https://image.tmdb.org/t/p/w500/p.jpg",
+                              "backdrop": "https://image.tmdb.org/t/p/w1280/b.jpg"}
+    versions, extras = page["rows"]
+    assert versions["title"] == "Verze na Přehraj.to (4)" and extras["title"] == "Ukázky a neúplné soubory"
+    # výchozí předvolby: český dabing a nejvyšší kvalita; kino kopie až na konec, duplicita sloučená
+    assert _titles(versions["items"]) == ["CZ dabing · 1080p", "CZ titulky · 2160p", "EN · 720p", "CZ dabing"]
+    best = versions["items"][0]
+    assert best["badges"] == ["CZ", "1080p"] and best["wide"] is True
+    assert best["subtitle"] == "4 GB · 2 h 00 min · Pelisky.1999.CZ.1080p"
+    assert "kino kopie" in versions["items"][3]["subtitle"] and versions["items"][1]["badges"] == ["TIT", "2160p"]
+    assert "ukázka nebo část" in extras["items"][0]["subtitle"]
+    assert best["target"]["params"]["choice"] == "movie:11" and "Stáhnout na disk" in _titles(best["menu"])
+    play, favourite, manual = page["actions"]
+    assert (play["title"], play["subtitle"]) == ("Přehrát", "CZ dabing · 1080p") and play["target"] == best["target"]
+    assert favourite["title"] == "Přidat do oblíbených"
+    assert manual["target"] == {"type": "search", "call": "search", "params": {"q": "Pelíšky"}}
+    assert asked == [("Pelíšky 1999", 1)]
+
+    api("settings_set", prefer_language="subs", prefer_quality="720")       # originál s titulky, nejblíž 720p
+    ordered = _titles(api("discover_title", **FILM)["rows"][0]["items"])
+    assert ordered == ["CZ titulky · 2160p", "EN · 720p", "CZ dabing · 1080p", "CZ dabing"]
+    api("settings_set", prefer_language="any", prefer_quality="small")
+    assert _titles(api("discover_title", **FILM)["rows"][0]["items"])[0] == "EN · 720p"   # nejmenší soubor
+    api("settings_set", prefer_language="dub", prefer_quality="best")
+
+    api("play_failed", track=best["target"]["params"]["vid"])                # nešla přehrát → příště až za ostatní
+    again = api("discover_title", **FILM)["rows"][0]["items"]
+    assert again[0]["title"] == "CZ titulky · 2160p" and "nešlo přehrát" in again[2]["subtitle"]
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/v.mp4", {}))
+    english = next(card for card in again if card["title"] == "EN · 720p")
+    api("play", **english["target"]["params"])                               # ručně zvolená verze je příště první
+    chosen = api("discover_title", **FILM)
+    assert chosen["rows"][0]["items"][0]["title"] == "EN · 720p"
+    assert "naposledy zvolená" in chosen["rows"][0]["items"][0]["subtitle"]
+    assert chosen["actions"][0]["subtitle"] == "EN · 720p"
+
+    api(favourite["target"]["call"], **favourite["target"]["params"])        # oblíbený titul z Objevuj
     favorite = _section(api, "prehrajto")["Oblíbené"][0]
-    assert favorite["title"] == "Pelíšky" and favorite["target"]["call"] == "discover_title"
+    assert favorite["title"] == "Pelíšky" and favorite["target"]["type"] == "title"
     assert favorite["target"]["params"]["id"] == 11 and favorite["menu"][-1]["title"] == "Odebrat z oblíbených"
-    assert api("discover_title", **title)["items"][2]["title"] == "Odebrat z oblíbených"
+    assert api("discover_title", **FILM)["actions"][1]["title"] == "Odebrat z oblíbených"
 
-    nothing = api("discover_title", kind="movie", id=5, title="Neznámý film", year=2001)["items"]
-    assert nothing[0]["title"] == "Na Přehraj.to jsem nic nenašel" and nothing[0]["target"]["type"] == "search"
-    assert asked[-2:] == ["Neznámý film 2001", "Neznámý film"]             # zkusí i bez roku
-
-    _fake_tmdb(monkeypatch, {
-        "/tv/77": {"seasons": [{"season_number": 0, "name": "Speciály"},
-                               {"season_number": 1, "name": "1. řada", "episode_count": 8, "poster_path": "/s1.jpg"}]},
-        "/tv/77/season/1": {"episodes": [{"episode_number": 2, "name": "Druhý", "overview": "Děj", "still_path": "/e2.jpg"},
-                                          {"episode_number": 1, "name": "Pilot"}]},
-    })
-    show = {"kind": "tv", "id": 77, "title": "Archa", "year": 1996, "poster": "", "orig": ""}
-    seasons = api("discover_title", **show)["items"]
-    assert _titles(seasons) == ["1. řada", "Přidat do oblíbených", "Hledat ručně"]
-    assert seasons[0]["subtitle"] == "8 dílů" and seasons[0]["target"]["call"] == "discover_season"
-    episodes = api("discover_season", **seasons[0]["target"]["params"])["items"]
-    assert _titles(episodes) == ["1×01 · Pilot", "1×02 · Druhý"] and episodes[1]["wide"] is True
-    versions = api("discover_episode", **episodes[1]["target"]["params"])["items"]
-    assert _titles(versions) == ["Archa S01E02 CZ"] and asked[-1] == "Archa S01E02"
-    missing = api("discover_episode", **episodes[0]["target"]["params"])["items"]
-    assert missing[0]["target"] == {"type": "search", "call": "search", "params": {"q": "Archa S01E01"}}
+    nothing = api("discover_title", kind="movie", id=5, title="Neznámý film", year=2001)
+    assert nothing["rows"] == [] and [action["title"] for action in nothing["actions"]] == [
+        "Přidat do oblíbených", "Hledat ručně"]
+    assert "nenašel" in nothing["detail"]["plot"]
+    assert asked[-2:] == [("Neznámý film 2001", 1), ("Neznámý film", 1)]     # zkusí i bez roku
 
     def broken(client, query, page, cursor):
         raise app_api.provider.ProviderError("HTTP 500")
 
     monkeypatch.setattr(app_api.provider, "search_catalog", broken)
-    assert "nezdařilo" in api("discover_title", **title)["error"]
+    assert "nezdařilo" in api("discover_title", **FILM)["error"]
+
+
+def test_series_page_seasons_episodes_and_continue(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    asked = _catalogue_search(monkeypatch, {"Archa S01E02": [
+        _web(41, "Archa S01E02 CZ"), _web(42, "Archa S01E03 CZ")]})          # druhý výsledek je jiný díl
+    _fake_tmdb(monkeypatch, {
+        "/tv/77": {"id": 77, "name": "Archa", "first_air_date": "1996-01-01", "overview": "Seriál.",
+                   "seasons": [{"season_number": 0, "name": "Speciály"},
+                               {"season_number": 1, "name": "1. řada", "episode_count": 8, "poster_path": "/s1.jpg"}]},
+        "/tv/77/season/1": {"episodes": [{"episode_number": 2, "name": "Druhý", "overview": "Děj", "still_path": "/e2.jpg"},
+                                          {"episode_number": 1, "name": "Pilot"}]},
+    })
+    show = {"kind": "tv", "id": 77, "title": "Archa", "year": 1996, "poster": "", "orig": ""}
+    page = api("discover_title", **show)
+    assert page["detail"]["meta"] == "1996 · seriál" and page["detail"]["plot"] == "Seriál."
+    assert [action["title"] for action in page["actions"]] == ["Přidat do oblíbených", "Hledat ručně"]
+    seasons = page["rows"][0]
+    assert seasons["title"] == "Řady" and _titles(seasons["items"]) == ["1. řada"]
+    assert seasons["items"][0]["subtitle"] == "8 dílů" and seasons["items"][0]["target"]["call"] == "discover_season"
+    episodes = api("discover_season", **seasons["items"][0]["target"]["params"])["items"]
+    assert _titles(episodes) == ["1×01 · Pilot", "1×02 · Druhý"] and episodes[1]["wide"] is True
+    versions = api("discover_episode", **episodes[1]["target"]["params"])["items"]
+    assert _titles(versions) == ["CZ dabing"] and asked[-1] == ("Archa S01E02", 1)
+    assert versions[0]["target"]["params"]["choice"] == "tv:77:1:2"
+    missing = api("discover_episode", **episodes[0]["target"]["params"])["items"]
+    assert missing[0]["target"] == {"type": "search", "call": "search", "params": {"q": "Archa S01E01"}}
+
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/v.mp4", {}))
+    stream = api("play", **versions[0]["target"]["params"])                  # rozkoukaný díl je vidět ve výpisu řady
+    api("progress_save", track=stream["track"], position=300, total=1200)
+    marked = api("discover_season", **seasons["items"][0]["target"]["params"])["items"]
+    assert (marked[1]["progress"], marked[0]["progress"]) == (25, 0)
+    resume = api("discover_title", **show)["actions"][0]                     # stránka seriálu nabídne pokračování
+    assert (resume["title"], resume["subtitle"]) == ("Pokračovat", "1. řada")
+    assert resume["target"]["params"]["season"] == 1
+
+
+def test_availability_check_marks_discovered_films(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    films = [{"id": 11, "title": "Pelíšky", "original_title": "Pelisky", "release_date": "1999-04-08"},
+             {"id": 12, "title": "Kolja", "release_date": "1996-05-15"}]
+    _fake_tmdb(monkeypatch, {"/movie/popular": {"results": films, "total_pages": 1}})
+    asked = _catalogue_search(monkeypatch, {"Pelíšky 1999": [_web(32, "Pelisky.1999.CZ.1080p", 7000)]})
+    listing = api("discover", kind="movie", category="popular")["items"]
+    check = listing[0]
+    assert [card.get("badges") for card in listing[1:]] == [None, None]
+    result = api(check["target"]["call"], **check["target"]["params"])
+    assert result == {"message": "Ověřeno 2 filmů, na Přehraj.to je 1 z nich."}
+    assert api("progress") == {"text": "", "busy": False}
+    marked = api("discover", kind="movie", category="popular")["items"]      # dlaždice pro ověření už není potřeba
+    assert _titles(marked) == ["Pelíšky", "Kolja"]
+    assert [card["badges"] for card in marked] == [["Přehraj.to"], ["Nenalezeno"]]
+    count = len(asked)
+    api(check["target"]["call"], **check["target"]["params"])
+    assert len(asked) == count                                              # už ověřené se neptá znovu
+
+
+def test_search_offers_titles_and_remembers_queries(api, monkeypatch):
+    assert api("search_history") == {"rows": []}
+    api("settings_set", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {"/search/multi": {"results": [
+        {"id": 11, "media_type": "movie", "title": "Pelíšky", "release_date": "1999-04-08", "poster_path": "/p.jpg"},
+        {"id": 77, "media_type": "tv", "name": "Archa", "first_air_date": "1996-01-01"},
+        {"id": 5, "media_type": "person", "name": "Někdo"}], "total_pages": 1}})
+    monkeypatch.setattr(app_api, "prehrajto_search", lambda params: {"items": [], "next": None})
+    rows = {row["title"]: row["items"] for row in api("search", q="pelisky")["rows"]}
+    titles = rows["Filmy a seriály"]
+    assert _titles(titles) == ["Pelíšky", "Archa"]
+    assert titles[0]["target"]["type"] == "title" and titles[1]["target"]["params"]["kind"] == "tv"
+    api("search", q="archa")
+    api("search", q="pelisky")                                              # opakovaný dotaz se jen posune dopředu
+    history = api("search_history")["rows"][0]
+    assert history["title"] == "Naposledy hledané" and _titles(history["items"]) == ["pelisky", "archa"]
+    assert history["items"][0]["target"] == {"type": "search", "call": "search", "params": {"q": "pelisky"}}
+
+
+def test_stream_variant_follows_preferred_quality():
+    streams = [{"quality": token} for token in ("ORIG", "UHD", "FHD", "HD", "SD")]
+    pick = lambda quality, items=streams: app_api._pick_stream(items, {"language": "dub", "quality": quality})["quality"]
+    assert [pick(q) for q in ("best", "1080", "720", "small")] == ["ORIG", "FHD", "HD", "SD"]
+    assert pick("1080", [{"quality": "UHD"}, {"quality": "HD"}]) == "HD"     # nejbližší nižší má přednost
+    assert pick("720", [{"quality": "ORIG"}, {"quality": "UHD"}]) == "UHD"   # originál s neznámým rozlišením až nakonec
+    assert app_api._size_bytes("4,2 GB") == int(4.2 * 1024 ** 3) and app_api._size_bytes("700 MB") == 700 * 1024 ** 2
+    assert app_api._size_bytes("") == 0
 
 
 def test_protected_ivysilani_programme_uses_device_widevine(api, monkeypatch):
