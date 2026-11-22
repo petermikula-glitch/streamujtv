@@ -2,5 +2,7 @@
 build/
 local.properties
 *.keystore
+# podpisový klíč aplikace je v repozitáři záměrně (viz README, oddíl Aktualizace)
+!signing/mojevidea.keystore
 *.jks
 .kotlin/

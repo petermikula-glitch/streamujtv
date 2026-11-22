@@ -36,8 +36,9 @@ android {
     }
     signingConfigs {
         // Aktualizace jde nainstalovat přes starší verzi jen se stejným podpisem.
-        // Klíč se předává zvenčí: -PsigningKeystore=/cesta/k/souboru.keystore
+        // Klíč aplikace je v signing/mojevidea.keystore; jiný lze předat -PsigningKeystore=/cesta/k/souboru.
         val keystore = providers.gradleProperty("signingKeystore").orNull
+            ?: rootProject.file("signing/mojevidea.keystore").takeIf { it.exists() }?.path
         if (keystore != null) {
             create("personal") {
                 storeFile = file(keystore)

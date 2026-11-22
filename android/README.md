@@ -44,8 +44,10 @@ Emulátor mívá jiné měřítko než televize – `adb shell wm density 213` n
 
 ### Podpis
 
-Android dovolí nainstalovat novou verzi přes starou jen se stejným podpisem. Vlastní klíč se
-předává při sestavení a do repozitáře nepatří:
+Android dovolí nainstalovat novou verzi přes starou jen se stejným podpisem. Klíč aplikace je proto
+v repozitáři (`signing/mojevidea.keystore`, heslo `android`, alias `mojevidea`) a každé sestavení ho
+použije samo. Je to vědomé rozhodnutí vlastníka u osobní aplikace: klíč je veřejný, aktualizace si ale
+aplikace bere jen z vydání tohoto repozitáře. Jiný klíč lze předat při sestavení:
 
 ```bash
 gradle assembleDebug -PsigningKeystore=/cesta/klic.keystore -PsigningPassword=… -PsigningAlias=…
@@ -108,8 +110,8 @@ systémovému instalátoru; ruční kontrola je v Nastavení. Poprvé je potřeb
 z neznámých zdrojů. Nová verze musí být podepsaná stejným klíčem jako ta nainstalovaná.
 
 Vydání vytváří `.github/workflows/android.yml` při změně na hlavní větvi: spustí testy, sestaví APK,
-podepíše ho klíčem z tajné proměnné `SIGNING_KEYSTORE_BASE64` (úložiště klíčů v base64; heslo
-v `SIGNING_PASSWORD`, výchozí `android`) a založí vydání, pokud pro danou verzi ještě neexistuje.
+podepíše ho klíčem ze `signing/` (tajná proměnná `SIGNING_KEYSTORE_BASE64` s úložištěm klíčů v base64
+má přednost, je-li nastavená) a založí vydání, pokud pro danou verzi ještě neexistuje.
 Nové vydání tedy znamená zvýšit `versionCode` a `versionName` v `app/build.gradle.kts` a přepsat
 `RELEASE_NOTES.md` (text se ukáže v nabídce aktualizace).
 

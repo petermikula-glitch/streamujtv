@@ -46,7 +46,7 @@ jobs:
           gradle-version: '8.14.3'
 
       # Aktualizace jde nainstalovat jen se stejným podpisem jako předchozí verze.
-      # Klíč je v tajné proměnné SIGNING_KEYSTORE_BASE64, případně v android/signing/.
+      # Klíč je v android/signing/; tajná proměnná SIGNING_KEYSTORE_BASE64 má přednost, je-li nastavená.
       - name: Podpisový klíč
         id: key
         env:
@@ -72,6 +72,11 @@ jobs:
           else
             gradle --no-daemon assembleDebug
           fi
+
+      - name: Kontrola podpisu
+        run: |
+          apksigner="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
+          "$apksigner" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | grep "SHA-256"
 
       - name: Verze
         id: version
