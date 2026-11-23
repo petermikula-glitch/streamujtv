@@ -124,7 +124,7 @@ def test_catalogue_rows_lists_and_search(api):
                     "target": {"type": "play", "call": "play", "params": {"vid": REF}}}  # česká verze ve vyšší kvalitě
     assert [item["title"] for item in film["menu"]] == [
         "Přehrát", "Přehrát od začátku", "Stáhnout na disk", "Označit jako zhlédnuté", "Odebrat z Rozkoukaných",
-        "Přidat do oblíbených"]
+        "Opravit přiřazení", "Přidat do oblíbených"]
     assert rows["Moje filmy"][1]["title"] == "Filmy z mého účtu (1)" and rows["Moje filmy"][1]["target"]["call"] == "movies"
     assert rows["Moje filmy"][1]["icon"] == "movies"                  # dlaždice bez obrázku nese ikonu
     assert _section(api, "series")["Nově přidané z účtu"][0]["target"] == {"type": "list", "call": "show", "params": {"key": "show:archa"},
@@ -167,7 +167,9 @@ def test_web_search_reuses_playback_history_and_downloads(api, monkeypatch):
     rows = {row["title"]: row["items"] for row in api("search", q=" Pelíšky ")["rows"]}
     assert _titles(rows["Filmy v katalogu"]) == ["Pelíšky"]
     assert rows["Díly v iVysílání"]
-    known, online, more = rows["Videa na Přehraj.to"]
+    known, online, filtered, more = rows["Videa na Přehraj.to"]
+    assert filtered["title"] == "Filtrovat videa" and filtered["target"]["params"] == {
+        "q": "Pelíšky", "group": True, "listing": True}
     assert known["progress"] == 20 and known["target"]["params"]["vid"] == REF
     assert online["title"] == "Hra o trůny S01E02 CZ tit"
     assert online["target"]["params"]["vid"] == episode
@@ -432,7 +434,8 @@ def test_download_queue_progress_local_playback_and_removal(api, tmp_path):
     assert api("download_progress", vid=REF, done=50, total=200) == {"cancel": False}
     card = api("downloads")["items"][0]
     assert (card["subtitle"], card["progress"]) == ("Stahuje se · 25 % z 0 MB", 25)
-    assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zrušit stahování", "Označit jako zhlédnuté"]
+    assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zrušit stahování", "Označit jako zhlédnuté",
+                                                        "Opravit přiřazení"]
     rows = _section(api, "movies")                                           # dlaždice vede na stažené filmy
     assert rows["Moje filmy"][0]["title"] == "Stažené filmy (1)" and rows["Moje filmy"][0]["icon"] == "download"
     assert _section(api, "series")["Moje seriály"][0]["title"] == "Stažené díly"
@@ -490,7 +493,7 @@ def test_download_failures_and_cancel(api, tmp_path, monkeypatch):
     card = api("downloads")["items"][0]
     assert card["subtitle"].startswith("Chyba: Video už na Přehraj.to není")
     assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zkusit stáhnout znovu", "Odebrat ze stahování",
-                                                        "Označit jako zhlédnuté"]
+                                                        "Označit jako zhlédnuté", "Opravit přiřazení"]
     api("download_add", vid=REF)                                             # znovu do fronty
     _link(REF, "https://cdn.x/stream?id=5")
     job = api("download_next", dir=disk)
@@ -565,7 +568,7 @@ def test_favorites_from_catalogue_cards(api):
     assert add["title"] == "Přidat do oblíbených" and add["target"]["type"] == "command"
     assert api(add["target"]["call"], **add["target"]["params"]) == {"message": "Přidáno do oblíbených: Pelíšky"}
     series = _section(api, "series")["Nově přidané z účtu"][0]
-    assert _titles(series["menu"]) == ["Otevřít", "Přidat do oblíbených"]
+    assert _titles(series["menu"]) == ["Otevřít", "Přidat do oblíbených", "Opravit přiřazení"]
     api(series["menu"][1]["target"]["call"], **series["menu"][1]["target"]["params"])
 
     rows = _section(api, "favorites")                               # vlastní sekce, filmy a seriály zvlášť
@@ -875,7 +878,7 @@ def test_web_results_of_one_title_are_grouped(api, monkeypatch):
                          _web(73, "Pelisky.1999.CZ.1080p", 2 * hour, "4 GB"), _web(74, "Pelisky 1999 CZ tit", 2 * hour)]}
     _catalogue_search(monkeypatch, found)
     rows = {row["title"]: row["items"] for row in api("search", q="Pelíšky")["rows"]}
-    grouped, other = rows["Videa na Přehraj.to"]
+    grouped, other, _filtered = rows["Videa na Přehraj.to"]
     assert grouped["target"]["params"]["vid"] == _web(73, "")["id"]          # nejlepší verze podle předvoleb
     assert grouped["subtitle"].startswith("3 verze") and other["title"].startswith("Jiny film")
     versions = grouped["menu"][-1]
@@ -1534,6 +1537,135 @@ def test_subtitle_style_belongs_to_the_profile(api):
     assert (api("subtitle_style")["size"], api("subtitle_style")["background"]) == ("large", "shade")
     api(other["target"]["call"], **other["target"]["params"])
     assert api("subtitle_style")["size"] == "huge"
+
+
+def test_double_episode_counts_as_both_and_the_next_one_follows_it(api, monkeypatch):
+    first, third = "21:archa:%016x" % 21, "23:archa:%016x" % 23
+    with app_api._library() as lib:
+        lib.upsert_video(first, "Archa.S01E01-E02.CZ", "account", None)        # dvojdíl v jednom souboru
+        lib.upsert_video(third, "Archa.S01E03.CZ", "account", None)
+    listed = api("show", key="show:archa")["items"]
+    assert _titles(listed)[:2] == ["1×01–02", "1×03"]
+    _catalogue_search(monkeypatch, {})
+    following = api("play_next", track=first)["next"]                          # po dvojdílu rovnou třetí díl
+    assert (following["title"], following["subtitle"], following["auto"]) == ("Další díl", "Archa 1×03", True)
+    assert following["target"]["params"] == {"vid": third}
+
+
+def test_version_search_goes_on_until_it_finds_the_preferred_language(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    english = _web(61, "Pelisky 1999 EN 1080p", 6600, "3 GB")
+    dubbed = _web(62, "Cosy Dens 1999 CZ dabing 1080p", 6600, "3 GB")
+    asked = _catalogue_search(monkeypatch, {"Pelíšky 1999": [english], "Cosy Dens 1999": [dubbed]})
+    with app_api._library() as lib:
+        state = app_api._state(lib)
+    versions = app_api.app_discover._find_versions(["Pelíšky", "Cosy Dens"], 1999, None, state)
+    # pod českým názvem je jen verze bez dabingu: hledá se dál pod původním a dabovaná je první
+    assert [query for query, _page in asked] == ["Pelíšky 1999", "Pelíšky", "Cosy Dens 1999"]
+    assert [version["video"]["id"] for version in versions] == [dubbed["id"], english["id"]]
+
+    del asked[:]
+    quick = app_api.app_discover._find_versions(["Pelíšky", "Cosy Dens"], 1999, None, state, thorough=False)
+    assert [query for query, _page in asked] == ["Pelíšky 1999"] and len(quick) == 1   # ověření dostupnosti nehledá dál
+
+    del asked[:]
+    api("settings_set", prefer_language="any")
+    with app_api._library() as lib:
+        state = app_api._state(lib)
+    assert len(app_api.app_discover._find_versions(["Pelíšky", "Cosy Dens"], 1999, None, state)) == 1
+    assert [query for query, _page in asked] == ["Pelíšky 1999"]                # bez předvolby jazyka stačí první nález
+
+
+def test_search_listing_filters_by_language_and_quality(api, monkeypatch):
+    found = {"Pelíšky": [_web(71, "Pelisky 1999 EN 720p", 7200, "1 GB"), _web(72, "Pelisky.1999.CZ.1080p", 7200, "4 GB"),
+                         _web(73, "Pelisky 1999 CZ tit 2160p", 7200), _web(74, "Pelisky 1999 CZ dabing", 7200)]}
+    _catalogue_search(monkeypatch, found)
+    listing = api("prehrajto_search", q="Pelíšky", listing=True)["items"]
+    assert listing[0]["title"] == "Filtr" and listing[0]["subtitle"] == "Jazyk a kvalita" and len(listing) == 5
+    assert listing[0]["target"] == {"type": "filter", "call": "search_filters", "params": {"listing": True, "q": "Pelíšky"}}
+    filters = api("search_filters", **listing[0]["target"]["params"])
+    assert [(group["title"], group["value"]) for group in filters["filters"]] == [("Jazyk", "Vše"), ("Kvalita", "Vše")]
+    assert filters["reset"] is None
+    dubbed = filters["filters"][0]["options"][1]["params"]
+    assert dubbed == {"listing": True, "q": "Pelíšky", "lang": "dub"}
+    only = api("prehrajto_search", **dubbed)["items"]
+    assert only[0]["subtitle"] == "Český nebo slovenský dabing"
+    assert [card["title"] for card in only[1:]] == ["Pelisky.1999.CZ.1080p", "Pelisky 1999 CZ dabing"]
+    sharp = api("prehrajto_search", q="Pelíšky", listing=True, lang="dub", quality="1080")["items"]
+    assert [card["title"] for card in sharp[1:]] == ["Pelisky.1999.CZ.1080p"]   # soubor bez uvedené kvality neprojde
+    subs = api("prehrajto_search", q="Pelíšky", listing=True, lang="subs")["items"]
+    assert [card["title"] for card in subs[1:]] == ["Pelisky 1999 CZ tit 2160p"]
+    active = api("search_filters", q="Pelíšky", listing=True, lang="dub", quality="1080")
+    assert active["reset"] == {"listing": True, "q": "Pelíšky"}
+    assert len(api("prehrajto_search", q="Pelíšky")["items"]) == 4              # bez filtru a bez karty Filtr
+
+
+def test_wrong_assignment_can_be_repaired_by_hand(api, monkeypatch):
+    _fill(2)
+    api("settings_set", tmdb_key="k" * 32)
+    film = _section(api, "movies")["Nově přidané z účtu"][0]
+    repair = next(item for item in film["menu"] if item["title"] == "Opravit přiřazení")["target"]
+    assert repair == {"type": "list", "call": "repair", "params": {"vid": REF}, "title": "Opravit přiřazení"}
+
+    class Tmdb(object):
+        enabled = True
+
+        def search(self, query, want_series=False):
+            return [{"id": 11, "title": "Pelíšky", "year": 1999, "orig_title": "Pelíšky"},
+                    {"id": 12, "title": query + " 2", "year": 2005, "orig_title": "Cosy Dens 2"}]
+
+        def details(self, tmdb_id, want_series=False):
+            return {"title": "Pelíšky 2", "orig_title": "Cosy Dens 2", "year": 2005, "tmdb_id": tmdb_id, "rating": 55,
+                    "poster": "https://img/p2.jpg", "genres": ["Komedie"]}
+
+    monkeypatch.setattr(app_api, "_tmdb", lambda: Tmdb())
+    cards = api("repair", **repair["params"])["items"]
+    assert _titles(cards) == ["Hledat pod jiným názvem", "Pelíšky (1999)", "Pelisky 2 (2005)", "Je to díl seriálu",
+                              "Přepsat název ručně"]
+    assert cards[0]["target"]["type"] == "input" and cards[0]["target"]["params"]["value"] == "Pelisky"
+    assert cards[2]["subtitle"] == "Cosy Dens 2"
+
+    # jiný název: výpis kandidátů se otevře znovu s novým dotazem a ten starý se zavře
+    again = api("repair_query", key="movie:pelisky|1999", vid=REF, text="Cosy Dens")
+    assert again["close"] is True and again["open"]["params"] == {"key": "movie:pelisky|1999", "vid": REF, "q": "Cosy Dens"}
+    assert _titles(api("repair", **again["open"]["params"])["items"])[2] == "Cosy Dens 2 (2005)"
+    assert "prázdný" in api("repair_query", key="movie:pelisky|1999", text=" ")["error"]
+
+    # výběr kandidáta: titul dostane název, plakát a hodnocení a jeho soubory se zamknou
+    applied = api(cards[2]["target"]["call"], **cards[2]["target"]["params"])
+    assert applied == {"message": "", "toast": "Přiřazeno: Pelíšky 2", "close": True}
+    with app_api._library() as lib:
+        meta = lib.get_meta("movie:pelisky|1999")
+        assert (meta["title"], meta["poster"], meta["status"]) == ("Pelíšky 2", "https://img/p2.jpg", "ok")
+        assert lib.get_video(REF)["locked"] == 1
+    assert "Vrátit automatické rozpoznání" in _titles(api("repair", vid=REF)["items"])
+
+    # oprava souboru: díl, řada, film místo dílu, ruční název
+    monkeypatch.setattr(app_api.catalog, "enrich", lambda lib, metas, **kw: {"ok": 0, "notfound": len(metas),
+                                                                             "csfd_blocked": False})
+    second = "12:archa:%016x" % 12
+    episode = api("repair", vid=second)["items"]
+    assert ["Změnit číslo dílu", "Změnit řadu", "Je to film, ne díl", "Přepsat název ručně"] == _titles(episode)[-4:]
+    assert episode[-4]["subtitle"] == "Teď: 1×02" and episode[-1]["target"]["params"]["value"] == "Archa S01E02"
+    assert api("repair_video", vid=second, field="episode", text="7") == {
+        "message": "", "toast": "Opraveno: Archa 1×07", "close": True}
+    assert api("repair_video", vid=second, field="season", text="3")["toast"] == "Opraveno: Archa 3×07"
+    assert "číslo" in api("repair_video", vid=second, field="episode", text="sedm")["error"]
+    assert api("repair_video", vid=second, field="movie")["toast"] == "Opraveno: Archa"
+    assert api("repair_video", vid=second, field="episode_of", text="2x05")["toast"] == "Opraveno: Archa 2×05"
+    assert api("repair_video", vid=second, field="name", text="Jiný seriál 1x09")["toast"] == "Opraveno: Jiný seriál 1×09"
+    with app_api._library() as lib:
+        fixed = lib.get_video(second)
+        assert (fixed["meta_key"], fixed["season"], fixed["episode"], fixed["locked"]) == ("show:jiny serial", 1, 9, 1)
+    assert api("repair_video", vid=second, field="auto")["toast"] == "Opraveno: Archa 1×02"
+    with app_api._library() as lib:
+        assert lib.get_video(second)["locked"] == 0 and lib.get_meta("show:jiny serial") is None
+
+    # číslovaný soubor jako díl: číslo se z názvu seriálu vypustí
+    with app_api._library() as lib:
+        lib.upsert_video("40:ulice:%016x" % 40, "Ulice 4521", "account", None)
+    assert api("repair_video", vid="40:ulice:%016x" % 40, field="episode_of", text="4521")["toast"] == "Opraveno: Ulice 1×4521"
+    assert "není" in api("repair", vid="9:x:00000000000000ff")["error"]
 
 
 def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):

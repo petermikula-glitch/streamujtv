@@ -350,7 +350,9 @@ def _show_card(meta, state=None):
     subtitle = " · ".join(part for part in (rating, "%d dílů" % count if count else "") if part)
     title = _display_title(meta)
     target = _target("list", "show", {"key": meta["key"]}, title)
-    menu = [{"title": "Otevřít", "target": target}] + _favorite_menu(state, meta) if state else None
+    menu = [{"title": "Otevřít", "target": target}] + _favorite_menu(state, meta) + [
+        {"title": "Opravit přiřazení", "target": _target("list", "repair", {"key": meta["key"]}, "Opravit přiřazení")}
+    ] if state else None
     return _card(title, target, subtitle, meta.get("poster") or meta.get("thumb"), wide=not meta.get("poster"),
                  icon="series", menu=menu)
 
@@ -359,7 +361,7 @@ def _video_card(video, meta, state, prefix="", web_result=None):
     meta = meta or {}
     title = _display_title(meta) or video["title"]
     if video["kind"] == "episode":
-        label = "%s %dx%02d" % (title, video["season"], video["episode"]) if video["episode"] else video["raw_title"]
+        label = "%s %s" % (title, _episode_code(video, "x")) if video["episode"] else video["raw_title"]
     else:
         label = title
     details = " · ".join(part for part in (video.get("lang"), video.get("quality"), video.get("size")) if part)
@@ -413,6 +415,8 @@ def _video_menu(state, params, point=None):
                       "target": _target("command", "watched_set", {"vid": vid, "watched": not seen})})
     if point and point[0] > 0:
         items.append({"title": "Odebrat z Rozkoukaných", "target": _target("command", "progress_remove", {"vid": vid})})
+    if not params.get("web_result"):
+        items.append({"title": "Opravit přiřazení", "target": _target("list", "repair", {"vid": vid}, "Opravit přiřazení")})
     return items
 
 
@@ -833,7 +837,7 @@ def show(params):
     cards = []
     for position in sorted(best, key=lambda item: (item[0], str(item[1]).zfill(12))):
         video = best[position]
-        label = "%d×%02d" % (video["season"], video["episode"]) if video["episode"] else video["raw_title"]
+        label = _episode_code(video) if video["episode"] else video["raw_title"]
         details = " · ".join(part for part in (video.get("lang"), video.get("quality")) if part)
         point = state["resume"].get(video["id"])
         cards.append(_card(label, _target("play", "play", {"vid": video["id"]}), _mark(state, video["id"], details),
@@ -890,6 +894,11 @@ def search(params):
         rows.extend(app_discover.title_rows(titles.result(), state, results.get("results") or []))
         rows.extend(people.result())
         cards = results["items"]
+        if cards:
+            cards.append(_card("Filtrovat videa", _target("list", "prehrajto_search",
+                                                          {"q": query, "group": True, "listing": True},
+                                                          "Videa na Přehraj.to: %s" % query),
+                               "Podle jazyka a kvality", icon="settings:search"))
         if results["next"]:
             cards.append(_card("Další výsledky na Přehraj.to",
                                _target("list", "prehrajto_search", results["next"]["params"],
@@ -932,6 +941,49 @@ def _ivys_search_rows(query):
     return rows
 
 
+SEARCH_LANGUAGES = (("", "Vše"), ("dub", "Český nebo slovenský dabing"), ("subs", "S titulky"))
+SEARCH_QUALITIES = (("", "Vše"), ("1080", "1080p a lepší"), ("720", "720p a lepší"))
+
+
+def _search_filter(params):
+    """Zvolený filtr výpisu videí z Přehraj.to (a příznaky výpisu, které se nesou mezi stránkami)."""
+    chosen = {key: True for key in ("group", "listing") if params.get(key)}
+    if params.get("lang") in dict(SEARCH_LANGUAGES) and params["lang"]:
+        chosen["lang"] = params["lang"]
+    if params.get("quality") in dict(SEARCH_QUALITIES) and params["quality"]:
+        chosen["quality"] = params["quality"]
+    return chosen
+
+
+def _search_filter_passes(video, chosen):
+    lang = video.get("lang") or ""
+    if chosen.get("lang") == "dub" and _language_rank(lang, "dub") != 0:
+        return False
+    if chosen.get("lang") == "subs" and "titulky" not in lang:
+        return False
+    if chosen.get("quality"):
+        order = provider.QUALITY_ORDER
+        token = provider.quality_token(video.get("quality") or "")
+        if token not in order or order.index(token) > order.index("FHD" if chosen["quality"] == "1080" else "HD"):
+            return False   # kvalita, kterou výsledek neuvádí, filtrem neprojde
+    return True
+
+
+def search_filters(params):
+    """Filtr výpisu videí z Přehraj.to: jazyk a kvalita (stejný tvar jako ``catalog_filters``)."""
+    query = (params.get("q") or "").strip()
+    chosen = _search_filter(params)
+    filters = []
+    for title, key, choices in (("Jazyk", "lang", SEARCH_LANGUAGES), ("Kvalita", "quality", SEARCH_QUALITIES)):
+        listed = [{"title": name, "current": value == chosen.get(key, ""),
+                   "params": dict({k: v for k, v in chosen.items() if k != key}, q=query, **({key: value} if value else {}))}
+                  for value, name in choices]
+        filters.append({"title": title, "value": next(o["title"] for o in listed if o["current"]), "options": listed})
+    active = bool(chosen.get("lang") or chosen.get("quality"))
+    reset = dict({k: v for k, v in chosen.items() if k in ("group", "listing")}, q=query)
+    return {"title": "Filtr", "filters": filters, "reset": reset if active else None}
+
+
 def prehrajto_search(params):
     query = (params.get("q") or "").strip()
     page = max(1, _offset({"offset": params.get("page")}))
@@ -946,6 +998,7 @@ def prehrajto_search(params):
         raise ApiError("Hledání na Přehraj.to se nezdařilo. Zkuste to znovu.")
     cards, groups = [], {}
     only = params.get("only") or ""
+    chosen = _search_filter(params)
     with _library() as lib:
         state = _state(lib)
         for result in results:
@@ -956,6 +1009,8 @@ def prehrajto_search(params):
                 video = dict(nameparser.parse(title), id=result["id"], raw_title=title,
                              thumb=result.get("thumb", ""), size=result.get("size", ""))
                 video["quality"] = result.get("quality") or video["quality"]
+            if not _search_filter_passes(video, chosen):
+                continue
             key = "|".join(str(part) for part in (search_results.normalize(video.get("title") or ""),
                                                   video.get("year") or 0, video.get("season") or 0,
                                                   video.get("episode") or 0))
@@ -980,8 +1035,14 @@ def prehrajto_search(params):
                                                  "only": key}, card["title"])}]
             grouped.append((min(index for _rank, index in members), card))
         cards = [card for _index, card in sorted(grouped, key=lambda item: item[0])]
-    following = {"call": "prehrajto_search", "params": {"q": query, "page": page + 1, "cursor": cursor}} \
+    following = {"call": "prehrajto_search", "params": dict(chosen, q=query, page=page + 1, cursor=cursor)} \
         if cursor and not only else None
+    if params.get("listing") and page == 1 and not only:
+        # samostatný výpis videí: první karta je filtr jazyka a kvality
+        summary = " · ".join(title for key, choices in (("lang", SEARCH_LANGUAGES), ("quality", SEARCH_QUALITIES))
+                             for value, title in choices if value and value == chosen.get(key))
+        cards.insert(0, _card("Filtr", {"type": "filter", "call": "search_filters", "params": dict(chosen, q=query)},
+                              summary or "Jazyk a kvalita", icon="settings:search"))
     response = {"items": cards, "next": following}
     if params.get("group"):
         response["results"] = results   # hledání podle nich vyznačí, které tituly na Přehraj.to jsou
@@ -1056,10 +1117,22 @@ def play(params):
             "track": vid, "live": False, "hls": False, "tracks": tracks}
 
 
+def _episode_code(video, separator="×"):
+    """Označení dílu „1×05“; soubor s víc díly najednou „1×01–02“."""
+    code = "%d%s%02d" % (video["season"], separator, video["episode"])
+    last = video.get("episode_end") or 0
+    return code + ("–%02d" % last if last > video["episode"] else "")
+
+
+def _last_episode(video):
+    """Poslední díl, který soubor obsahuje (u dvojdílu druhý)."""
+    return max(video["episode"], video.get("episode_end") or 0)
+
+
 def _video_title(video, meta):
     title = _display_title(meta or {}) or video["title"]
     if video["kind"] == "episode" and video["episode"]:
-        title = "%s %d×%02d" % (title, video["season"], video["episode"])
+        title = "%s %s" % (title, _episode_code(video))
     return title
 
 
@@ -1309,6 +1382,164 @@ def quick_sync(params):
         _STATE["busy"] = False
         _STATE["progress"] = ""
         _LOCK.release()
+
+
+# ---------------------------------------------------------------------------
+# Ruční oprava přiřazení
+# ---------------------------------------------------------------------------
+
+def _canonical_name(video):
+    """Jak by se video jmenovalo zapsané „správně“ – předloha pro ruční přepis."""
+    if video["kind"] == "episode":
+        return "%s S%02dE%02d" % (video["title"], video["season"], video["episode"])
+    return "%s %d" % (video["title"], video["year"]) if video["year"] else video["title"]
+
+
+def repair(params):
+    """Oprava špatně rozpoznaného titulu: výběr správného filmu nebo seriálu a oprava řady a dílu."""
+    vid = str(params.get("vid") or "")
+    with _library() as lib:
+        video = lib.find_video(vid) if vid else None
+        key = params.get("key") or (video or {}).get("meta_key") or ""
+        meta = lib.get_meta(key) if key else None
+    if not meta:
+        raise ApiError("Tento titul už v katalogu není.")
+    series = meta["kind"] == "show"
+    query = (params.get("q") or meta.get("search_title") or "").strip()
+    ref = {"key": key, "vid": vid}
+    cards = [_card("Hledat pod jiným názvem",
+                   _target("input", "repair_query", dict(ref, value=query, hint="Název filmu nebo seriálu")),
+                   "Teď hledám: %s" % query, icon="search")]
+    tmdb = _tmdb()
+    if tmdb.enabled:
+        try:
+            candidates = tmdb.search(query, series) if query else []
+        except TmdbError as error:
+            raise ApiError(str(error))
+        for item in candidates:
+            name = "%s (%s)" % (item["title"], item["year"] or "?")
+            other = item["orig_title"] if item.get("orig_title") and item["orig_title"] != item["title"] else ""
+            current = str(meta.get("tmdb_id") or "") == str(item["id"])
+            cards.append(_card(name, _target("command", "repair_apply", dict(ref, id=item["id"])),
+                               " · ".join(part for part in ("teď přiřazeno" if current else "", other) if part),
+                               icon="series" if series else "movies"))
+        if not candidates:
+            cards.append(_card("Nic nenalezeno", _target("refresh"), "Zkuste jiný název", icon="search"))
+    else:
+        cards.append(_card("Plakáty a názvy potřebují klíč TMDB", _target("settings"), "Otevřít Nastavení",
+                           icon="settings"))
+    if video:
+        if video["kind"] == "episode":
+            cards.append(_card("Změnit číslo dílu", _target("input", "repair_video", dict(
+                ref, field="episode", value=str(video["episode"]), hint="Číslo dílu")), "Teď: %s" % _episode_code(video),
+                icon="series"))
+            cards.append(_card("Změnit řadu", _target("input", "repair_video", dict(
+                ref, field="season", value=str(video["season"]), hint="Číslo řady")), "Teď: %d. řada" % video["season"],
+                icon="series"))
+            cards.append(_card("Je to film, ne díl", _target("command", "repair_video", dict(ref, field="movie")),
+                               icon="movies"))
+        else:
+            cards.append(_card("Je to díl seriálu", _target("input", "repair_video", dict(
+                ref, field="episode_of", value="", hint="Řada a díl, např. 1x05")), "Zadejte řadu a díl", icon="series"))
+        cards.append(_card("Přepsat název ručně", _target("input", "repair_video", dict(
+            ref, field="name", value=_canonical_name(video), hint="Např. Pelíšky 1999 nebo Ulice 1x4521")),
+            "Soubor: %s" % video["raw_title"], icon="settings"))
+        if video.get("locked"):
+            cards.append(_card("Vrátit automatické rozpoznání", _target("command", "repair_video", dict(ref, field="auto")),
+                               "Zruší ruční úpravu tohoto souboru", icon="sync"))
+    return {"title": "Opravit přiřazení", "items": cards, "next": None,
+            "empty": "K tomuto titulu není co opravit."}
+
+
+def repair_query(params):
+    """Jiný název pro hledání správného titulu: výpis kandidátů se otevře znovu s novým dotazem."""
+    text = str(params.get("text") or "").strip()
+    if not text:
+        raise ApiError("Název nesmí být prázdný.")
+    target = _target("list", "repair", {"key": params.get("key") or "", "vid": params.get("vid") or "", "q": text},
+                     "Opravit přiřazení")
+    return {"message": "", "open": target, "close": True}
+
+
+def repair_apply(params):
+    """Přiřadí titulu z katalogu vybraný film nebo seriál z TMDB (název, plakát, hodnocení)."""
+    key = params.get("key") or ""
+    with _library() as lib:
+        meta = lib.get_meta(key)
+    if not meta:
+        raise ApiError("Tento titul už v katalogu není.")
+    info = _tmdb().details(int(params.get("id") or 0), meta["kind"] == "show")
+    with _library() as lib:
+        catalog.apply_details(lib, key, info, "tmdb", lock_videos=True)
+    return {"message": "", "toast": "Přiřazeno: %s" % (info.get("title") or meta["search_title"]), "close": True}
+
+
+_EPISODE_OF_RE = re.compile(r"^\s*(?:s\s*)?(\d{1,2})\s*(?:x|×|e|\s)\s*(\d{1,4})\s*$", re.I)
+
+
+def _whole(text, low, high, what):
+    try:
+        value = int(str(text).strip())
+    except ValueError:
+        raise ApiError("%s musí být číslo." % what)
+    if not low <= value <= high:
+        raise ApiError("%s musí být od %d do %d." % (what, low, high))
+    return value
+
+
+def repair_video(params):
+    """Oprava jednoho souboru: číslo dílu, řada, film místo dílu a naopak, nebo celý název ručně.
+
+    Ruční úprava video „zamkne“ – synchronizace ani přepočet katalogu ji už nepřepíše."""
+    vid, field, text = str(params.get("vid") or ""), params.get("field") or "", str(params.get("text") or "").strip()
+    with _library() as lib:
+        video = lib.find_video(vid)
+        if not video:
+            raise ApiError("Tento soubor už v katalogu není.")
+        vid = video["id"]
+        kind, title, year = video["kind"], video["title"], video["year"]
+        season, episode = video["season"], video["episode"]
+        if field == "auto":
+            key = lib.unlock_video(vid)
+        else:
+            if field == "episode":
+                kind, episode = "episode", _whole(text, 1, 9999, "Číslo dílu")
+            elif field == "season":
+                kind, season = "episode", _whole(text, 0, 99, "Číslo řady")
+            elif field == "movie":
+                kind, season, episode = "movie", 0, 0
+                year = nameparser.parse(video["raw_title"])["year"]
+            elif field == "episode_of":
+                found = _EPISODE_OF_RE.match(text)
+                if found:
+                    season, episode = int(found.group(1)), int(found.group(2))
+                else:
+                    season, episode = 1, _whole(text, 1, 9999, "Číslo dílu")
+                kind, year = "episode", 0
+                # „Ulice 4521“ jako díl 4521: číslo do názvu seriálu nepatří
+                base = nameparser.numbered(title)
+                if base and int(base[1]) == episode:
+                    title = base[0]
+            elif field == "name":
+                parsed = nameparser.parse(text)
+                if not parsed["title"]:
+                    raise ApiError("Název nesmí být prázdný.")
+                kind, title, year = parsed["kind"], parsed["title"], parsed["year"]
+                season, episode = parsed["season"], parsed["episode"]
+            else:
+                raise ApiError("Neznámá oprava.")
+            if kind == "episode" and episode <= 0:
+                raise ApiError("U dílu seriálu musí být číslo dílu.")
+            key = lib.edit_video(vid, kind, title, year, season, episode)
+        fixed = lib.get_video(vid)
+        label = _video_title(fixed, lib.get_meta(key))
+        fresh = (lib.get_meta(key) or {}).get("status") == "new"
+    if fresh:
+        try:
+            _enrich()        # nový titul si hned dotáhne plakát a hodnocení
+        except (ApiError, TmdbError):
+            pass
+    return {"message": "", "toast": "Opraveno: %s" % label, "close": True}
 
 
 def _enrich(statuses=("new",)):
@@ -2084,6 +2315,8 @@ ACTIONS.update({
     "play": play, "progress_save": progress_save, "link_failed": link_failed,
     "settings_get": settings_get, "settings_set": settings_set, "account_status": account_status,
     "progress": progress, "sync": sync, "quick_sync": quick_sync, "enrich": enrich,
+    "repair": repair, "repair_query": repair_query, "repair_apply": repair_apply, "repair_video": repair_video,
+    "search_filters": search_filters,
     "ivys_live": ivys_live, "ivys_category": ivys_category, "ivys_listing": ivys_listing, "ivys_show": ivys_show,
     "ivys_favorites": ivys_favorites, "ivys_favorite": ivys_favorite, "ivys_play": ivys_play,
 })

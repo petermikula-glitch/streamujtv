@@ -519,3 +519,101 @@ def test_quick_sync_stops_at_known_page_and_never_prunes(plugin, monkeypatch):
     assert not stats["quick"] and listing_requests() == 3 and stats["removed"] == 1
     client.calls.clear()
     assert not plugin.run_sync(background=False)["quick"] and listing_requests() == 3  # ruční je vždy úplná
+
+
+def _snapshot(lib, names, started, durations=None):
+    videos = [{"id": "%d:v:%016x" % (number, number), "title": raw, "duration": (durations or {}).get(number, 0)}
+              for number, raw in names.items()]
+    return lib.apply_account_snapshot(videos, started, True, False)
+
+
+def test_files_numbered_only_by_number_become_a_series_as_a_group(tmp_path):
+    lib = _lib(tmp_path)
+    names = {1: "Ulice 4521", 2: "Ulice 4522", 3: "Ulice 4523",            # čísla, jaká pokračování filmů nemívají
+             4: "Rocky 2", 5: "Rocky 3", 6: "Rocky 4",                     # filmová pokračování: zůstávají filmy
+             7: "Kutil 1", 8: "Kutil 2", 9: "Kutil 3",                     # malá čísla, ale délka dílu
+             10: "Naruto 045", 11: "Naruto 046",                           # jen dva soubory: zatím nic
+             12: "Blade Runner 2049 1080p CZ"}
+    durations = {4: 7200, 5: 7200, 6: 7200, 7: 1500, 8: 1500, 9: 1500}
+    _snapshot(lib, names, 10, durations)
+    videos = {int(v["id"].split(":")[0]): v for v in lib.all_videos()}
+    assert [(videos[n]["kind"], videos[n]["meta_key"], videos[n]["season"], videos[n]["episode"]) for n in (1, 2, 3)] == [
+        ("episode", "show:ulice", 1, 4521), ("episode", "show:ulice", 1, 4522), ("episode", "show:ulice", 1, 4523)]
+    assert all(videos[n]["kind"] == "movie" for n in (4, 5, 6, 10, 11, 12))
+    assert [(videos[n]["meta_key"], videos[n]["episode"]) for n in (7, 8, 9)] == [
+        ("show:kutil", 1), ("show:kutil", 2), ("show:kutil", 3)]
+    assert lib.get_meta("show:ulice")["title"] == "Ulice" and lib.get_meta("movie:ulice 4521|") is None
+
+    # další soubor se k existujícímu seriálu přidá sám; třetí Naruto z dvojice udělá seriál
+    cid = lib.create_collection("Anime")
+    lib.add_to_collection(cid, "movie:naruto 045|")
+    lib.record_play("10:v:%016x" % 10, 300, 1400)
+    names.update({13: "Ulice 4524", 14: "Naruto 047", 15: "Ulice 2"})
+    _snapshot(lib, names, 20, durations)
+    videos = {int(v["id"].split(":")[0]): v for v in lib.all_videos()}
+    assert (videos[13]["meta_key"], videos[13]["episode"]) == ("show:ulice", 4524)
+    assert [videos[n]["meta_key"] for n in (10, 11, 14)] == ["show:naruto"] * 3
+    assert videos[15]["kind"] == "movie"                                   # „Ulice 2“ bez délky: nejisté, nechá se
+    assert lib.collection_targets(cid) == ["show:naruto"]                  # kolekce jde s titulem
+    assert lib.resume_points() == {"10:v:%016x" % 10: (300.0, 1400.0)}     # rozkoukané zůstává u videa
+
+    # ruční úprava má přednost a přepočet katalogu seskupení nerozbije
+    lib.edit_video("1:v:%016x" % 1, "movie", "Ulice film", 2005)
+    assert lib._reparse_unlocked() == 0
+    videos = {int(v["id"].split(":")[0]): v for v in lib.all_videos()}
+    assert videos[1]["meta_key"] == "movie:ulice film|2005" and videos[2]["meta_key"] == "show:ulice"
+    lib.close()
+
+
+def test_upgrade_to_schema_10_reparses_names_and_adds_double_episodes(tmp_path):
+    import db
+    import nameparser
+    path = str(tmp_path / "c.db")
+    names = {"1:a:%016x" % 1: "Vratné lahve - celý film CZ HD", "2:b:%016x" % 2: "Přátelé S01E01-E02",
+             "3:c:%016x" % 3: "Pán prstenů: Dvě věže / The Lord of the Rings: The Two Towers (2002)",
+             "4:d:%016x" % 4: "Ulice 4521", "5:e:%016x" % 5: "Ulice 4522", "6:f:%016x" % 6: "Ulice 4523"}
+    with db.Library(path) as lib, lib.conn:
+        for vid, raw in names.items():
+            lib.upsert_video(vid, raw, "account", nameparser.parse(raw))
+        ids = list(names)
+        old = _old_parse(lib, ids[0], "Vratné lahve celý film")
+        _old_parse(lib, ids[2], "Pán prstenů: Dvě věže / The Lord of the Rings: The Two Towers", 2002)
+        for vid, title in zip(ids[3:], ("Ulice 4521", "Ulice 4522", "Ulice 4523")):
+            _old_parse(lib, vid, title)
+        lib.conn.execute("UPDATE videos SET episode_end=0")
+        cid = lib.create_collection("České")
+        lib.add_to_collection(cid, old)
+        lib.conn.execute("PRAGMA user_version = 9")
+
+    with db.Library(path) as lib:
+        videos = {v["id"]: v for v in lib.all_videos()}
+        assert videos[ids[0]]["meta_key"] == "movie:vratne lahve|" and lib.collection_targets(cid) == ["movie:vratne lahve|"]
+        assert (videos[ids[1]]["episode"], videos[ids[1]]["episode_end"]) == (1, 2)
+        assert videos[ids[2]]["meta_key"] == "movie:pan prstenu dve veze|2002"
+        assert [videos[vid]["meta_key"] for vid in ids[3:]] == ["show:ulice"] * 3
+        assert lib.conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 10
+
+
+def test_backup_made_before_double_episodes_still_restores(tmp_path):
+    lib = _lib(tmp_path)
+    lib.upsert_video(REF, "Pratele S01E01-E02", "account", None)
+    backup = lib.export_backup("plugin.test")
+    assert backup["tables"]["videos"][0]["episode_end"] == 2
+    for row in backup["tables"]["videos"]:
+        del row["episode_end"]                                             # záloha ze starší verze sloupec nemá
+    lib.clear()
+    lib.restore_backup(backup, "plugin.test")
+    assert lib.get_video(REF)["episode_end"] == 2                          # přepočet po obnově ho doplní
+    lib.close()
+
+
+def test_metadata_lookup_tries_the_other_title_from_the_file_name(tmp_path):
+    import catalog
+    lib = _lib(tmp_path)
+    raw = "Dvě věže neznamy / The Two Towers (2002)"
+    lib.upsert_video(REF, raw, "account", None)
+    stub = _TmdbStub()
+    stats = catalog.enrich(lib, lib.meta_to_fetch(), use_csfd=False, tmdb=stub)
+    assert stub.calls == ["Dvě věže neznamy", "The Two Towers"]             # český název nic, původní ano
+    assert stats["ok"] == 1 and lib.get_meta("movie:dve veze neznamy|2002")["status"] == "ok"
+    lib.close()

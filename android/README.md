@@ -228,6 +228,25 @@ nabídka existuje, připomene aplikace při prvních třech spuštěních jednor
 začíná velkým panelem s tlačítkem Pokračovat; obrázek je z metadat titulu, jinak výchozí ilustrace.
 Když se postranní nabídka sbalí, zůstane vlevo úzká lišta ikon sekcí.
 
+**Rozpoznávání názvů a katalog** (sdílené moduly `nameparser.py`, `db.py`, `catalog.py`):
+- *Seriály číslované jen číslem* („Ulice 4521“, „Naruto 045“): jeden takový soubor je film („Rocky 2“);
+  seriál z nich dělá až skupina aspoň tří souborů se stejným názvem a různým číslem, bez roku v názvu
+  a s číslem nebo délkou dílu (`_group_numbered` v `db.py`). K existujícímu seriálu se další přidávají samy.
+- *Dva názvy v jednom* („Český / Original (2002)“): katalog vede první, druhý se zkusí při hledání
+  plakátu a hodnocení (`alternatives`, `_search_titles`).
+- *Slova navíc* („celý film“, „český film“, „Pohádka:“) se z názvu vypouštějí.
+- *Dvojdíl* („S01E01-E02“) se eviduje jako oba díly (`episode_end`): po něm následuje až třetí díl.
+- Při aktualizaci se katalog přepočítá podle nových pravidel (schéma 10); ručně upravená videa se nemění.
+
+**Oprava přiřazení** (`repair*` v `app_api.py`): v nabídce karty filmu, seriálu nebo dílu je „Opravit
+přiřazení“ – výběr správného titulu z TMDB (i pod jiným názvem), změna čísla dílu nebo řady, film místo
+dílu a naopak, případně přepis názvu ručně („Pelíšky 1999“, „Ulice 1x4521“). Ruční úprava soubor
+zamkne proti přepsání; „Vrátit automatické rozpoznání“ zámek zruší.
+
+**Hledání verzí** (`_find_versions`): když pod prvním názvem není verze podle předvoleb (jazyk, kvalita,
+žádná kino kopie), hledá se dál pod dalšími názvy – původní název často najde lepší soubor než český.
+Výpis „Filtrovat videa“ z hledání má filtr jazyka a kvality (`search_filters`).
+
 **Další díl v iVysílání** (`ivys_next`, `_ivys_following` v `app_api.py`): po dokoukání dílu z iVysílání
 přehrávač nabídne další díl téhož pořadu – podle pořadí ve výpisu ČT, ať je řazený od nejnovějšího,
 nebo od nejstaršího. Sám se nespouští. Výpis pořadu začíná kartou **Pokračovat** (rozkoukaný díl,

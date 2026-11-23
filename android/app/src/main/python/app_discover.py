@@ -176,7 +176,7 @@ def favorites_check(params):
     for entry in waiting:
         try:
             versions = _find_versions([entry.get("title") or "", entry.get("orig") or ""],
-                                      int(entry.get("year") or 0), None, state, pages=1)
+                                      int(entry.get("year") or 0), None, state, pages=1, thorough=False)
         except api.ApiError:
             break  # hledání teď nejde; zkusí se příště
         good = [version for version in versions if not version["short"]]
@@ -392,7 +392,7 @@ def _check_available(kind, items, state):
                 try:
                     versions = _find_versions(names, year if kind == "movie" else 0,
                                               None if kind == "movie" else (1, 1), state, pages=1, client=client,
-                                              queries_max=3, strict=True)
+                                              queries_max=3, strict=True, thorough=False)
                     count = len([version for version in versions if not version["short"]])
                 except api.ApiError:
                     _PAUSED["prehrajto"] = time.time() + CHECK_PAUSE
@@ -698,7 +698,8 @@ def discover_check(params):
             date = item.get("release_date") or ""
             try:
                 versions = _find_versions([title, item.get("original_title") or ""],
-                                          int(date[:4]) if date[:4].isdigit() else 0, None, state, pages=1)
+                                          int(date[:4]) if date[:4].isdigit() else 0, None, state, pages=1,
+                                          thorough=False)
             except api.ApiError:
                 continue  # hledání teď nejde; titul zůstane neověřený
             good = [version for version in versions if not version["short"]]
@@ -805,13 +806,35 @@ def _search_client(timeout=8):
     return client
 
 
+def _good_enough(found, prefs, names):
+    """Je mezi nalezenými soubory aspoň jeden, jaký si uživatel přeje – v předvoleném jazyce a kvalitě,
+    žádná kino kopie ani ukázka? Kvalita, kterou hledání neuvádí, se bere jako vyhovující."""
+    order = provider.QUALITY_ORDER
+    limit = {"best": "FHD", "1080": "FHD", "720": "HD"}.get(prefs["quality"])
+    for result, parsed in found:
+        raw = result["title"]
+        if api.CAM_RE.search(raw) or search_results.is_preview(raw, names):
+            continue
+        if prefs["language"] != "any" and api._language_rank(parsed.get("lang"), prefs["language"]) != 0:
+            continue
+        token = provider.quality_token(result.get("quality") or parsed.get("quality") or "")
+        if limit and token in order and order.index(token) > order.index(limit):
+            continue
+        return True
+    return False
+
+
 def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", client=None, queries_max=4,
-                   strict=False):
+                   strict=False, thorough=True):
     """Verze titulu (nebo dílu) na Přehraj.to, vyčištěné a seřazené podle předvoleb.
 
     Vrací ``[{"video", "result", "short", "cam", "bad", "chosen"}]``. Hledá se více variantami názvu;
     soubor výrazně kratší než film (``runtime`` v minutách) je ukázka nebo část a řadí se až na konec,
     stejně jako kino kopie a verze, které se dřív nepodařilo přehrát. Stejné soubory se slučují.
+
+    ``thorough``: nespokojit se s prvním názvem, pod kterým se něco našlo – když mezi nálezy není
+    verze podle předvoleb (jazyk, kvalita, žádná kino kopie), zkusí se i další názvy (původní název
+    často najde lepší soubor než český). Ověřování dostupnosti to nepotřebuje: tam stačí, že titul je.
     """
     if client is None:
         client = _search_client()
@@ -826,6 +849,7 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
             if query not in queries:
                 queries.append(query)
     queries = queries[:queries_max]
+    prefs, bad = state.get("prefs") or api._prefs(), state.get("bad", ())
     found, failed = {}, 0
     for query in queries:
         cursor = ""
@@ -841,9 +865,8 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
                     found.setdefault(result["id"], (result, parsed))
             if not cursor:
                 break
-        if found:
+        if found and (not thorough or _good_enough(found.values(), prefs, names)):
             break
-    prefs, bad = state.get("prefs") or api._prefs(), state.get("bad", ())
     with api._library() as lib:
         chosen = lib.get_kv(api.CHOICE_PREFIX + choice) if choice else ""
         # Verze stažené na disku patří k titulu, i když už je hledání nevrací (nebo zrovna nejde).
@@ -1357,7 +1380,8 @@ def _catalogue_next_episode(lib, video, state):
         rank = api._version_rank(other, state["prefs"], state["bad"])
         if position not in best or rank < best[position][0]:
             best[position] = (rank, other)
-    later = sorted(position for position in best if position > (video["season"], video["episode"]))
+    # dvojdíl (1×01–02) končí druhým dílem: další je až ten za ním
+    later = sorted(position for position in best if position > (video["season"], api._last_episode(video)))
     if not later:
         return None
     following = best[later[0]][1]
@@ -1368,21 +1392,21 @@ def _missing_between(video, following):
     """Díl, který mezi dokoukaným a nabízeným chybí: ``(řada, díl)``, nebo None, když na sebe navazují.
 
     Navazuje díl s číslem o jedna vyšším a první díl další řady (kolik dílů řada má, katalog neví)."""
-    position, later = (video["season"], video["episode"]), (following["season"], following["episode"])
+    position, later = (video["season"], api._last_episode(video)), (following["season"], following["episode"])
     if later == (position[0], position[1] + 1) or later == (position[0] + 1, 1):
         return None
     return position[0], position[1] + 1
 
 
 def _episode_label(lib, video, position=None):
-    season, episode = position or (video["season"], video["episode"])
     meta = lib.get_meta(video["meta_key"]) or {}
-    return "%s %d×%02d" % (api._display_title(meta) or video["title"], season, episode)
+    code = "%d×%02d" % position if position else api._episode_code(video)
+    return "%s %s" % (api._display_title(meta) or video["title"], code)
 
 
 def _searched_next_episode(lib, video, state):
     """Další díl seriálu, který v katalogu není: vyhledá se na Přehraj.to podle názvu seriálu."""
-    following = (video["season"], video["episode"] + 1)
+    following = (video["season"], api._last_episode(video) + 1)
     meta = lib.get_meta(video["meta_key"]) or {}
     names = [api._display_title(meta) or video["title"], meta.get("orig_title") or "", video["title"]]
     versions = [version for version in _find_versions(names, 0, following, state, pages=1) if not version["short"]]

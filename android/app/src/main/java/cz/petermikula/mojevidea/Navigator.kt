@@ -231,6 +231,8 @@ object Navigator {
             data?.optString("toast")?.takeIf { it.isNotEmpty() }?.let {
                 Toast.makeText(activity, it, Toast.LENGTH_LONG).show()
             }
+            // příkaz, který vede na další obrazovku (kandidáti po zadání jiného názvu): otevře se hned
+            if (result.ok) data?.optJSONObject("open")?.let { open(activity, Target.from(it), title) }
             // příkaz, kterým výběr končí (zvolený profil, obrázek): výpis se zavře
             val finished = {
                 if (result.ok && data?.optBoolean("close") == true && activity is ListActivity) activity.finish()

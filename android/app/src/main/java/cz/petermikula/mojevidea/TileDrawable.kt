@@ -53,6 +53,17 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
         canvas.save()
         canvas.clipRect(area)
         canvas.drawRect(area, fill)
+        // název čitelný z dálky: na velké dlaždici větší
+        val small = area.width() < SMALL * density
+        text.textSize = (if (small) 20 else 24) * density
+        val width = (area.width() - 2 * padding).toInt()
+        val layout = if (width > 0 && title.isNotEmpty()) {
+            StaticLayout.Builder.obtain(title, 0, title.length, text, width)
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setMaxLines(3)
+                .setEllipsize(TextUtils.TruncateAt.END)
+                .build()
+        } else null
         if (art != null) {
             // malba vyplní dlaždici na výšku a drží se pravého okraje (motiv je v pravé polovině)
             val width = max(1, art.intrinsicWidth)
@@ -61,8 +72,9 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
             val portrait = area.height() > area.width()
             val scale = if (portrait) area.width() / width.toFloat()
             else max(area.width() / width.toFloat(), area.height() / height.toFloat())
-            // na malé kartě (verze, díly) je motiv tlumenější, ať nepřebíjí název
-            art.alpha = if (area.width() < SMALL * density) 150 else 255
+            // na malé kartě (verze, díly) je motiv tlumenější, ať nepřebíjí název; víceřádkový název
+            // (jméno souboru) přes něj jde celý, proto ještě víc
+            art.alpha = if (!small) 255 else if ((layout?.lineCount ?: 1) > 1) 60 else 150
             val w = (width * scale).toInt()
             val h = (height * scale).toInt()
             val left = area.right - w
@@ -79,15 +91,7 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
                 it.draw(canvas)
             }
         }
-        val width = (area.width() - 2 * padding).toInt()
-        // název čitelný z dálky: na velké dlaždici větší
-        text.textSize = (if (area.width() < SMALL * density) 20 else 24) * density
-        if (width > 0 && title.isNotEmpty()) {
-            val layout = StaticLayout.Builder.obtain(title, 0, title.length, text, width)
-                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setMaxLines(3)
-                .setEllipsize(TextUtils.TruncateAt.END)
-                .build()
+        if (layout != null) {
             canvas.translate(area.left + padding, area.bottom - padding - layout.height)
             layout.draw(canvas)
         }

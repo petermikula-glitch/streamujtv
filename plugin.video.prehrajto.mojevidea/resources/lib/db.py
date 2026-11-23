@@ -4,9 +4,15 @@ import json
 import sqlite3
 import time
 
-from nameparser import movie_key, normalize, parse, show_key, title_key
+from nameparser import movie_key, normalize, numbered, parse, show_key, title_key
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
+# Seriál číslovaný jen číslem („Ulice 4521“): aspoň tolik souborů se stejným názvem a různým číslem…
+NUMBERED_MIN = 3
+# …a k tomu buď čísla, jaká filmová pokračování nemívají (od tohoto výš, nebo s nulou na začátku),
+NUMBERED_STRONG = 20
+# nebo délka, jakou má díl, ne film (v sekundách).
+EPISODE_MAX_SECONDS = 75 * 60
 BACKUP_VERSION = 1
 MAX_SQL_KEYS = 500  # SQLite před 3.32 dovolí nejvýš 999 parametrů v jednom dotazu
 OPTIONAL_BACKUP_TABLES = ("watchlist", "watched_marks", "progress_hidden", "saved_movie_filters",
@@ -33,7 +39,8 @@ CREATE TABLE IF NOT EXISTS videos (
     quality TEXT DEFAULT '',
     meta_key TEXT NOT NULL,        -- odkaz do tabulky meta
     locked INTEGER DEFAULT 0,      -- 1 = uživatel ručně upravil název/typ, sync nepřepisuje
-    hidden INTEGER DEFAULT 0
+    hidden INTEGER DEFAULT 0,
+    episode_end INTEGER DEFAULT 0  -- poslední díl, když soubor obsahuje víc dílů (S01E01-E02), jinak 0
 );
 CREATE INDEX IF NOT EXISTS idx_videos_meta ON videos(meta_key);
 CREATE INDEX IF NOT EXISTS idx_videos_kind ON videos(kind);
@@ -245,6 +252,8 @@ class Library(object):
             self.conn.execute("ALTER TABLE videos ADD COLUMN vkey TEXT DEFAULT ''")
         if "size" not in cols:
             self.conn.execute("ALTER TABLE videos ADD COLUMN size TEXT DEFAULT ''")
+        if "episode_end" not in cols:
+            self.conn.execute("ALTER TABLE videos ADD COLUMN episode_end INTEGER DEFAULT 0")
         if "search_name" not in cols:
             self.conn.execute("ALTER TABLE videos ADD COLUMN search_name TEXT NOT NULL DEFAULT ''")
             self.conn.executemany("UPDATE videos SET search_name=? WHERE id=?",
@@ -267,8 +276,9 @@ class Library(object):
             for other in ids:
                 if other != keep:
                     self._merge_into(other, keep)
-        if previous < 8:
-            # 1.3.7 opravila rozpoznávání názvů (Johnny English, Ulice 4012. díl, S01E02: …)
+        if previous < 10:
+            # Rozpoznávání názvů se zlepšilo (1.3.7: Johnny English, Ulice 4012. díl; verze 10: dva názvy
+            # v jednom, slova navíc, dvojdíly, seriály číslované jen číslem): katalog se přepočítá.
             self._reparse_unlocked()
 
     def _carry_links(self, old_key, new_key):
@@ -291,7 +301,7 @@ class Library(object):
         """Znovu rozpozná názvy videí, která uživatel ručně neupravil (po opravě pravidel
         rozpoznávání nebo po obnově starší zálohy). Vrací počet přeřazených videí."""
         moved = 0
-        watched = ("kind", "title", "year", "season", "episode", "meta_key")
+        watched = ("kind", "title", "year", "season", "episode", "episode_end", "meta_key")
         rows = [_row(r) for r in self.conn.execute("SELECT * FROM videos WHERE locked=0 ORDER BY id").fetchall()]
         parsed = [(video, parse(video["raw_title"])) for video in rows]
         # Filmy bez roku se přiřazují k jedinému stejnojmennému filmu s rokem, proto až ve
@@ -300,6 +310,11 @@ class Library(object):
             for video, result in parsed:
                 if (result["kind"] != "movie" or bool(result.get("year"))) != with_year:
                     continue
+                if video["kind"] == "episode" and result["kind"] == "movie" and not result.get("year"):
+                    # díl seriálu číslovaného jen číslem: zařadil ho _group_numbered, název sám říká „film“
+                    found = numbered(result["title"])
+                    if found and title_key(found[0]) == title_key(video["title"]) and int(found[1]) == video["episode"]:
+                        continue
                 fields = self._parsed_fields(video["raw_title"], result)
                 if all(fields[name] == video[name] for name in watched):
                     continue
@@ -312,6 +327,49 @@ class Library(object):
                 moved += 1
             if moved:
                 self._cleanup_meta()
+        return moved + self._group_numbered()
+
+    @staticmethod
+    def _episode_number(digits, duration):
+        """Vypadá číslo na konci názvu jako číslo dílu? Podle čísla samého, nebo podle délky videa."""
+        strong = int(digits) >= NUMBERED_STRONG or (len(digits) > 1 and digits.startswith("0"))
+        return strong or 0 < (duration or 0) < EPISODE_MAX_SECONDS
+
+    def _group_numbered(self):
+        """Soubory číslované jen číslem („Ulice 4521“, „Naruto 045“) zařadí jako díly seriálu.
+
+        Jeden takový soubor nic neznamená („Rocky 2“ je film). Seriál z nich dělá až skupina:
+        aspoň ``NUMBERED_MIN`` souborů se stejným názvem a různým číslem, všechny bez roku v názvu
+        a všechny s číslem nebo délkou dílu (ne filmového pokračování). Jakmile seriál existuje,
+        přidávají se k němu další takové soubory po jednom. Ručně upravená videa se nemění.
+        Vrací počet přeřazených videí."""
+        groups = {}
+        for row in self.conn.execute("SELECT * FROM videos WHERE locked=0 AND kind='movie' AND year=0 "
+                                     "ORDER BY id").fetchall():
+            video = _row(row)
+            found = numbered(video["title"])
+            if found:
+                groups.setdefault(title_key(found[0]), []).append((video, found[0], found[1]))
+        moved = 0
+        for key, members in groups.items():
+            show = "show:" + show_key(members[0][1])
+            likely = [member for member in members if self._episode_number(member[2], member[0]["duration"])]
+            exists = self.conn.execute("SELECT 1 FROM videos WHERE meta_key=? AND kind='episode' LIMIT 1",
+                                       (show,)).fetchone()
+            if not exists and (len(likely) < len(members) or len({int(m[2]) for m in members}) < NUMBERED_MIN):
+                continue
+            # název seriálu: jak ho píše většina souborů
+            names = [base for _video, base, _digits in members]
+            title = max(sorted(set(names)), key=names.count)
+            for video, _base, digits in likely:
+                self.conn.execute(
+                    "UPDATE videos SET kind='episode', title=?, season=1, episode=?, episode_end=0, meta_key=? "
+                    "WHERE id=?", (title, int(digits), show, video["id"]))
+                self._ensure_meta_for_video(video["id"])
+                self._carry_links(video["meta_key"], show)
+                moved += 1
+        if moved:
+            self._cleanup_meta()
         return moved
 
     def _merge_into(self, old, new):
@@ -370,8 +428,9 @@ class Library(object):
             numeric = {row[1] for row in info if row[2].upper() in ("INTEGER", "REAL")}
             rows = tables[table]
             if table == "videos" and isinstance(rows, list) and all(isinstance(row, dict) for row in rows):
-                rows = [dict(row, search_name=normalize(row["raw_title"])) if isinstance(row.get("raw_title"), str)
-                        else row for row in rows]
+                # starší záloha sloupec episode_end ještě nemá
+                rows = [dict({"episode_end": 0}, **dict(row, search_name=normalize(row["raw_title"])))
+                        if isinstance(row.get("raw_title"), str) else row for row in rows]
             if not isinstance(rows, list) or any(
                     not isinstance(row, dict) or set(row) != set(columns)
                     or any(value is not None and type(value) not in (str, int, float)
@@ -560,6 +619,8 @@ class Library(object):
                 self.conn.execute("DELETE FROM collection_items WHERE target IN (SELECT 'v:' || id FROM (" +
                                   missing + "))", (now,))
                 removed = self.conn.execute("DELETE FROM videos WHERE id IN (" + missing + ")", (now,)).rowcount
+            if added:
+                self._group_numbered()   # nové soubory mohly doplnit seriál číslovaný jen číslem
             self._cleanup_meta()
             self.conn.execute("INSERT OR REPLACE INTO settings_kv VALUES ('account_snapshot', ?)", (str(started),))
             if complete or partial:
@@ -588,6 +649,7 @@ class Library(object):
             "year": parsed.get("year") or 0,
             "season": parsed.get("season") or 0,
             "episode": parsed.get("episode") or 0,
+            "episode_end": parsed.get("episode_end") or 0,
             "lang": parsed.get("lang") or "",
             "quality": parsed.get("quality") or "",
             "meta_key": key,
@@ -605,7 +667,7 @@ class Library(object):
     def _edit_video(self, vid, kind, title, year, season, episode):
         key = meta_key_for(kind, title, year)
         self.conn.execute(
-            "UPDATE videos SET kind=?, title=?, year=?, season=?, episode=?, meta_key=?, locked=1 "
+            "UPDATE videos SET kind=?, title=?, year=?, season=?, episode=?, episode_end=0, meta_key=?, locked=1 "
             "WHERE id=?", (kind, title, year or 0, season or 0, episode or 0, key, vid))
         self._ensure_meta_for_video(vid)
         return key
@@ -619,6 +681,24 @@ class Library(object):
                 self._carry_links(previous["meta_key"], key)
             self._cleanup_meta()
         return key
+
+    def unlock_video(self, vid):
+        """Zruší ruční úpravu: video se znovu rozpozná z názvu souboru. Vrací nový klíč titulu."""
+        with self.conn:
+            previous = self.get_video(vid)
+            if not previous:
+                return None
+            fields = self._parsed_fields(previous["raw_title"], parse(previous["raw_title"]))
+            fields["quality"] = fields["quality"] or previous["quality"]
+            fields["lang"] = fields["lang"] or previous["lang"]
+            fields["locked"] = 0
+            sets = ", ".join("%s=?" % name for name in fields)
+            self.conn.execute("UPDATE videos SET %s WHERE id=?" % sets, list(fields.values()) + [vid])
+            self._ensure_meta_for_video(vid)
+            self._carry_links(previous["meta_key"], fields["meta_key"])
+            self._group_numbered()
+            self._cleanup_meta()
+        return self.get_video(vid)["meta_key"]
 
     def edit_episodes(self, assignments, title, season):
         """Přesune potvrzené soubory najednou a zachová vazby podle ID videa."""

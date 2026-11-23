@@ -42,6 +42,24 @@ CASES = [
     ("Show - S01E02, CZ", "episode", "Show", 0, 1, 2),
     ("Show S01E02-E03 CZ", "episode", "Show", 0, 1, 2),
     ("Wall-E 2008", "movie", "Wall-E", 2008, 0, 0),
+    # dva názvy v jednom: katalog vede první
+    ("Pán prstenů: Dvě věže / The Lord of the Rings: The Two Towers (2002)", "movie", "Pán prstenů: Dvě věže", 2002, 0, 0),
+    ("Kancl / The Office S03E05 CZ", "episode", "Kancl", 0, 3, 5),
+    ("AC/DC Live 1991", "movie", "AC/DC Live", 1991, 0, 0),
+    # slova, která k názvu nepatří
+    ("Vratné lahve - celý film CZ HD", "movie", "Vratné lahve", 0, 0, 0),
+    ("Cely film - Vratne lahve", "movie", "Vratne lahve", 0, 0, 0),
+    ("Vlny 2024 cesky film", "movie", "Vlny", 2024, 0, 0),
+    ("Pohádka: Tři oříšky pro Popelku", "movie", "Tři oříšky pro Popelku", 0, 0, 0),
+    ("Celý film", "movie", "Celý film", 0, 0, 0),
+    ("Film: Název 2001", "movie", "Název", 2001, 0, 0),
+    # číslo dílu hned za rokem; závorka, která k názvu patří
+    ("Chalupáři (1975) 03 - Kopecký", "episode", "Chalupáři", 1975, 1, 3),
+    ("Film (2010) 50 fps", "movie", "Film", 2010, 0, 0),
+    ("The Office (US) S03E05", "episode", "The Office (US)", 0, 3, 5),
+    # jeden číslovaný soubor zůstává filmem – seriál z nich dělá až skupina v katalogu
+    ("Ulice 4521", "movie", "Ulice 4521", 0, 0, 0),
+    ("Rocky 2", "movie", "Rocky 2", 0, 0, 0),
 ]
 
 
@@ -67,3 +85,18 @@ def test_keys_keep_titles_without_latin_letters_apart():
     assert nameparser.movie_key("Брат", 2001) != nameparser.movie_key("Унесённые призраками", 2001)
     assert nameparser.show_key("Брат") != nameparser.show_key("Бригада")
     assert nameparser.movie_key("Pelíšky", 1999) == "pelisky|1999"
+
+
+def test_double_episodes_other_titles_and_numbered_names():
+    assert nameparser.parse("Přátelé S01E01-E02")["episode_end"] == 2          # dvojdíl v jednom souboru
+    assert nameparser.parse("Simpsonovi 35x01-02 CZ")["episode_end"] == 2
+    assert nameparser.parse("Show S01E02E03")["episode_end"] == 3
+    assert nameparser.parse("Show S01E02")["episode_end"] == 0
+    assert nameparser.parse("Hra S01E01-E10")["episode_end"] == 0              # velký rozsah dvojdíl není
+    assert nameparser.alternatives("Pán prstenů: Dvě věže / The Lord of the Rings: The Two Towers (2002)") == [
+        "The Lord of the Rings: The Two Towers"]
+    assert nameparser.alternatives("Matrix (1999)") == []
+    assert nameparser.numbered("Ulice 4521") == ("Ulice", "4521")
+    assert nameparser.numbered("Naruto 045") == ("Naruto", "045")
+    assert nameparser.numbered("Ulice (4521)") == ("Ulice", "4521")
+    assert nameparser.numbered("Matrix") is None and nameparser.numbered("1917") is None

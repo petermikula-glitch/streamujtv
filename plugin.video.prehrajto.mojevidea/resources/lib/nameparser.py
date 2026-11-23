@@ -38,10 +38,10 @@ _B = r"(?:^|[\s(\-])"
 _E = r"(?=[\s,:;)\-]|$)"
 
 _EP_PATTERNS = [
-    # S01E02, S1E2, S01 E02, S01E02E03, S01E02-E03
-    re.compile(_B + r"s(\d{1,2})\s?e(\d{1,4})(?:\s?-?\s?e\d{1,4})?" + _E, re.I),
-    # 1x02
-    re.compile(_B + r"(\d{1,2})x(\d{1,4})" + _E, re.I),
+    # S01E02, S1E2, S01 E02, S01E02E03, S01E02-E03 (třetí skupina = poslední díl dvojdílu)
+    re.compile(_B + r"s(\d{1,2})\s?e(\d{1,4})(?:\s?-?\s?e(\d{1,4}))?" + _E, re.I),
+    # 1x02, 1x02-03
+    re.compile(_B + r"(\d{1,2})x(\d{1,4})(?:-(\d{1,4}))?" + _E, re.I),
     # 1. série 2. díl / 1 serie 2 dil / série 1 díl 2
     re.compile(r"(?:^|\s)(\d{1,2})\s?\.?\s?s[eé]rie\s+(\d{1,4})\s?\.?\s?d[ií]l", re.I),
     re.compile(r"(?:^|\s)s[eé]rie\s?(\d{1,2})\s+d[ií]l\s?(\d{1,4})", re.I),
@@ -60,6 +60,18 @@ _EP_ONLY_PATTERNS = [
 _SEASON_ONLY = re.compile(r"(?:^|\s)(?:s(\d{1,2})|(\d{1,2})\s?\.?\s?s[eé]rie)(?=\s|$)", re.I)
 
 _YEAR_RE = re.compile(r"(?:^|[\s(\[])((?:19[2-9]|20[0-4])\d)(?=[\s)\]]|$)")
+# číslo dílu hned za rokem v závorce: "Chalupáři (1975) 03 - Kopecký" (ne "… (2010) 50 fps")
+_YEAR_THEN_EP = re.compile(r"\((?:19[2-9]|20[0-4])\d\)\s+(\d{2,3})(?=\s|$)(?!\s*(?:fps|min|mb|gb|bit|hz|khz|kbps)\b)",
+                           re.I)
+MAX_MULTI_EPISODE = 3   # „S01E01-E02“ je dvojdíl; větší rozsah je spíš překlep nebo něco jiného
+
+# Slova, která k názvu nepatří: "Vratné lahve - celý film", "Vlny 2024 český film", "Pohádka: Popelka"
+_NOISE_RE = re.compile(r"(?:^|(?<=\s))(?:cel[ýy] film|(?:česk[ýy]|cesk[ýy]|slovensk[ýy]) film)(?=\s|$)", re.I)
+_PREFIX_RE = re.compile(r"^(?:poh[aá]dka|film|dokument|seri[aá]l)\s*[:–-]\s+", re.I)
+# dva názvy v jednom: "Pán prstenů: Dvě věže / The Lord of the Rings: The Two Towers"
+_SPLIT_RE = re.compile(r"\s+[/|]\s+")
+# název končící číslem: "Ulice 4521", "Naruto 045", "One Piece (1071)"
+_NUMBERED_RE = re.compile(r"^(.*[^\W\d_].*?)[\s(]+(\d{1,4})\)?$", re.S)
 
 
 def _cut_at_tags(title, anchored):
@@ -97,8 +109,22 @@ def normalize(text):
 
 
 def _tidy(text):
-    text = re.sub(r"\s+", " ", text or "").strip(" -_.,:;|/[]()")
-    return text.strip()
+    text = re.sub(r"\s+", " ", text or "").strip(" -_.,:;|/[]()").strip()
+    if text.count("(") > text.count(")"):
+        text += ")"   # ořez sebral závorku, která k názvu patří: "The Office (US)"
+    return text
+
+
+def numbered(title):
+    """Název, který končí číslem („Ulice 4521“, „Naruto 045“): ``(název bez čísla, číslo jako text)``, jinak None.
+
+    Samo o sobě to nic neznamená („Rocky 2“ je film); teprve víc souborů se stejným názvem a různým
+    číslem dělá seriál – o tom rozhoduje katalog."""
+    match = _NUMBERED_RE.match((title or "").strip())
+    if not match:
+        return None
+    base = _tidy(match.group(1))
+    return (base, match.group(2)) if base else None
 
 
 def _detect_lang(text):
@@ -152,12 +178,16 @@ def parse(raw_title):
     # pomlčky místo mezer (Ta-nejlepsi-videa) – jen když v názvu nejsou mezery
     if no_spaces and "-" in text:
         text = re.sub(r"-+", " ", text)
+    # slova navíc ("Pohádka: …", "… celý film"); když by z názvu nic nezbylo, nechají se
+    cleaned = _NOISE_RE.sub(" ", _PREFIX_RE.sub("", text))
+    if re.search(r"\w", cleaned):
+        text = cleaned
     text = re.sub(r"\s-+\s|-{2,}", " ", text)
     text = re.sub(r"[\[\]{}]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
 
-    result = {"kind": "movie", "title": "", "year": 0, "season": 0, "episode": 0,
-              "lang": _detect_lang(text), "quality": _detect_quality(text)}
+    result = {"kind": "movie", "title": "", "year": 0, "season": 0, "episode": 0, "episode_end": 0,
+              "lang": _detect_lang(text), "quality": _detect_quality(text), "alt_titles": []}
 
     cut = len(text)
     marker = (0, 0)  # část textu s číslem dílu – čísla v ní nejsou rok
@@ -167,9 +197,20 @@ def parse(raw_title):
             result["kind"] = "episode"
             result["season"] = int(m.group(1))
             result["episode"] = int(m.group(2))
+            last = int(m.group(3)) if m.lastindex and m.lastindex >= 3 and m.group(3) else 0
+            if 0 < last - result["episode"] <= MAX_MULTI_EPISODE:
+                result["episode_end"] = last   # dvojdíl v jednom souboru
             cut = min(cut, m.start())
             marker = m.span()
             break
+    if result["kind"] == "movie":
+        m = _YEAR_THEN_EP.search(text)
+        if m and m.start() > 0:
+            result["kind"] = "episode"
+            result["season"] = 1
+            result["episode"] = int(m.group(1))
+            cut = min(cut, m.start())
+            marker = m.span(1)
     if result["kind"] == "movie":
         for pat in _EP_ONLY_PATTERNS:
             m = pat.search(text)
@@ -203,11 +244,20 @@ def parse(raw_title):
 
     title = _cut_at_tags(text[:cut], anchored=cut < len(text))
     title = re.sub(r"\(\s*\)", "", title)
+    # dva názvy v jednom (český / původní): katalog vede první, druhý zkusí při hledání metadat
+    parts = [part for part in (_tidy(part) for part in _SPLIT_RE.split(title)) if part]
+    if len(parts) > 1:
+        title, result["alt_titles"] = parts[0], parts[1:]
     title = _tidy(title)
     if not title:
         title = _tidy(text) or raw.strip()
     result["title"] = title
     return result
+
+
+def alternatives(raw_title):
+    """Další názvy téhož titulu zapsané v názvu souboru („Český / Original“)."""
+    return parse(raw_title)["alt_titles"]
 
 
 def title_key(title):

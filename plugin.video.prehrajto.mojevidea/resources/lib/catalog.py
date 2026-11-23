@@ -171,6 +171,17 @@ def apply_details(lib, key, info, source, lock_videos=False):
         lib.update_meta(key, data)
 
 
+def _search_titles(lib, meta):
+    """Názvy, pod kterými se titul hledá: název z katalogu a další názvy zapsané v názvech souborů
+    („Český / Original“) – nejvýš dva navíc."""
+    titles = [meta["search_title"]]
+    for video in lib.videos_for_meta(meta["key"]):
+        for other in nameparser.alternatives(video["raw_title"]):
+            if other and nameparser.normalize(other) not in [nameparser.normalize(t) for t in titles]:
+                titles.append(other)
+    return titles[:3]
+
+
 def enrich(lib, metas, use_csfd=True, tmdb=None, progress=None, log=None):
     """Doplní metadata k zadaným titulům. Vrací statistiku.
 
@@ -197,9 +208,13 @@ def enrich(lib, metas, use_csfd=True, tmdb=None, progress=None, log=None):
         info = None
         source = ""
         failed = False
+        titles = _search_titles(lib, meta)
         if csfd_available:
             try:
-                info = csfd.find(title, year, want_series, log=log)
+                for candidate in titles:
+                    info = csfd.find(candidate, year, want_series, log=log)
+                    if info:
+                        break
                 source = "csfd" if info else ""
             except csfd.CsfdBlocked as e:
                 log("ČSFD blokuje automatické dotazy: %s" % e)
@@ -212,7 +227,10 @@ def enrich(lib, metas, use_csfd=True, tmdb=None, progress=None, log=None):
                 failed = True
         if info is None and tmdb_available:
             try:
-                info = tmdb.find(title, year, want_series)
+                for candidate in titles:
+                    info = tmdb.find(candidate, year, want_series)
+                    if info:
+                        break
                 source = "tmdb" if info else ""
                 failed = False
             except TmdbError as e:
@@ -245,9 +263,14 @@ def enrich(lib, metas, use_csfd=True, tmdb=None, progress=None, log=None):
 def _enrich_from_tmdb(lib, metas, start, tmdb, stats, progress, log):
     """Doplní ``metas[start:]`` z TMDB po dávkách souběžných dotazů; zápis do katalogu
     zůstává v tomto vlákně."""
-    def lookup(meta):
+    def lookup(item):
+        meta, titles = item
         try:
-            return tmdb.find(meta["search_title"], meta.get("search_year") or 0, meta["kind"] == "show"), None
+            for candidate in titles:
+                info = tmdb.find(candidate, meta.get("search_year") or 0, meta["kind"] == "show")
+                if info:
+                    return info, None
+            return None, None
         except TmdbError as e:
             return None, e
 
@@ -259,7 +282,9 @@ def _enrich_from_tmdb(lib, metas, start, tmdb, stats, progress, log):
                 stats["cancelled"] = True
                 return
             bad_key = False
-            for offset, (meta, (info, error)) in enumerate(zip(batch, pool.map(lookup, batch))):
+            # další názvy se čtou z katalogu tady: vlákna s dotazy na databázi nesmějí
+            asked = [(meta, _search_titles(lib, meta)) for meta in batch]
+            for offset, (meta, (info, error)) in enumerate(zip(batch, pool.map(lookup, asked))):
                 if progress:
                     progress(first + offset, total, meta["search_title"])
                 if info:
