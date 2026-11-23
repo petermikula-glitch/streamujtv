@@ -100,3 +100,14 @@ def test_double_episodes_other_titles_and_numbered_names():
     assert nameparser.numbered("Naruto 045") == ("Naruto", "045")
     assert nameparser.numbered("Ulice (4521)") == ("Ulice", "4521")
     assert nameparser.numbered("Matrix") is None and nameparser.numbered("1917") is None
+
+
+def test_slovak_is_recognised_as_a_word_too():
+    lang = lambda name: nameparser.parse(name)["lang"]
+    assert lang("Film.2020.slovensky.dabing") == "SK dabing" and lang("Film 2020 slovenský dabing") == "SK dabing"
+    assert lang("Film 2020 slovensky") == "SK dabing" and lang("Film 2020 SK") == "SK dabing"
+    assert lang("Film 2020 slovenske titulky") == "SK titulky" and lang("Film 2020 sk tit") == "SK titulky"
+    # obě řeči v jednom souboru se berou jako český dabing
+    assert lang("Film 2020 CZ/SK") == "CZ dabing" and lang("Film 2020 CZ-SK dabing") == "CZ dabing"
+    assert lang("Film 2020 cesky dabing") == "CZ dabing" and lang("Film 2020 dabing") == "CZ dabing"
+    assert lang("Česká pohádka 2010") == "" and lang("Film 2020 EN") == "EN"

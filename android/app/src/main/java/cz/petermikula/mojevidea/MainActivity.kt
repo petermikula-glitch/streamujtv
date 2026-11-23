@@ -273,14 +273,16 @@ class MainFragment : BrowseSupportFragment(), RowsHost {
     }
 
     /**
-     * Po otevření aplikace se na pozadí zkontroluje, jestli na účtu nepřibyla videa. Jak často se smí
-     * ptát, hlídá logika; nová videa se rovnou ukážou, jinak se nestane nic.
+     * Po otevření aplikace se na pozadí zkontroluje, jestli na účtu nepřibyla videa, a titulům bez
+     * hodnocení a plakátu se doplní. Jak často se smí ptát, hlídá logika; když se něco změnilo,
+     * obrazovka se načte znovu, jinak se nestane nic.
      */
     private fun quickSync() {
         Api.call("quick_sync") { result ->
             if (!isAdded) return@call
             val data = result.data ?: return@call
-            if (data.optInt("new") <= 0) return@call
+            // nová videa z účtu, nebo se samo doplnilo hodnocení a plakáty: obrazovka se načte znovu
+            if (data.optInt("new") <= 0 && !data.optBoolean("refresh")) return@call
             data.optString("toast").takeIf { it.isNotEmpty() }?.let {
                 android.widget.Toast.makeText(requireContext(), it, android.widget.Toast.LENGTH_LONG).show()
             }

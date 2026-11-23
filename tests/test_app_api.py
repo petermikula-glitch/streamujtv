@@ -107,7 +107,7 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
     tools = _section(api, "tools")["Nástroje"]
     assert [item["target"]["type"] for item in tools] == ["search", "list", "command", "command", "settings",
                                                           "choices", "list", "diagnostics"]
-    assert tools[5]["title"] == "Jazyk a kvalita přehrávání" and tools[5]["subtitle"] == "Český dabing · Nejvyšší dostupná"
+    assert tools[5]["title"] == "Jazyk a kvalita přehrávání" and tools[5]["subtitle"] == "Český nebo slovenský dabing · Nejvyšší dostupná"
     assert tools[6]["title"] == "Profil: Hlavní profil" and tools[6]["image"] == "res:avatar_clapper"
     assert tools[1]["target"]["call"] == "downloads"
 
@@ -909,7 +909,7 @@ def test_diagnostics_reports_state_and_recent_errors(api, monkeypatch):
     assert first["Přehraj.to"]["ok"] is False and "nepřihlášeno" in first["Přehraj.to"]["value"]
     assert first["TMDB"]["ok"] is False and first["iVysílání"]["ok"] is True
     assert first["Katalog"] == {"label": "Katalog", "value": "0 videí, 0 filmů, 0 seriálů", "ok": None}
-    assert first["Předvolby"]["value"] == "Český dabing, Nejvyšší dostupná"
+    assert first["Předvolby"]["value"] == "Český nebo slovenský dabing, Nejvyšší dostupná"
 
     api("settings_set", username="a@b.cz", password="heslo", tmdb_key="k" * 32)
     _fake_tmdb(monkeypatch, {"/genre/movie/list": {"genres": [{"id": 35, "name": "Komedie"}]}})
@@ -1451,6 +1451,7 @@ def test_quick_sync_after_opening_adds_new_videos_and_never_removes(api, monkeyp
     monkeypatch.setattr(app_api.provider, "make_client", lambda *a, **k: made.append(1) or Client())
     monkeypatch.setattr(app_api.catalog, "enrich", lambda lib, metas, **kw: {
         "ok": len(metas), "notfound": 0, "csfd_blocked": False})
+    monkeypatch.setattr(app_api, "_auto_enrich", lambda: 0)     # samočinné doplňování metadat má vlastní test
     assert api("quick_sync") == {"new": 0, "skipped": "account"} and not made     # bez přihlášení se nic neděje
     api("settings_set", username="a@b.cz", password="heslo")
     with app_api._library() as lib:
@@ -2090,7 +2091,7 @@ def test_playback_preferences_are_offered_as_choices(api):
     offered = api("prefs_choices")
     assert offered["apply"] == "settings_set" and offered["reset"] is None
     assert [(group["title"], group["value"]) for group in offered["filters"]] == [
-        ("Jazyk", "Český dabing"), ("Kvalita", "Nejvyšší dostupná"), ("Nejnižší kvalita", "Bez omezení")]
+        ("Jazyk", "Český nebo slovenský dabing"), ("Kvalita", "Nejvyšší dostupná"), ("Nejnižší kvalita", "Bez omezení")]
     subtitles = offered["filters"][0]["options"][1]
     assert subtitles == {"title": "Originál s titulky", "current": False, "params": {"prefer_language": "subs"}}
     api(offered["apply"], **subtitles["params"])
@@ -2717,3 +2718,41 @@ def test_search_shares_one_client_and_survives_a_failed_login_check(api, monkeyp
     assert made == ["a@b.cz", "a@b.cz", ""] and len(logins) == 2
     api("discover_title", **FILM)
     assert len(made) == 3 and len(logins) == 2              # a přihlášení se nezkouší před každým hledáním znovu
+
+
+def test_slovak_dubbing_counts_as_the_preferred_language(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    hour = 3600
+    found = [_web(81, "Duna 2021 EN 1080p", 2 * hour, "9 GB"),
+             _web(82, "Duna 2021 slovensky dabing 1080p", 2 * hour, "8 GB"),
+             _web(83, "Duna 2021 CZ dabing 720p", 2 * hour, "3 GB"),
+             _web(84, "Duna 2021 slovenske titulky 1080p", 2 * hour, "7 GB")]
+    _catalogue_search(monkeypatch, {"Duna 2021": found, "Duna": found})
+    with app_api._library() as lib:
+        state = app_api._state(lib)
+    versions = app_api.app_discover._find_versions(["Duna"], 2021, None, state)
+    # slovenský dabing je stejně dobrý jako český: mezi nimi rozhoduje kvalita; titulky a cizí zvuk až potom
+    assert [(int(v["video"]["id"].split(":")[0]), v["video"]["lang"]) for v in versions] == [
+        (82, "SK dabing"), (83, "CZ dabing"), (84, "SK titulky"), (81, "EN")]
+    assert dict(app_api.LANGUAGE_CHOICES)["dub"] == "Český nebo slovenský dabing"
+
+
+def test_ratings_and_posters_fill_in_by_themselves(api, monkeypatch):
+    _fill(2)                                   # Pelíšky už metadata mají, seriál Archa je nový
+    asked = []
+
+    def enrich(lib, metas, **kw):
+        asked.append(sorted(meta["key"] for meta in metas))
+        for meta in metas:
+            lib.set_meta_status(meta["key"], "notfound" if len(asked) == 1 else "ok")
+        return {"ok": 0 if len(asked) == 1 else len(metas), "notfound": len(metas), "csfd_blocked": False}
+
+    monkeypatch.setattr(app_api.catalog, "enrich", enrich)
+    # po otevření aplikace se doplní samo, i bez přihlášení k Přehraj.to; nic se nenašlo → obrazovka se neobnovuje
+    assert api("quick_sync") == {"new": 0, "skipped": "account"}
+    assert len(asked) == 1 and len(asked[0]) == 1 and "archa" in asked[0][0]
+    assert api("quick_sync") == {"new": 0, "skipped": "account"} and len(asked) == 1   # nenalezené se hned nezkouší znovu
+    monkeypatch.setattr(app_api, "ENRICH_NOTFOUND_AFTER", -1)                          # … až po čase
+    assert api("quick_sync") == {"new": 0, "skipped": "account", "refresh": True} and len(asked) == 2
+    assert api("quick_sync") == {"new": 0, "skipped": "account"} and len(asked) == 2   # hotovo: už se neptá
+    assert "samo" in _section(api, "tools")["Nástroje"][3]["subtitle"]

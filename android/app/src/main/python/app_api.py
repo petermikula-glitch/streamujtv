@@ -233,7 +233,8 @@ def _languages(values):
     return ", ".join(part for part in (values or "").split(",") if part)
 
 
-LANGUAGE_CHOICES = (("dub", "Český dabing"), ("subs", "Originál s titulky"), ("any", "Je mi to jedno"))
+LANGUAGE_CHOICES = (("dub", "Český nebo slovenský dabing"), ("subs", "Originál s titulky"),
+                    ("any", "Je mi to jedno"))
 QUALITY_CHOICES = (("best", "Nejvyšší dostupná"), ("1080", "1080p"), ("720", "720p"),
                    ("small", "Úsporná (nejmenší soubor)"))
 # Nejnižší kvalita, která se z Přehraj.to ještě nabízí: na velké televizi nižší rozlišení nevypadá dobře.
@@ -419,6 +420,8 @@ def _size_bytes(text):
 
 
 def _language_rank(lang, prefer):
+    """Pořadí verze podle předvolby jazyka. Český a slovenský dabing jsou si rovny (stejně jako české
+    a slovenské titulky): mezi nimi pak rozhoduje kvalita."""
     parts = {part.strip() for part in (lang or "").split(",") if part.strip()}
     dubbed = bool(parts & {"CZ", "CZ dabing", "SK", "SK dabing"})
     subtitled = bool(parts & {"CZ titulky", "SK titulky"})
@@ -710,7 +713,8 @@ def home(params):
         _card("Synchronizovat s účtem", _target("command", "sync", {}),
               "Naposledy: %s" % time.strftime("%d.%m. %H:%M", time.localtime(last)) if last else "Zatím neproběhla",
               icon="sync"),
-        _card("Doplnit hodnocení a plakáty", _target("command", "enrich", {}), "ČSFD, záložně TMDB", icon="enrich"),
+        _card("Doplnit hodnocení a plakáty", _target("command", "enrich", {}),
+              "Doplňuje se samo; tady to spustíte hned", icon="enrich"),
         _card("Nastavení a přihlášení", _target("settings"), settings.get("username") or "Nepřihlášeno",
               icon="settings"),
         _card("Jazyk a kvalita přehrávání", _target("choices", "prefs_choices", {}),
@@ -1571,7 +1575,48 @@ def sync(params):
 QUICK_SYNC_EVERY = 15 * 60   # s – častěji se účet po otevření aplikace nekontroluje
 
 
+AUTO_ENRICH_BATCH = 40                # tolik titulů nejvýš doplní jedno samočinné kolo (ať netrvá dlouho)
+ENRICH_RETRY_AFTER = 6 * 3600         # titul, u kterého doplnění selhalo (výpadek, ČSFD odmítlo), se zkusí znovu po…
+ENRICH_NOTFOUND_AFTER = 7 * 24 * 3600   # …a nenalezený po týdnu (v databázích mohl mezitím přibýt)
+
+
 def quick_sync(params):
+    """Po otevření aplikace: zkontroluje účet (nová videa) a doplní chybějící hodnocení a plakáty.
+
+    Obojí běží potichu na pozadí. ``refresh`` ve výsledku říká, že se něco doplnilo a obrazovka se
+    má načíst znovu."""
+    result = _account_check(params)
+    if _auto_enrich():
+        result["refresh"] = True
+    return result
+
+
+def _auto_enrich():
+    """Doplní hodnocení a plakáty titulům, které je nemají – bez mačkání dlaždice v Nástrojích.
+
+    Nové tituly hned; ty, u kterých to dřív nevyšlo, znovu až po čase (aby se při každém otevření
+    aplikace neptala na totéž). Vrací, kolika titulům se něco doplnilo; když běží jiná operace, nedělá nic."""
+    with _library() as lib:
+        waiting = (lib.meta_to_fetch(("new",))
+                   + lib.meta_to_fetch(("error", "blocked"), retry_after=ENRICH_RETRY_AFTER)
+                   + lib.meta_to_fetch(("notfound",), retry_after=ENRICH_NOTFOUND_AFTER))[:AUTO_ENRICH_BATCH]
+    if not waiting or not _LOCK.acquire(False):
+        return 0
+    _STATE["busy"] = True
+    try:
+        done = {}
+        _enrich(metas=waiting, result=done)
+        return done.get("ok", 0)
+    except (ApiError, TmdbError, provider.ProviderError, OSError) as error:
+        _remember_error("doplnění hodnocení a plakátů", error)   # jen do Diagnostiky
+        return 0
+    finally:
+        _STATE["busy"] = False
+        _STATE["progress"] = ""
+        _LOCK.release()
+
+
+def _account_check(params):
     """Rychlá kontrola účtu po otevření aplikace: přidá nová videa a doplní k nim metadata.
 
     Výpis účtu se čte jen po první stránku, na které není nic nového, takže se podle něj nic
@@ -1767,10 +1812,10 @@ def repair_video(params):
     return {"message": "", "toast": "Opraveno: %s" % label, "close": True}
 
 
-def _enrich(statuses=("new",)):
+def _enrich(statuses=("new",), metas=None, result=None):
     tmdb = _tmdb()
     with _library() as lib:
-        metas = lib.meta_to_fetch(statuses)
+        metas = lib.meta_to_fetch(statuses) if metas is None else metas
         if not metas:
             return "Metadata jsou doplněná."
 
@@ -1779,6 +1824,8 @@ def _enrich(statuses=("new",)):
             return False
 
         stats = catalog.enrich(lib, metas, use_csfd=True, tmdb=tmdb, progress=on_progress)
+    if result is not None:
+        result.update(stats)
     text = "Metadata doplněna u %d titulů, nenalezeno %d." % (stats["ok"], stats["notfound"])
     if stats["csfd_blocked"] and not tmdb.enabled:
         text += " ČSFD automatické dotazy blokuje – vyplňte v Nastavení klíč TMDB."

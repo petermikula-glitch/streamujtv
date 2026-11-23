@@ -219,7 +219,8 @@ o které se jistě ví, že je horší než nejnižší povolená kvalita (bez �
 až podle změřeného obrazu), vypadne a ověří se další (nejvýš `VERIFY_VERSIONS`).
 
 **Předvolby přehrávání** (dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích, tlačítko na stránce
-titulu a Nastavení; cíl typu `choices`, akce `prefs_choices`): jazyk (český dabing / originál s titulky / jedno) a kvalita
+titulu a Nastavení; cíl typu `choices`, akce `prefs_choices`): jazyk (český nebo slovenský dabing – oba si jsou
+rovny, rozhoduje mezi nimi kvalita / originál s titulky / jedno) a kvalita
 (nejvyšší / 1080p / 720p / nejmenší soubor). Řídí pořadí verzí (`_version_rank`) i výběr varianty
 souboru při přehrání (`_pick_stream`).
 
@@ -238,6 +239,11 @@ Díl se nikdy nepřeskočí potichu: chybí-li v katalogu bezprostředně násle
 na Přehraj.to, a teprve když tam není, nabídne se pozdější díl z katalogu – s poznámkou, který chybí,
 a bez samočinného spuštění. Zapamatovaná adresa souboru platí jen pro předvolbu kvality, se kterou
 vznikla; po změně předvolby se varianta vybere znovu.
+**Hodnocení a plakáty** se doplňují samy (`_auto_enrich`, volá se z `quick_sync` po otevření aplikace, i bez
+přihlášení k Přehraj.to): nové tituly hned, ty, u kterých doplnění selhalo, znovu po šesti hodinách
+a nenalezené po týdnu; jedno kolo nejvýš `AUTO_ENRICH_BATCH` titulů. Když se něco doplní, obrazovka se
+načte znovu (`refresh`). Dlaždice „Doplnit hodnocení a plakáty“ v Nástrojích to spustí hned a pro všechny.
+
 **Nejnižší kvalita** (`min_quality`: bez omezení / HD a vyšší – výchozí / jen Full HD a vyšší / jen 4K;
 `_meets_minimum` v `app_api.py`): z Přehraj.to se nabízejí jen verze v aspoň takové kvalitě – na stránce
 titulu, v hledání souborů, u dalšího dílu i při stahování řady – a titul, který je jen v nižší kvalitě, se

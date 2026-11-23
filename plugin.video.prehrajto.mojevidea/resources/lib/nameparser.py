@@ -127,24 +127,32 @@ def numbered(title):
     return (base, match.group(2)) if base else None
 
 
+_SK_WORD = r"sk|svk|slovak|slovensk[yýéeáaú]|slovensky"   # slovenština zkratkou i slovem
+_CZ_WORD = r"cz|cze|czech|[cč]esk[yýéeáa]|[cč]esky"
+
+
 def _detect_lang(text):
     t = " " + text.lower() + " "
     dub = None
     subs = None
-    if re.search(r"\s(?:cz|cze|czech)?\s?-?\s?dab(?:ing)?\s|\sczdab\s|\scz-dab", t):
+    if re.search(r"\s(?:%s)?\s?-?\s?dab(?:ing)?\s|\sczdab\s|\scz-dab" % _CZ_WORD, t):
         dub = "CZ"
-    if re.search(r"\ssk\s?-?\s?dab(?:ing)?\s|\sskdab\s", t):
+    if re.search(r"\s(?:%s)\s?-?\s?dab(?:ing)?\s|\sskdab\s" % _SK_WORD, t):
         dub = "SK"
+    # obě řeči v jednom souboru („CZ/SK“, „CZ-SK dabing“): bere se jako český dabing
+    both = re.search(r"\scz\s?[/+,&-]?\s?sk\s|\ssk\s?[/+,&-]?\s?cz\s", t)
+    if both:
+        dub = "CZ"
     if re.search(r"\s(?:cz\s?-?\s?tit(?:ulky)?|cztit|cz\s?subs?)\s", t):
         subs = "CZ"
-    elif re.search(r"\s(?:sk\s?-?\s?tit(?:ulky)?|sktit|sk\s?subs?)\s", t):
+    elif re.search(r"\s(?:(?:%s)\s?-?\s?tit(?:ulky)?|sktit|sk\s?subs?)\s" % _SK_WORD, t):
         subs = "SK"
     elif re.search(r"\stit(?:ulky)?\s", t):
         subs = "CZ"
     if dub is None and subs is None:
-        if re.search(r"\s(?:cz|cze|czech)\s", t):
+        if re.search(r"\s(?:cz|cze|czech|[cč]esky)\s", t):
             dub = "CZ"
-        elif re.search(r"\s(?:sk|svk|slovak)\s", t):
+        elif re.search(r"\s(?:sk|svk|slovak|slovensky)\s", t):
             dub = "SK"
         elif re.search(r"\s(?:en|eng|english)\s", t):
             dub = "EN"
