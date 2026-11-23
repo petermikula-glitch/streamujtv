@@ -114,7 +114,8 @@ Postranní nabídka má šest sekcí; každá je stránka s vlastními řadami (
 - **Seriály** – stejná mřížka: Objevuj seriály a Moje seriály (Stažené díly, Seriály z mého účtu, Hledat).
 - **Oblíbené** – řady Filmy, Seriály a Pořady z iVysílání.
 - **Rozkoukané** – nahoře panel s naposledy rozkoukaným videem, řady Filmy, Seriály, Další díly
-  a iVysílání a dlaždice Naposledy přehrané.
+  a iVysílání a dlaždice Naposledy přehrané. Video se sem zařadí po deseti sekundách přehrávání
+  (`IN_PROGRESS_AFTER` v `app_api.py`; doplněk pro Kodi počítá až od jedné minuty).
 - **iVysílání** – živé kanály, rozkoukané pořady, Moje pořady a kategorie; nic jiného.
 - **Nástroje** – hledání, stahování, synchronizace, metadata, nastavení, předvolby, profily, diagnostika.
 

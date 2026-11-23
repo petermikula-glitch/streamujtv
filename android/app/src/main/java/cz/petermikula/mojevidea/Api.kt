@@ -21,6 +21,10 @@ class ApiResult(val data: JSONObject?, val error: String?, val offline: Boolean 
 object Api {
     private const val TAG = "MojeVidea"
     private val pool = Executors.newFixedThreadPool(4)
+    // Zápisy (pozice přehrávání) jdou jedním vláknem v pořadí, v jakém vznikly, a čtení na ně počká:
+    // hlavní obrazovka po návratu z přehrávače tak vždy vidí už uloženou pozici.
+    private val writer = Executors.newSingleThreadExecutor()
+    private val writes = java.util.concurrent.ConcurrentLinkedQueue<java.util.concurrent.Future<*>>()
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var ready = false
     private lateinit var appContext: Context
@@ -73,6 +77,7 @@ object Api {
 
     fun call(action: String, params: JSONObject = JSONObject(), done: (ApiResult) -> Unit) {
         pool.execute {
+            awaitWrites()
             val result = callBlocking(action, params)
             main.post { done(result) }
         }
@@ -80,6 +85,21 @@ object Api {
 
     /** Volání, na jehož výsledek nikdo nečeká (ukládání pozice). */
     fun send(action: String, params: JSONObject) {
-        pool.execute { callBlocking(action, params) }
+        writes.removeAll { it.isDone }  // dlouhý film ukládá pozici průběžně: hotové zápisy se nehromadí
+        writes.add(writer.submit { callBlocking(action, params) })
+    }
+
+    /** Počká (krátce) na rozpracované zápisy, aby čtení nepředběhlo ukládání. */
+    private fun awaitWrites() {
+        while (true) {
+            // nahlédnout, počkat a teprve pak odebrat: na tentýž zápis tak počkají i souběžná čtení
+            val write = writes.peek() ?: return
+            try {
+                write.get(3, java.util.concurrent.TimeUnit.SECONDS)
+            } catch (error: Exception) {
+                // zápis trvá déle nebo selhal: čtení kvůli němu nestojí
+            }
+            writes.remove(write)
+        }
     }
 }

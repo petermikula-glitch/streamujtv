@@ -96,8 +96,13 @@ def _save_settings(values):
     os.replace(temporary, _path("settings.json"))
 
 
+IN_PROGRESS_AFTER = 10   # s; od kdy si aplikace pamatuje, kde se skončilo (krátké puštění taky platí)
+
+
 def _library():
-    return db.Library(_path("catalog.db"), video_key=provider.video_key, prefer_ref=provider.prefer_ref)
+    lib = db.Library(_path("catalog.db"), video_key=provider.video_key, prefer_ref=provider.prefer_ref)
+    lib.in_progress_min = IN_PROGRESS_AFTER
+    return lib
 
 
 def _client(allow_anonymous=False):
@@ -196,7 +201,10 @@ def _year(meta):
 
 
 def _percent(point):
-    return int(100 * point[0] / point[1]) if point and point[1] else 0
+    """Kolik procent je přehráno; rozkoukané video má aspoň 1 %, aby to na kartě bylo vidět."""
+    if not point or not point[1]:
+        return 0
+    return max(1, int(100 * point[0] / point[1])) if point[0] > 0 else 0
 
 
 def _languages(values):

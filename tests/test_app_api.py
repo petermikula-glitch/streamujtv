@@ -1486,3 +1486,24 @@ def test_downloaded_films_are_listed_with_their_posters(api, monkeypatch, tmp_pa
     assert len(calls) == before
     assert app_api._downloads()[second["id"]]["poster"].endswith("/k.jpg")
 
+
+def test_briefly_played_video_is_remembered_as_unfinished(api, monkeypatch):
+    _fill(2)
+    episode = "11:archa:%016x" % 11
+    api("progress_save", track=REF, position=5, total=6000, started=True)    # pár sekund: omyl, nepočítá se
+    assert list(_section(api, "progress")) == ["Rozkoukané", "Historie"]
+    api("progress_save", track=REF, position=25, total=6000)                 # krátké puštění už ano
+    api("progress_save", track=episode, position=40, total=1200, started=True)
+    rows = _section(api, "progress")
+    assert _titles(rows["Filmy"]) == ["Pelíšky"] and _titles(rows["Seriály"]) == ["Archa 1x01"]
+    assert rows["Filmy"][0]["progress"] == 1                                 # i půl procenta je na kartě vidět
+    api("settings_set", username="a@b.cz", password="heslo")
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/v.mp4", {}))
+    assert api("play", vid=REF)["position"] == 25                            # a přehrávání naváže, kde skončilo
+    assert api("home")["sections"][3]["hero"]["title"] == "Archa 1×01"
+    assert [item["position"] for item in api("watch_next")["items"]] == [40, 25]
+    with app_api._library() as lib:
+        lib.ivys_touch("777", "9", "Díl 3", "Vyprávěj", "")
+        lib.ivys_record_play("777", 30, 3000)
+    assert _titles(_section(api, "progress")["iVysílání"]) == ["Vyprávěj · Díl 3"]
+

@@ -209,6 +209,8 @@ IN_PROGRESS_MAX = 0.92
 
 class Library(object):
     def __init__(self, path, video_key=None, prefer_ref=None):
+        # po kolika sekundách přehrávání se video počítá mezi rozkoukaná (volající může změnit)
+        self.in_progress_min = IN_PROGRESS_MIN
         """``video_key(id)`` → klíč, podle kterého se poznají dvě ID téhož videa
         (Přehraj.to: hash); ``prefer_ref(nové, staré)`` → které ID si nechat."""
         self.path = path
@@ -1130,7 +1132,7 @@ class Library(object):
         q = ("SELECT vid, position, total FROM history WHERE position >= ? AND total > 0 "
              "AND position < total * ? AND vid NOT IN "
              "(SELECT vid FROM watched_marks WHERE marked_at >= history.last_played)")
-        params = [IN_PROGRESS_MIN, IN_PROGRESS_MAX]
+        params = [self.in_progress_min, IN_PROGRESS_MAX]
         rows = self.conn.execute(q, params).fetchall()
         out = dict((r[0], (r[1], r[2])) for r in rows)
         if vids is not None:
@@ -1187,7 +1189,7 @@ class Library(object):
         if in_progress:
             q += ("AND h.position >= ? AND h.total > 0 AND h.position < h.total * ? "
                   "AND h.vid NOT IN (SELECT vid FROM watched_marks) ")
-            params += [IN_PROGRESS_MIN, IN_PROGRESS_MAX]
+            params += [self.in_progress_min, IN_PROGRESS_MAX]
         q += "ORDER BY h.last_played DESC, h.rowid DESC LIMIT ?"
         params.append(limit)
         return [_row(r) for r in self.conn.execute(q, params).fetchall()]
@@ -1227,7 +1229,7 @@ class Library(object):
         for idec, position, total in self.conn.execute("SELECT idec, position, total FROM ivys_history WHERE total > 0"):
             if position >= total * IN_PROGRESS_MAX:
                 watched.add(idec)
-            elif position >= IN_PROGRESS_MIN:
+            elif position >= self.in_progress_min:
                 resume[idec] = (position, total)
         return resume, watched
 
@@ -1235,7 +1237,7 @@ class Library(object):
         """Rozkoukané díly z iVysílání, naposledy přehrané první."""
         rows = self.conn.execute(
             "SELECT * FROM ivys_history WHERE total > 0 AND position >= ? AND position < total * ? "
-            "ORDER BY last_played DESC, idec LIMIT ?", (IN_PROGRESS_MIN, IN_PROGRESS_MAX, int(limit))).fetchall()
+            "ORDER BY last_played DESC, idec LIMIT ?", (self.in_progress_min, IN_PROGRESS_MAX, int(limit))).fetchall()
         return [dict(row) for row in rows]
 
     def ivys_remove_history(self, idec=None):
