@@ -1238,16 +1238,24 @@ def _version_card(version, state, choice=""):
                      badges=["Na disku" if version.get("saved") else "", language, quality])
 
 
+def _extras(kind, tmdb_id):
+    """Doplňky k titulu z TMDB (``Tmdb.extras``: další názvy, upoutávka, slogan); bez TMDB nebo při
+    výpadku prázdné – nic z toho není pro stránku titulu nezbytné."""
+    if not tmdb_id:
+        return {}
+    try:
+        return api._tmdb().extras(kind, tmdb_id)
+    except (TmdbError, api.ApiError, ValueError):
+        return {}
+
+
 def _local_names(kind, tmdb_id, known=()):
     """Další názvy titulu z TMDB – slovenský a jiné české (viz ``Tmdb.local_titles``) –, které mezi
     ``known`` ještě nejsou. Bez TMDB nebo při výpadku nic: hledá se pod názvy, které jsou."""
     if not tmdb_id:
         return []
     have = search_results.aliases(*known)
-    try:
-        names = api._tmdb().local_titles(kind, tmdb_id)
-    except (TmdbError, api.ApiError, ValueError):
-        return []
+    names = _extras(kind, tmdb_id).get("names") or []
     extra = []
     for name in names:
         if search_results.normalize(name) not in have:
@@ -1268,7 +1276,7 @@ def _detail(params, kind):
     """Údaje o titulu pro jeho stránku; bez TMDB zůstane to, co nese karta."""
     info = {"title": params.get("title") or "", "year": int(params.get("year") or 0), "rating": 0, "genres": [],
             "plot": "", "poster": params.get("poster") or "", "fanart": "", "runtime": 0, "collection_id": 0,
-            "orig_title": params.get("orig") or ""}
+            "orig_title": params.get("orig") or "", "directors": [], "cast": [], "countries": []}
     if params.get("id"):
         try:
             found = _tmdb().details(int(params["id"]), want_series=kind == "tv")
@@ -1281,6 +1289,54 @@ def _detail(params, kind):
         ", ".join(info["genres"][:3])) if part)
     return info, {"title": info["title"], "meta": meta, "plot": info["plot"], "poster": info["poster"],
                   "backdrop": info["fanart"] or info["poster"]}
+
+
+YOUTUBE_APPS = ("com.google.android.youtube.tv", "com.google.android.youtube")   # pro televize, pro telefony
+
+
+def _about(info, detail, extras, kind):
+    """Text pro „Více o filmu“: celý popis (na stránce se vejde jen začátek) a údaje, na které tam
+    není místo – původní název, režie, obsazení, země."""
+    lines = []
+    if extras.get("tagline"):
+        lines.append("„%s“" % extras["tagline"])
+    if detail.get("meta"):
+        lines.append(detail["meta"])
+    if info.get("plot"):
+        lines.append(info["plot"])
+    facts = []
+    if info.get("orig_title") and search_results.normalize(info["orig_title"]) != search_results.normalize(info["title"]):
+        facts.append("Původní název: %s" % info["orig_title"])
+    if info.get("directors"):
+        facts.append("%s: %s" % ("Tvůrci" if kind == "tv" else "Režie", ", ".join(info["directors"][:4])))
+    if info.get("cast"):
+        facts.append("Hrají: %s" % ", ".join(info["cast"][:10]))
+    if info.get("countries"):
+        facts.append("Země: %s" % ", ".join(info["countries"][:4]))
+    if info.get("genres"):
+        facts.append("Žánr: %s" % ", ".join(info["genres"]))
+    if facts:
+        lines.append("\n".join(facts))
+    return "\n\n".join(lines)
+
+
+def _extra_actions(params, kind, info, detail):
+    """Tlačítka stránky titulu, která nepřehrávají: upoutávka (je-li) a celý popis."""
+    extras = _extras(kind, params.get("id"))
+    actions = []
+    if extras.get("trailer"):
+        key = extras["trailer"]
+        # Upoutávku přehraje aplikace YouTube v televizi (jinak cokoli, co odkaz umí otevřít). Běžný
+        # odkaz youtube.com: zkrácený tvar „vnd.youtube:…“ aplikace YouTube pro televize nesnese.
+        actions.append({"title": "Upoutávka", "subtitle": "", "target": {
+            "type": "open", "call": "", "title": "", "params": {
+                "url": "https://www.youtube.com/watch?v=" + key, "packages": list(YOUTUBE_APPS),
+                "missing": "Upoutávku se nepodařilo otevřít: v televizi chybí aplikace YouTube."}}})
+    about = _about(info, detail, extras, kind)
+    if about and (info.get("plot") or info.get("directors") or info.get("cast")):   # jen když je co číst
+        actions.append({"title": "Více o seriálu" if kind == "tv" else "Více o filmu", "subtitle": "", "target": {
+            "type": "info", "call": "", "title": info["title"], "params": {"text": about}}})
+    return actions
 
 
 def _related_rows(kind, params, info, state):
@@ -1381,6 +1437,11 @@ def discover_title(params):
         television = pool.submit(_title_television, kind, params)   # souběžně s hledáním na Přehraj.to
         page, playable = _title_page(params, kind)
         show = television.result()
+    if not playable:
+        # Není co přehrát z Přehraj.to: místa je dost a ruční hledání i předvolby jsou právě to, co je
+        # teď potřeba – nabídka „Další“ se rozbalí do samostatných tlačítek.
+        page["actions"] = [button for action in page["actions"] for button in (
+            [dict(item, subtitle="") for item in action["menu"]] if action.get("menu") else [action])]
     entry = None
     if params.get("id"):
         with api._library() as lib:
@@ -1392,8 +1453,16 @@ def discover_title(params):
         else:
             action = {"title": "Díly v iVysílání", "subtitle": "Česká televize",
                       "target": api._target("list", "ivys_show", {"id": show}, params.get("title") or "")}
-        # hned za Přehrát z Přehraj.to; první, když tam titul není (nebo se to neví a nic k přehrání není)
-        page["actions"].insert(1 if playable and not (entry and not entry["n"]) else 0, action)
+        # za Přehrát (a Stáhnout) z Přehraj.to; první, když tam titul není (nebo se to neví a nic k přehrání není)
+        second = playable and not (entry and not entry["n"])
+        if second:
+            # vedle tlačítek z Přehraj.to stačí krátký název, ať se všechna vejdou do dvou řádků
+            action.update(title="V iVysílání", subtitle="")
+            downloads = [index for index, item in enumerate(page["actions"][:2])
+                         if item["target"].get("call") in ("download_add", "downloads")]
+            page["actions"].insert(downloads[-1] + 1 if downloads else 1, action)
+        else:
+            page["actions"].insert(0, action)
         if page["detail"].get("plot", "").startswith(NOT_FOUND):
             page["detail"]["plot"] = page["detail"]["plot"].replace(
                 NOT_FOUND, "Na Přehraj.to jsem tento film nenašel, je ale v iVysílání České televize.", 1)
@@ -1414,9 +1483,14 @@ def _title_page(params, kind):
         params.get("orig") or "")
     toggle = favorite_item(favorites_state, entry)
     info, detail = _detail(params, kind)
-    actions = [{"title": toggle["title"], "subtitle": "", "target": toggle["target"]},
-               {"title": "Hledat ručně", "subtitle": "", "target": api._target("search", "search", {"q": title})},
-               {"title": "Jazyk a kvalita", "subtitle": "", "target": api._target("choices", "prefs_choices", {})}]
+    # Tlačítek je víc, než se vejde do dvou řádků: krátký název u oblíbených a méně používané volby
+    # (ruční hledání, předvolby) pod „Další“.
+    favourite = "Z oblíbených" if toggle["title"].startswith("Odebrat") else "Do oblíbených"
+    actions = _extra_actions(params, kind, info, detail) + [
+        {"title": favourite, "subtitle": "", "target": toggle["target"]},
+        {"title": "Další", "subtitle": "", "target": {"type": "menu", "call": "", "title": "", "params": {}}, "menu": [
+            {"title": "Hledat ručně", "target": api._target("search", "search", {"q": title})},
+            {"title": "Jazyk a kvalita", "target": api._target("choices", "prefs_choices", {})}]}]
     if kind == "tv" and not params.get("id"):
         # oblíbený seriál, který už v katalogu není a TMDB ho nezná: díly nejdou dohledat po řadách
         detail["plot"] = ("Tento seriál už ve vašem katalogu není. Zkuste „Hledat ručně“.\n\n"

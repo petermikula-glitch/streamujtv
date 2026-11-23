@@ -71,6 +71,8 @@ object Navigator {
             "settings" -> activity.startActivity(Intent(activity, SettingsActivity::class.java))
             "diagnostics" -> activity.startActivity(Intent(activity, DiagnosticsActivity::class.java))
             "refresh" -> onChanged()  // „Zkusit znovu“: obrazovka si obsah načte znovu
+            "info" -> showInfo(activity, target.title.ifEmpty { title }, target.params.optString("text"))
+            "open" -> openOutside(activity, target.params)
             "storage" -> chooseStorage(activity, onChanged)
             "move" -> planMove(activity, target, onChanged)
             "input" -> askText(activity, title, target, onChanged)
@@ -312,5 +314,59 @@ object Navigator {
                 finished()
             }
         }
+    }
+
+    /** Delší text k přečtení (celý popis filmu, režie, obsazení): okno, kterým jde listovat šipkami. */
+    private fun showInfo(activity: FragmentActivity, title: String, text: String) {
+        val density = activity.resources.displayMetrics.density
+        val body = android.widget.TextView(activity).apply {
+            this.text = text
+            textSize = 17f
+            setLineSpacing(4 * density, 1f)
+            setTextColor(androidx.core.content.ContextCompat.getColor(activity, R.color.text_primary))
+            val side = (24 * density).toInt()
+            setPadding(side, (8 * density).toInt(), side, (8 * density).toInt())
+        }
+        val scroll = android.widget.ScrollView(activity).apply {
+            addView(body)
+            isFocusable = true   // šipky nahoru a dolů text posouvají
+            isVerticalScrollBarEnabled = true
+        }
+        AlertDialog.Builder(activity)
+            .setTitle(title)
+            .setView(scroll)
+            .setPositiveButton("Zavřít", null)
+            .showStyled()
+        scroll.requestFocus()
+    }
+
+    /**
+     * Otevře něco mimo aplikaci (upoutávku v aplikaci YouTube): adresu `url` nejdřív v aplikacích
+     * `packages` (podle pořadí), pak v čemkoli, co ji v televizi umí otevřít; když v ničem, zkusí
+     * `fallback`, a když ani to, řekne to (`missing`).
+     */
+    private fun openOutside(activity: FragmentActivity, params: org.json.JSONObject) {
+        val packages = params.optJSONArray("packages")?.let { list ->
+            (0 until list.length()).map { list.optString(it) }.filter { it.isNotEmpty() }
+        }.orEmpty()
+        val attempts = ArrayList<Intent>()
+        for (address in listOf(params.optString("url"), params.optString("fallback"))) {
+            if (address.isEmpty()) continue
+            val uri = android.net.Uri.parse(address)
+            for (name in packages) attempts.add(Intent(Intent.ACTION_VIEW, uri).setPackage(name))
+            attempts.add(Intent(Intent.ACTION_VIEW, uri))
+        }
+        for (intent in attempts) {
+            try {
+                activity.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                return
+            } catch (error: android.content.ActivityNotFoundException) {
+                continue
+            } catch (error: SecurityException) {
+                continue
+            }
+        }
+        Toast.makeText(activity, params.optString("missing").ifEmpty { "Nepodařilo se otevřít." },
+            Toast.LENGTH_LONG).show()
     }
 }

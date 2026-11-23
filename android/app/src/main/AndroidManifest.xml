@@ -24,6 +24,9 @@
     <queries>
         <package android:name="cz.ceskatelevize.ivysilani.tvapp" />
         <package android:name="cz.motion.ivysilani" />
+        <!-- upoutávky se otevírají v aplikaci YouTube -->
+        <package android:name="com.google.android.youtube.tv" />
+        <package android:name="com.google.android.youtube" />
     </queries>
 
     <application

@@ -200,6 +200,12 @@ kartou řady; u dlouhého seriálu jsou to řady kolem té naposledy sledované)
 nejlepší verzi (`discover_episode_play`); ruční výběr verze je v nabídce karty dílu. Po návratu
 z přehrávače se výběr v řadách přesune na díl, kterým se pokračuje (`focus` v datech stránky). Tlačítko „Jazyk a kvalita“ otevírá předvolby přehrávání.
 
+Tlačítka stránky: Přehrát, Stáhnout na disk, (V iVysílání), Upoutávka, Více o filmu, Do/Z oblíbených
+a „Další“ (nabídka `menu`: Hledat ručně, Jazyk a kvalita). Když není co přehrát z Přehraj.to, nabídka
+„Další“ se rozbalí do samostatných tlačítek. „Upoutávka“ (cíl typu `open`) je trailer z TMDB (`Tmdb.extras`,
+nejraději česky nebo slovensky) a otevírá se běžným odkazem youtube.com v aplikaci YouTube – zkrácený tvar
+`vnd.youtube:` aplikace YouTube pro televize nesnese. „Více o filmu“ (cíl typu `info`) ukáže v okně celý
+popis, slogan, původní název, režii, obsazení a zemi (`_about`); textem jde listovat šipkami.
 Tlačítka (`FlowLayout`) se zalamují na další řádek, aby bylo každé vidět celé; popis dostane jen tolik
 řádků, kolik nad řadami karet zbývá (`fitPlot`). Nad tlačítky je řádek se souborem, který tlačítko Přehrát
 pustí (`detail.file`: název, jak je na Přehraj.to, velikost a délka), a hned za Přehrát tlačítko

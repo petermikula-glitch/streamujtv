@@ -188,13 +188,16 @@ class Tmdb(object):
         return list(dict.fromkeys(entry["title"].strip() for entry in alternatives
                                   if entry.get("iso_3166_1") in ("CZ", "SK") and entry.get("title", "").strip()))
 
-    def local_titles(self, kind, tmdb_id):
-        """Jak se titul jmenuje česky a slovensky: přeložené názvy a alternativní názvy pro CZ a SK.
+    def extras(self, kind, tmdb_id):
+        """Doplňky k titulu jedním dotazem: ``{"names": české a slovenské názvy, "trailer": klíč
+        upoutávky na YouTube | "", "tagline": slogan}``.
 
-        Soubory na Přehraj.to bývají pojmenované i slovensky nebo starším distribučním názvem; pod
-        jedním názvem by se takový titul nenašel. Jeden dotaz na TMDB (jde přes mezipaměť)."""
+        Názvy: přeložené a alternativní pro CZ a SK – soubory na Přehraj.to bývají pojmenované i slovensky
+        nebo starším distribučním názvem. Upoutávka: oficiální trailer, nejraději česky nebo slovensky,
+        jinak v původním znění."""
         kind = "tv" if kind == "tv" else "movie"
-        data = self._get("/%s/%d" % (kind, int(tmdb_id)), append_to_response="translations,alternative_titles")
+        data = self._get("/%s/%d" % (kind, int(tmdb_id)), append_to_response="translations,alternative_titles,videos",
+                         include_video_language="cs,sk,en,null")
         names = []
         for entry in (data.get("translations") or {}).get("translations") or []:
             if entry.get("iso_639_1") in ("cs", "sk"):
@@ -204,7 +207,18 @@ class Tmdb(object):
         for entry in alternatives.get("titles") or alternatives.get("results") or []:
             if entry.get("iso_3166_1") in ("CZ", "SK"):
                 names.append((entry.get("title") or "").strip())
-        return list(dict.fromkeys(name for name in names if name))
+        videos = [video for video in (data.get("videos") or {}).get("results") or []
+                  if isinstance(video, dict) and video.get("site") == "YouTube" and video.get("key")
+                  and video.get("type") in ("Trailer", "Teaser")]
+        # trailer před ukázkou, čeština a slovenština před ostatními, oficiální před neoficiálními
+        videos.sort(key=lambda video: (video.get("type") != "Trailer", video.get("iso_639_1") not in ("cs", "sk"),
+                                       not video.get("official")))
+        return {"names": list(dict.fromkeys(name for name in names if name)),
+                "trailer": videos[0]["key"] if videos else "", "tagline": (data.get("tagline") or "").strip()}
+
+    def local_titles(self, kind, tmdb_id):
+        """Jak se titul jmenuje česky a slovensky (viz ``extras``)."""
+        return self.extras(kind, tmdb_id)["names"]
 
     def search_people(self, query, page=1):
         data = self._get("/search/person", query=query, page=page, include_adult="false")

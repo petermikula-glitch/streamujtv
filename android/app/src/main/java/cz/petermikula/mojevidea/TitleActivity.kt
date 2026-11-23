@@ -185,7 +185,9 @@ class TitleActivity : FragmentActivity() {
             val button = Button(ContextThemeWrapper(this, R.style.TitleButton), null, 0).apply {
                 text = if (subtitle.isEmpty()) action.optString("title") else "${action.optString("title")}  ·  $subtitle"
                 setOnClickListener {
-                    Navigator.open(this@TitleActivity, target, action.optString("title")) { load() }
+                    val menu = action.optJSONArray("menu")
+                    if (menu != null && menu.length() > 0) showMenu(action.optString("title"), menu)
+                    else Navigator.open(this@TitleActivity, target, action.optString("title")) { load() }
                 }
             }
             actions.addView(button)
@@ -246,6 +248,18 @@ class TitleActivity : FragmentActivity() {
             lines--
         }
         column.requestLayout()
+    }
+
+    /** Tlačítko s nabídkou („Další“): méně používané volby, aby tlačítek na stránce nebylo moc. */
+    private fun showMenu(title: String, menu: org.json.JSONArray) {
+        val items = (0 until menu.length()).mapNotNull { menu.optJSONObject(it) }
+        android.app.AlertDialog.Builder(this)
+            .setTitle(title)
+            .setAdapter(Dialogs.items(this, items.map { it.optString("title") })) { _, which ->
+                val chosen = items[which]
+                Navigator.open(this, Target.from(chosen.optJSONObject("target")), chosen.optString("title")) { load() }
+            }
+            .showStyled()
     }
 
     private fun showMeta() {

@@ -704,13 +704,20 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
     assert "kino kopie" in versions["items"][3]["subtitle"] and versions["items"][1]["badges"] == ["TIT", "2160p"]
     assert "ukázka nebo část" in extras["items"][0]["subtitle"]
     assert best["target"]["params"]["choice"] == "movie:11" and "Stáhnout na disk" in _titles(best["menu"])
-    play, download, favourite, manual, prefs = page["actions"]
+    play, download, about, favourite, more = page["actions"]
     # vybraný soubor jde rovnou stáhnout na disk; tlačítko říká, jak je velký
     assert (download["title"], download["subtitle"]) == ("Stáhnout na disk", "4 GB")
     assert download["target"] == {"type": "download", "call": "download_add", "params": best["target"]["params"]}
-    assert prefs["title"] == "Jazyk a kvalita" and prefs["target"] == {"type": "choices", "call": "prefs_choices", "params": {}}
+    # celý popis a další údaje, na které na stránce není místo
+    assert about["title"] == "Více o filmu" and about["target"]["type"] == "info" and about["target"]["title"] == "Pelíšky"
+    assert about["target"]["params"]["text"] == (
+        "1999 · 86 % · 1 h 56 min · Komedie, Drama\n\nRodinná komedie.\n\nŽánr: Komedie, Drama")
+    # méně používané volby jsou pod „Další“, aby se tlačítka vešla do dvou řádků
+    assert more["title"] == "Další" and _titles(more["menu"]) == ["Hledat ručně", "Jazyk a kvalita"]
+    manual, prefs = more["menu"]
+    assert prefs["target"] == {"type": "choices", "call": "prefs_choices", "params": {}}
     assert (play["title"], play["subtitle"]) == ("Přehrát", "CZ dabing · 1080p") and play["target"] == best["target"]
-    assert favourite["title"] == "Přidat do oblíbených"
+    assert favourite["title"] == "Do oblíbených"
     assert manual["target"] == {"type": "search", "call": "search", "params": {"q": "Pelíšky"}}
     assert asked == [("Pelíšky 1999", 1)]
 
@@ -736,11 +743,11 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
     favorite = _section(api, "favorites")["Filmy"][0]
     assert favorite["title"] == "Pelíšky" and favorite["target"]["type"] == "title"
     assert favorite["target"]["params"]["id"] == 11 and favorite["menu"][-1]["title"] == "Odebrat z oblíbených"
-    assert api("discover_title", **FILM)["actions"][2]["title"] == "Odebrat z oblíbených"
+    assert api("discover_title", **FILM)["actions"][3]["title"] == "Z oblíbených"
 
     nothing = api("discover_title", kind="movie", id=5, title="Neznámý film", year=2001)
     assert nothing["rows"] == [] and [action["title"] for action in nothing["actions"]] == [
-        "Přidat do oblíbených", "Hledat ručně", "Jazyk a kvalita"]
+        "Do oblíbených", "Hledat ručně", "Jazyk a kvalita"]                 # není co přehrát: volby jsou rovnou vidět
     assert "nenašel" in nothing["detail"]["plot"]
     assert asked[-2:] == [("Neznámý film 2001", 1), ("Neznámý film", 1)]     # zkusí i bez roku
 
@@ -753,7 +760,7 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
         "Hledání na Přehraj.to se teď nezdařilo: Přehraj.to má výpadek. Neznamená to, že tam titul není")
     assert "Rodinná komedie." in failed["detail"]["plot"] and failed["rows"] == []
     assert [(action["title"], action["target"]["type"]) for action in failed["actions"]] == [
-        ("Zkusit znovu", "refresh"), ("Odebrat z oblíbených", "command"), ("Hledat ručně", "search"),
+        ("Zkusit znovu", "refresh"), ("Více o filmu", "info"), ("Z oblíbených", "command"), ("Hledat ručně", "search"),
         ("Jazyk a kvalita", "choices")]
 
 
@@ -811,7 +818,7 @@ def test_favourite_is_announced_when_a_version_matching_preferences_appears(api,
     found = {}
     asked = _catalogue_search(monkeypatch, found)
     page = api("discover_title", **FILM)                                     # film na Přehraj.to zatím není
-    favourite = next(action for action in page["actions"] if action["title"] == "Přidat do oblíbených")
+    favourite = next(action for action in page["actions"] if action["title"] == "Do oblíbených")
     api(favourite["target"]["call"], **favourite["target"]["params"])
     api("discover_title", **FILM)                                            # stránka si u oblíbeného zapamatuje stav
     before = len(asked)
@@ -946,7 +953,7 @@ def test_series_page_lists_episodes_that_play_at_once(api, monkeypatch):
     page = api("discover_title", **show)
     assert page["detail"]["meta"] == "1996 · seriál" and page["detail"]["plot"] == "Seriál."
     assert [(action["title"], action["subtitle"]) for action in page["actions"]] == [
-        ("Přehrát", "1×01 · Pilot"), ("Přidat do oblíbených", ""), ("Hledat ručně", ""), ("Jazyk a kvalita", "")]
+        ("Přehrát", "1×01 · Pilot"), ("Více o seriálu", ""), ("Do oblíbených", ""), ("Další", "")]
     row = page["rows"][0]                                                    # díly jsou přímo na stránce seriálu
     assert row["title"] == "1. řada (3 dílů)" and _titles(row["items"]) == ["1×01 · Pilot", "1×02 · Druhý", "1×03 · Třetí"]
     second = row["items"][1]
@@ -3059,3 +3066,43 @@ def test_update_check_survives_the_github_rate_limit(api, monkeypatch):
     assert api("update_check", current="0.19.0") == {"available": False, "current": "0.19.0"}   # samo se hned znovu neptá
     latest[0] = "https://github.com/petermikula-glitch/streamujtv/releases"                    # stránka nic neřekla
     assert "nepodařilo ověřit" in api("update_check", current="0.19.0", force=True)["error"]
+
+
+def test_title_page_offers_the_trailer_and_the_whole_description(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    detail = dict(FILM_DETAIL, original_title="Cosy Dens", tagline="Léta šedesátá", production_countries=[{"name": "Česko"}],
+                  credits={"cast": [{"name": "Miroslav Donutil"}, {"name": "Jiří Kodet"}],
+                           "crew": [{"name": "Jan Hřebejk", "job": "Director"}, {"name": "Někdo", "job": "Producer"}]},
+                  videos={"results": [
+                      {"site": "YouTube", "key": "teaser1", "type": "Teaser", "iso_639_1": "cs", "official": True},
+                      {"site": "YouTube", "key": "anglicky", "type": "Trailer", "iso_639_1": "en", "official": True},
+                      {"site": "YouTube", "key": "cesky", "type": "Trailer", "iso_639_1": "cs", "official": False},
+                      {"site": "Vimeo", "key": "jinde", "type": "Trailer", "iso_639_1": "cs"},
+                      {"site": "YouTube", "key": "zakulisi", "type": "Featurette", "iso_639_1": "cs"}]})
+    _fake_tmdb(monkeypatch, {"/movie/11": detail})
+    monkeypatch.setattr(app_api.app_discover, "_ivys_match", lambda kind, names, year: "77")
+    _catalogue_search(monkeypatch, {"Pelíšky 1999": [_web(32, "Pelisky.1999.CZ.1080p", 7000, "4 GB")]})
+    page = api("discover_title", **FILM)
+    assert _titles(page["actions"]) == ["Přehrát", "Stáhnout na disk", "V iVysílání", "Upoutávka", "Více o filmu",
+                                        "Do oblíbených", "Další"]
+    television, trailer, about = page["actions"][2:5]
+    assert television["subtitle"] == "" and television["target"]["call"] == "ivys_play"   # krátký název vedle Přehrát
+    assert trailer["target"] == {"type": "open", "call": "", "title": "", "params": {     # český trailer má přednost
+        "url": "https://www.youtube.com/watch?v=cesky",
+        "packages": ["com.google.android.youtube.tv", "com.google.android.youtube"],
+        "missing": "Upoutávku se nepodařilo otevřít: v televizi chybí aplikace YouTube."}}
+    assert about["target"]["params"]["text"] == (
+        "„Léta šedesátá“\n\n1999 · 86 % · 1 h 56 min · Komedie, Drama\n\nRodinná komedie.\n\n"
+        "Původní název: Cosy Dens\nRežie: Jan Hřebejk\nHrají: Miroslav Donutil, Jiří Kodet\nZemě: Česko\n"
+        "Žánr: Komedie, Drama")
+
+    _catalogue_search(monkeypatch, {})                                       # na Přehraj.to není, jen v iVysílání
+    with app_api._library() as lib, lib.conn:
+        lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE 'avail:%'")
+    only = api("discover_title", **FILM)
+    assert _titles(only["actions"]) == ["Přehrát v iVysílání", "Upoutávka", "Více o filmu", "Do oblíbených",
+                                        "Hledat ručně", "Jazyk a kvalita"]   # není co přehrát z Přehraj.to: vše rozbalené
+    assert only["actions"][0]["subtitle"] == "Česká televize"
+
+    _fake_tmdb(monkeypatch, {"/movie/12": dict(FILM_DETAIL, id=12)})         # bez upoutávky tlačítko není
+    assert "Upoutávka" not in _titles(api("discover_title", **dict(FILM, id=12))["actions"])
