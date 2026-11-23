@@ -49,9 +49,14 @@ def _titles(items):
 
 
 def _section(api, name):
-    """Řady jedné sekce hlavní obrazovky: {název řady: karty}."""
+    """Řady jedné sekce hlavní obrazovky: {název řady: karty}. Mřížka dlaždic je víc řad pod jedním
+    nadpisem (další jsou bez nadpisu) – tady se spojí do jedné."""
     section = next(item for item in api("home")["sections"] if item["id"] == name)
-    return {row["title"]: row["items"] for row in section["rows"]}
+    rows, last = {}, ""
+    for row in section["rows"]:
+        last = row["title"] or last
+        rows.setdefault(last, []).extend(row["items"])
+    return rows
 
 
 def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
@@ -60,7 +65,14 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
         ("movies", "Filmy"), ("series", "Seriály"), ("favorites", "Oblíbené"), ("progress", "Rozkoukané"),
         ("ivysilani", "iVysílání"), ("tools", "Nástroje")]
     films, series = _section(api, "movies"), _section(api, "series")
-    assert list(films) == ["Začínáme", "Objevuj filmy"] and list(series) == ["Objevuj seriály"]
+    assert list(films) == ["Začínáme", "Objevuj filmy", "Moje filmy"]
+    assert list(series) == ["Objevuj seriály", "Moje seriály"]
+    grid = [row for row in api("home")["sections"][0]["rows"] if row.get("tiles")]   # velké dlaždice po třech
+    assert [(row["title"], len(row["items"])) for row in grid] == [("Objevuj filmy", 3), ("", 3), ("Moje filmy", 3)]
+    assert _titles(films["Moje filmy"]) == ["Stažené filmy", "Filmy z mého účtu", "Hledat"]
+    assert films["Moje filmy"][0]["target"] == {"type": "list", "call": "downloads", "params": {"kind": "movie"},
+                                                "title": "Stažené filmy", "poster": True}
+    assert _titles(series["Moje seriály"]) == ["Stažené díly", "Seriály z mého účtu", "Hledat"]
     assert films["Začínáme"][0]["target"] == {"type": "settings"}
     assert _titles(films["Objevuj filmy"]) == ["Novinky", "Populární", "Nejlépe hodnocené", "Podle roku",
                                                 "Podle žánru", "Československé"]
@@ -91,15 +103,15 @@ def test_catalogue_rows_lists_and_search(api):
     unfinished = _section(api, "progress")
     assert list(unfinished) == ["Filmy", "Historie"]                         # rozkoukané mají vlastní sekci
     assert _titles(unfinished["Filmy"]) == ["Pelíšky"] and unfinished["Filmy"][0]["progress"] == 20
-    film = rows["Moje filmy – nově přidané"][0]
+    film = rows["Nově přidané z účtu"][0]
     assert film == {"title": "Pelíšky", "subtitle": "1999 · 91 % · CZ dabing, EN", "image": "https://img/pelisky.jpg",
                     "progress": 20, "wide": False, "watched": False, "icon": "movies", "menu": film["menu"],
                     "target": {"type": "play", "call": "play", "params": {"vid": REF}}}  # česká verze ve vyšší kvalitě
     assert [item["title"] for item in film["menu"]] == ["Přehrát", "Přehrát od začátku", "Stáhnout na disk",
                                                         "Přidat do oblíbených"]
-    assert rows["Moje filmy – nově přidané"][-1]["target"]["call"] == "movies"
-    assert rows["Moje filmy – nově přidané"][-1]["icon"] == "movies"  # dlaždice bez obrázku nese ikonu
-    assert _section(api, "series")["Moje seriály"][0]["target"] == {"type": "list", "call": "show", "params": {"key": "show:archa"},
+    assert rows["Moje filmy"][1]["title"] == "Filmy z mého účtu (1)" and rows["Moje filmy"][1]["target"]["call"] == "movies"
+    assert rows["Moje filmy"][1]["icon"] == "movies"                  # dlaždice bez obrázku nese ikonu
+    assert _section(api, "series")["Nově přidané z účtu"][0]["target"] == {"type": "list", "call": "show", "params": {"key": "show:archa"},
                                             "title": "Archa"}
 
     listing = api("movies", order="title")
@@ -395,8 +407,12 @@ def test_download_queue_progress_local_playback_and_removal(api, tmp_path):
     card = api("downloads")["items"][0]
     assert (card["subtitle"], card["progress"]) == ("Stahuje se · 25 % z 0 MB", 25)
     assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zrušit stahování"]
-    rows = _section(api, "movies")
-    assert _titles(rows["Stažené filmy"]) == ["Pelíšky"] and "Stažené díly" not in _section(api, "series")
+    rows = _section(api, "movies")                                           # dlaždice vede na stažené filmy
+    assert rows["Moje filmy"][0]["title"] == "Stažené filmy (1)" and rows["Moje filmy"][0]["icon"] == "download"
+    assert _section(api, "series")["Moje seriály"][0]["title"] == "Stažené díly"
+    assert _titles(api("downloads", kind="movie")["items"]) == ["Pelíšky"] and api("downloads", kind="movie")["title"] == "Stažené filmy"
+    assert api("downloads", kind="episode")["items"] == [] and api("downloads", kind="episode")["title"] == "Stažené díly"
+    assert api("downloads", kind="movie")["items"][0]["image"] == "https://img/pelisky.jpg"   # plakát filmu, ne náhled
     assert "1 ve frontě" in _section(api, "tools")["Nástroje"][1]["subtitle"]
 
     (disk / "Pelíšky.mkv").write_bytes(b"x" * 200)
@@ -405,7 +421,7 @@ def test_download_queue_progress_local_playback_and_removal(api, tmp_path):
     stream = api("play", vid=REF)                                            # hraje z disku, bez přihlášení
     assert stream["local"] is True and stream["url"] == job["path"] and stream["subtitles"] == [str(disk / "Pelíšky.1.vtt")]
     rows = _section(api, "movies")
-    film = rows["Moje filmy – nově přidané"][0]
+    film = rows["Nově přidané z účtu"][0]
     assert film["subtitle"].startswith("Staženo · ") and "Smazat stažený soubor" in _titles(film["menu"])
     assert "už je stažené" in api("download_add", vid=REF)["error"]
     assert api("download_progress", vid=REF, done=1, total=2) == {"cancel": True}   # hotové se už nestahuje
@@ -496,11 +512,11 @@ def test_favorites_from_catalogue_cards(api):
     assert "Zatím nemáte" in api("favorites")["empty"] and api("favorites")["items"] == []
     placeholder = _section(api, "favorites")["Oblíbené"]
     assert _titles(placeholder) == ["Zatím nic"] and placeholder[0]["target"]["call"] == "favorites"
-    film = _section(api, "movies")["Moje filmy – nově přidané"][0]
+    film = _section(api, "movies")["Nově přidané z účtu"][0]
     add = film["menu"][-1]
     assert add["title"] == "Přidat do oblíbených" and add["target"]["type"] == "command"
     assert api(add["target"]["call"], **add["target"]["params"]) == {"message": "Přidáno do oblíbených: Pelíšky"}
-    series = _section(api, "series")["Moje seriály"][0]
+    series = _section(api, "series")["Nově přidané z účtu"][0]
     assert _titles(series["menu"]) == ["Otevřít", "Přidat do oblíbených"]
     api(series["menu"][1]["target"]["call"], **series["menu"][1]["target"]["params"])
 
@@ -901,7 +917,7 @@ def test_series_page_lists_episodes_that_play_at_once(api, monkeypatch):
 def test_next_episode_from_the_catalogue_follows_a_finished_one(api):
     _fill(3)
     first, second, third = ["%d:archa:%016x" % (10 + n, 10 + n) for n in (1, 2, 3)]
-    assert "Další díly" not in _section(api, "series")
+    assert "Další díly" not in _section(api, "progress")
     following = api("play_next", track=first)["next"]
     assert following == {"title": "Další díl", "subtitle": "Archa 1×02", "auto": True,
                          "target": {"type": "play", "call": "play", "params": {"vid": second}}}
@@ -909,11 +925,11 @@ def test_next_episode_from_the_catalogue_follows_a_finished_one(api):
     assert api("play_next", track="")["next"] is None and api("play_next", track=REF)["next"] is None
 
     api("progress_save", track=first, position=1190, total=1200, ended=True)
-    row = _section(api, "series")["Další díly"]                             # po dokoukání čeká další díl na hlavní obrazovce
+    row = _section(api, "progress")["Další díly"]                           # po dokoukání čeká další díl na hlavní obrazovce
     assert len(row) == 1 and row[0]["target"]["params"] == {"vid": second}
     assert row[0]["subtitle"].startswith("Další díl")
     api("progress_save", track=second, position=300, total=1200, started=True)
-    assert "Další díly" not in _section(api, "series")                      # rozkoukaný díl je už v Rozkoukaných
+    assert "Další díly" not in _section(api, "progress")                    # rozkoukaný díl je už mezi rozkoukanými
     assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": second}
 
 
@@ -947,7 +963,7 @@ def test_next_episode_of_a_discovered_series_is_searched(api, monkeypatch):
     assert api("play_next", track="x", choice="tv:77:2:1")["next"] is None   # konec seriálu
     assert api("play_next", track="x", choice="tv:99:1:1")["next"] is None   # neznámý seriál
 
-    row = _section(api, "series")["Další díly"]                              # rozkoukaný seriál z Objevuj
+    row = _section(api, "progress")["Další díly"]                            # rozkoukaný seriál z Objevuj
     assert _titles(row) == ["Archa"] and row[0]["subtitle"] == "Pokračovat ve sledování"
     assert row[0]["target"]["type"] == "title" and row[0]["target"]["params"]["id"] == 77
     resume = api("discover_title", kind="tv", id=77, title="Archa")["actions"][0]
@@ -1166,9 +1182,8 @@ def test_hero_and_watch_next_follow_the_last_unfinished_video(api):
         lib.ivys_touch("777", "9", "Díl 3", "Vyprávěj", "https://img/v.jpg", now=3000)
         lib.ivys_record_play("777", 600, 3000, now=3000)
     sections = {section["id"]: section for section in api("home")["sections"]}
-    film = sections["movies"]["hero"]                                        # sekce Filmy: rozkoukaný film
-    assert (film["title"], film["image"], film["progress"]) == ("Pelíšky", "https://img/f.jpg", 25)
-    hero = sections["series"]["hero"]                                        # sekce Seriály: rozkoukaný díl
+    assert "hero" not in sections["movies"] and "hero" not in sections["series"]   # tam je mřížka dlaždic
+    hero = sections["progress"]["hero"]                                      # naposledy přehrané nedokoukané video
     assert (hero["title"], hero["label"], hero["progress"]) == ("Archa 1×01", "Pokračovat", 25)
     assert hero["subtitle"] == "CZ dabing · zbývá 15 min" and hero["image"] == ""
     assert hero["target"] == {"type": "play", "call": "play", "params": {"vid": "11:archa:%016x" % 11, "resume": True}}
@@ -1248,7 +1263,7 @@ def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):
     tiles = _section(api, "movies")
     assert tiles["Objevuj filmy"][0]["target"]["poster"] is True              # výpis plakátů
     assert "poster" not in tiles["Objevuj filmy"][3]["target"]               # Podle roku: dlaždice
-    assert "poster" not in _section(api, "tools")["Nástroje"][1]["target"]
+    assert "poster" not in _section(api, "tools")["Nástroje"][4]["target"]
 
 
 def test_discover_lists_can_be_filtered(api, monkeypatch):
@@ -1447,4 +1462,27 @@ def test_search_marks_titles_that_are_on_prehrajto_and_puts_them_first(api, monk
     assert films[0]["badges"] == ["Přehraj.to"] and "badges" not in films[1] and "badges" not in films[2]
     assert _titles(rows["Seriály"]) == ["Archa", "Bez dílů"] and rows["Seriály"][0]["badges"] == ["Přehraj.to"]
     assert "results" not in api("prehrajto_search", q="pelisky")            # jen pro hledání, ne pro výpis
+
+
+def test_downloaded_films_are_listed_with_their_posters(api, monkeypatch, tmp_path):
+    api("settings_set", tmdb_key="k" * 32, username="a@b.cz", password="heslo")
+    calls = _fake_tmdb(monkeypatch, {
+        "/movie/11": FILM_DETAIL,
+        "/search/movie": {"results": [{"id": 12, "title": "Kolja", "release_date": "1996-05-15"}]},
+        "/movie/12": {"id": 12, "title": "Kolja", "release_date": "1996-05-15", "poster_path": "/k.jpg"}})
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/v.mp4", {}))
+    first, second, third = (_web(71, "Pelisky 1999 CZ 1080p", 7000, "4 GB"), _web(72, "Kolja 1996 CZ", 6000, "2 GB"),
+                            _web(73, "Uplne nezname video 2001", 6000, "1 GB"))
+    api("play", vid=first["id"], web_result=first, choice="movie:11")       # film spuštěný ze stránky titulu
+    for result in (first, second, third):
+        api("download_add", vid=result["id"], web_result=result)
+    cards = {card["title"]: card for card in api("downloads", kind="movie")["items"]}
+    assert cards["Pelisky"]["image"] == "https://image.tmdb.org/t/p/w500/p.jpg" and cards["Pelisky"]["wide"] is False
+    assert cards["Kolja"]["image"] == "https://image.tmdb.org/t/p/w500/k.jpg"   # dohledaný podle názvu a roku
+    unknown = cards["Uplne nezname video"]
+    assert unknown["image"] == "" and unknown["wide"] is True and unknown["icon"] == "download"   # bez plakátu dlaždice
+    before = len(calls)
+    api("downloads", kind="movie")                                           # podruhé se už nic nedohledává
+    assert len(calls) == before
+    assert app_api._downloads()[second["id"]]["poster"].endswith("/k.jpg")
 

@@ -255,9 +255,8 @@ def hero(lib, state, section):
         return {"title": title, "subtitle": " · ".join(part for part in ("iVysílání", _remaining(point)) if part),
                 "image": row["image"] or "", "progress": api._percent(point), "label": "Pokračovat",
                 "target": api._target("play", "ivys_play", {"idec": row["idec"], "resume": True})}
-    # sekce Filmy ukazuje rozkoukaný film, sekce Seriály rozkoukaný díl
-    videos = [video for video in lib.history_videos(in_progress=True, limit=30, include_search=True)
-              if (video["kind"] == "episode") == (section == "series")]
+    # sekce Rozkoukané: naposledy přehrané nedokoukané video, ať je to film nebo díl
+    videos = lib.history_videos(in_progress=True, limit=1, include_search=True)
     if not videos:
         return None
     video = videos[0]

@@ -148,7 +148,8 @@ def _cached(key, ttl, load):
 # Karty
 # ---------------------------------------------------------------------------
 
-POSTER_LISTS = ("discover", "favorites", "movies", "shows", "profiles", "profile_avatars", "discover_person")
+POSTER_LISTS = ("discover", "favorites", "movies", "shows", "profiles", "profile_avatars", "discover_person",
+                "downloads")
 
 
 def _target(kind, call=None, params=None, title=None):
@@ -414,7 +415,8 @@ def home(params):
         own = {"movies": _movie_rows(lib, state, settings), "series": _show_rows(lib, state),
                "favorites": _favorite_rows(lib, state), "progress": _progress_rows(lib, state)}
         television = _ivysilani_rows(lib)
-        heroes = {name: app_extras.hero(lib, state, name) for name in ("movies", "series", "ivysilani")}
+        # velký panel „Pokračovat“ má sekce Rozkoukané (a iVysílání); Filmy a Seriály jsou mřížka dlaždic
+        heroes = {name: app_extras.hero(lib, state, name) for name in ("progress", "ivysilani")}
         empty = not lib.count_videos(visible_only=True)
     profile = app_extras.current()
     last = settings.get("last_sync")
@@ -458,50 +460,61 @@ def _hint(title, text, icon, target=None):
     return [_card(title, target or _target("refresh"), text, icon=icon)]
 
 
+TILES_PER_ROW = 3   # velké dlaždice sekcí Filmy a Seriály: tři vedle sebe přes celou šířku
+
+
+def _tile_rows(title, tiles):
+    """Mřížka velkých dlaždic: řady po třech, nadpis jen u první."""
+    return [{"title": title if index == 0 else "", "items": tiles[index:index + TILES_PER_ROW], "tiles": True}
+            for index in range(0, len(tiles), TILES_PER_ROW)]
+
+
+def _saved_count(lib, state, episodes):
+    """Kolik stažených videí jsou filmy / díly seriálů (hotové i rozpracované)."""
+    return len([entry for entry in state["downloads"].values()
+                if ((lib.find_video(entry.get("vid") or "") or {}).get("kind") == "episode") == episodes])
+
+
+def _counted(title, count):
+    return "%s (%d)" % (title, count) if count else title
+
+
 def _movie_rows(lib, state, settings):
-    """Sekce Filmy: objevování, stažené filmy a vlastní filmy z účtu."""
+    """Sekce Filmy: mřížka dlaždic (objevování, stažené, vlastní filmy, hledání) a nově přidané filmy z účtu."""
     rows = []
     total = lib.count_videos(visible_only=True)
     if not total and not settings.get("username"):
         rows.append({"title": "Začínáme", "items": [
             _card("Přihlásit se k Přehraj.to", _target("settings"), "E-mail a heslo, pak Synchronizovat",
                   icon="login")]})
-    rows.append({"title": "Objevuj filmy", "items": app_discover.home_tiles("movie")})
-    saved = _download_cards(lib, state, HOME_ROW, episodes=False)
-    if saved:
-        rows.append({"title": "Stažené filmy", "items": saved})
+    rows += _tile_rows("Objevuj filmy", app_discover.home_tiles("movie"))
+    rows += _tile_rows("Moje filmy", [
+        _card(_counted("Stažené filmy", _saved_count(lib, state, False)),
+              _target("list", "downloads", {"kind": "movie"}, "Stažené filmy"), "Hrají i bez internetu", icon="download"),
+        _card(_counted("Filmy z mého účtu", lib.count_movies()),
+              _target("list", "movies", {"order": "added"}, "Filmy z mého účtu"), "Nahrané na Přehraj.to", icon="movies"),
+        _card("Hledat", _target("search"), "Film, herec nebo režisér", icon="search"),
+    ])
     movies = lib.movies(order="added", limit=HOME_ROW)
     if movies:
         versions = lib.videos_grouped([m["key"] for m in movies if (m.get("video_count") or 1) > 1])
-        cards = [_movie_card(meta, state, versions) for meta in movies]
-        cards.append(_card("Všechny filmy", _target("list", "movies", {"order": "title"}, "Filmy"),
-                           "%d filmů" % lib.count_movies(), icon="movies"))
-        rows.append({"title": "Moje filmy – nově přidané", "items": cards})
-        rows.append({"title": "Moje filmy", "items": [
-            _card("Podle názvu", _target("list", "movies", {"order": "title"}, "Filmy"), icon="movies"),
-            _card("Podle hodnocení", _target("list", "movies", {"order": "rating"}, "Nejlépe hodnocené filmy"),
-                  icon="rating"),
-            _card("Podle roku", _target("list", "movies", {"order": "year"}, "Filmy podle roku"), icon="year"),
-        ]})
+        rows.append({"title": "Nově přidané z účtu", "items": [_movie_card(meta, state, versions) for meta in movies]})
     return rows
 
 
 def _show_rows(lib, state):
-    """Sekce Seriály: další díly, objevování, stažené díly a vlastní seriály z účtu."""
-    rows = []
-    following = app_discover.next_up_cards(lib, state)
-    if following:
-        rows.append({"title": "Další díly", "items": following})
-    rows.append({"title": "Objevuj seriály", "items": app_discover.home_tiles("tv")})
-    saved = _download_cards(lib, state, HOME_ROW, episodes=True)
-    if saved:
-        rows.append({"title": "Stažené díly", "items": saved})
+    """Sekce Seriály: mřížka dlaždic (objevování, stažené díly, vlastní seriály, hledání) a seriály z účtu."""
+    rows = _tile_rows("Objevuj seriály", app_discover.home_tiles("tv"))
     shows = lib.shows(order="added", limit=HOME_ROW)
+    rows += _tile_rows("Moje seriály", [
+        _card(_counted("Stažené díly", _saved_count(lib, state, True)),
+              _target("list", "downloads", {"kind": "episode"}, "Stažené díly"), "Hrají i bez internetu", icon="download"),
+        _card("Seriály z mého účtu", _target("list", "shows", {"order": "title"}, "Seriály z mého účtu"),
+              "Nahrané na Přehraj.to", icon="series"),
+        _card("Hledat", _target("search"), "Seriál, herec nebo režisér", icon="search"),
+    ])
     if shows:
-        cards = [_show_card(meta, state) for meta in shows]
-        cards.append(_card("Všechny seriály", _target("list", "shows", {"order": "title"}, "Seriály"),
-                           icon="series"))
-        rows.append({"title": "Moje seriály", "items": cards})
+        rows.append({"title": "Nově přidané z účtu", "items": [_show_card(meta, state) for meta in shows]})
     return rows
 
 
@@ -538,6 +551,9 @@ def _progress_rows(lib, state):
                  if (video["kind"] == "episode") == episodes][:HOME_ROW]
         if cards:
             rows.append({"title": name, "items": cards})
+    following = app_discover.next_up_cards(lib, state)
+    if following:
+        rows.append({"title": "Další díly", "items": following})
     television = _ivys_in_progress(lib)
     if television:
         rows.append({"title": "iVysílání", "items": television})
@@ -1391,28 +1407,69 @@ def _downloads_summary(items):
     return " · ".join(part for part in parts if part) or "Podržte OK na filmu a zvolte Stáhnout"
 
 
+def _download_poster(lib, vid, video):
+    """Plakát ke staženému videu: z metadat katalogu, podle titulu z Objevuj, nebo dohledaný podle názvu.
+
+    Vrací adresu, prázdný text (plakát není), nebo None, když se to teď nepodařilo zjistit.
+    """
+    meta = (lib.get_meta(video["meta_key"]) or {}) if video else {}
+    if meta.get("poster"):
+        return meta["poster"]
+    client = _tmdb()
+    if not client.enabled:
+        return None
+    try:
+        # video přehrané ze stránky titulu si nese, ke kterému titulu patří
+        row = lib.conn.execute("SELECT k FROM settings_kv WHERE k LIKE 'choice:%' AND v=? LIMIT 1", (vid,)).fetchone()
+        parts = row[0].split(":") if row else []
+        if len(parts) >= 3 and parts[2].isdigit():
+            return client.details(int(parts[2]), want_series=parts[1] == "tv").get("poster") or ""
+        if video:
+            found = client.find(video["title"], video["year"] or 0, want_series=video["kind"] == "episode")
+            return (found or {}).get("poster") or ""
+    except TmdbError:
+        return None
+    return ""
+
+
 def _download_cards(lib, state, limit=None, episodes=None):
-    """Karty stažených videí; ``episodes`` True/False vybere jen díly seriálů / jen filmy."""
-    cards = []
+    """Karty stažených videí s plakáty; ``episodes`` True/False vybere jen díly seriálů / jen filmy."""
+    cards, posters = [], {}
     items = sorted(state["downloads"].values(), key=lambda entry: -(entry.get("added") or 0))
+    videos = {entry.get("vid"): lib.find_video(entry.get("vid") or "") for entry in items}
     if episodes is not None:
-        kinds = {entry.get("vid"): (lib.find_video(entry.get("vid") or "") or {}).get("kind") for entry in items}
-        items = [entry for entry in items if (kinds.get(entry.get("vid")) == "episode") == episodes]
+        items = [entry for entry in items if ((videos.get(entry.get("vid")) or {}).get("kind") == "episode") == episodes]
     for entry in items[:limit] if limit else items:
         vid = entry.get("vid") or ""
         total = entry.get("total") or 0
         percent = 100 * (entry.get("done") or 0) // total if total and entry.get("state") != "done" else 0
         point = state["resume"].get(vid)
+        poster = entry.get("poster")
+        if poster is None:   # ještě nezjišťováno: dohledat a zapamatovat si
+            poster = _download_poster(lib, vid, videos.get(vid))
+            if poster is not None:
+                posters[vid] = poster
+        image = poster or (entry.get("image") if not entry.get("wide") else "")
         cards.append(_card(entry.get("title") or vid, _target("play", "play", {"vid": vid}), _download_status(entry),
-                           entry.get("image"), percent or _percent(point), wide=bool(entry.get("wide")),
+                           image or entry.get("image"), percent or _percent(point), wide=not image,
                            watched=vid in state["watched"], menu=_video_menu(state, {"vid": vid}, point), icon="download"))
+    if posters:
+        with _DOWNLOADS_LOCK:
+            saved = _downloads()
+            for vid, poster in posters.items():
+                if vid in saved:
+                    saved[vid]["poster"] = poster
+            _save_downloads(saved)
     return cards
 
 
 def downloads(params):
+    """Stažená videa; ``kind`` ``movie`` / ``episode`` vybere jen filmy / jen díly seriálů."""
+    episodes = {"movie": False, "episode": True}.get(params.get("kind"))
     with _library() as lib:
-        cards = _download_cards(lib, _state(lib))
-    return {"title": "Stahování", "items": cards, "next": None,
+        cards = _download_cards(lib, _state(lib), episodes=episodes)
+    title = {False: "Stažené filmy", True: "Stažené díly"}.get(episodes, "Stahování")
+    return {"title": title, "items": cards, "next": None,
             "refresh": 3 if any(entry.get("state") in ("queued", "downloading")
                                 for entry in _downloads().values()) else 0,
             "empty": "Zatím tu nic není.\n\nPodržte tlačítko OK na filmu nebo dílu a zvolte „Stáhnout na disk“. "

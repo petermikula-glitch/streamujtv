@@ -14,7 +14,12 @@ import com.bumptech.glide.Glide
  * Karta s obrázkem: plakát na výšku, nebo širší náhled (díly, živé vysílání, složky).
  * Tvar je společný pro celou řadu či mřížku – karty různých tvarů vedle sebe mřížku rozhází.
  */
-class CardPresenter(var poster: Boolean = false, private val onMenu: ((Card) -> Unit)? = null) : Presenter() {
+class CardPresenter(
+    var poster: Boolean = false,
+    /** Velká dlaždice mřížky (sekce Filmy a Seriály): tři vedle sebe přes obrazovku, jen obrázek s názvem. */
+    private val large: Boolean = false,
+    private val onMenu: ((Card) -> Unit)? = null,
+) : Presenter() {
     companion object {
         private val FADE = com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(160)
 
@@ -59,9 +64,12 @@ class CardPresenter(var poster: Boolean = false, private val onMenu: ((Card) -> 
         val context = view.context
         val density = view.resources.displayMetrics.density
         // rozměry vycházejí na obrazovku televize širokou 960 dp: 4 náhledy, nebo 5 plakátů vedle sebe
-        val width = ((if (poster) 150 else 200) * density).toInt()
-        val height = ((if (poster) 225 else 112) * density).toInt()
+        val width = ((if (large) 272 else if (poster) 150 else 200) * density).toInt()
+        val height = ((if (large) 153 else if (poster) 225 else 112) * density).toInt()
         view.setMainImageDimensions(width, height)
+        // velká dlaždice nese název v obrázku; popisek pod ní by mřížku jen roztahoval
+        view.cardType = if (large) androidx.leanback.widget.BaseCardView.CARD_TYPE_MAIN_ONLY
+        else androidx.leanback.widget.BaseCardView.CARD_TYPE_INFO_UNDER
         val detail = when {
             card.progress > 0 && card.subtitle.isNotEmpty() -> "${card.progress} % · ${card.subtitle}"
             card.progress > 0 -> "Rozkoukáno ${card.progress} %"

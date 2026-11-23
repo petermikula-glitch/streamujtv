@@ -266,6 +266,7 @@ class SectionFragment : RowsSupportFragment() {
     })
     private var titles = emptyList<String>()
     private var shapes = emptyList<Boolean>()
+    private var grids = emptyList<Boolean>()
 
     private fun host() = parentFragment as? MainFragment
 
@@ -287,19 +288,22 @@ class SectionFragment : RowsSupportFragment() {
         val list = host()?.rowsOf(requireArguments().getInt(INDEX)) ?: return
         val names = ArrayList<String>()
         val items = ArrayList<List<Card>>()
+        val tiles = ArrayList<Boolean>()  // mřížka velkých dlaždic
         host()?.heroOf(requireArguments().getInt(INDEX))?.let { hero ->
             // úvodní panel je první řada; nápis tlačítka nese karta ve štítku
             names.add(HERO)
+            tiles.add(false)
             items.add(listOf(Card.from(org.json.JSONObject(hero.toString())
                 .put("badges", JSONArray().put(hero.optString("label"))).put("wide", true))))
         }
         for (index in 0 until list.length()) {
             val row = list.optJSONObject(index) ?: continue
             names.add(row.optString("title"))
+            tiles.add(row.optBoolean("tiles"))
             items.add(Card.list(row.optJSONArray("items")))
         }
         val posters = items.map { CardPresenter.posterShape(it) }
-        if (names == titles && posters == shapes && rows.size() == names.size) {
+        if (names == titles && posters == shapes && tiles == grids && rows.size() == names.size) {
             // stejné řady: vyměnit jen změněné karty, ať výběr neuskočí na začátek
             for (index in names.indices) {
                 ((rows.get(index) as ListRow).adapter as ArrayObjectAdapter).setItems(items[index], Card.DIFF)
@@ -311,14 +315,16 @@ class SectionFragment : RowsSupportFragment() {
                     cards.addAll(0, items[index])
                     return@map HeroRow(cards)
                 }
-                val cards = ArrayObjectAdapter(CardPresenter(posters[index]) { card ->
+                val cards = ArrayObjectAdapter(CardPresenter(posters[index], tiles[index]) { card ->
                     Navigator.menu(requireActivity(), card) { host()?.load() }
                 })
                 cards.addAll(0, items[index])
-                ListRow(HeaderItem(index.toLong(), names[index]), cards)
+                // další řada téže mřížky nemá nadpis: bez něj na sebe řady těsně navazují
+                if (names[index].isEmpty()) ListRow(cards) else ListRow(HeaderItem(index.toLong(), names[index]), cards)
             }, null)
         }
         titles = names
         shapes = posters
+        grids = tiles
     }
 }
