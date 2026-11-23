@@ -57,6 +57,12 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
         val small = area.width() < SMALL * density
         text.textSize = (if (small) 20 else 24) * density
         val width = (area.width() - 2 * padding).toInt()
+        // Dlouhé slovo („Vědeckofantastický“) by se zalomilo uprostřed a poslední písmeno skončilo samo
+        // na dalším řádku: písmo se zmenší právě tak, aby se nejdelší slovo vešlo na řádek celé.
+        val longest = title.split(' ', '\n', '\u00A0').maxOfOrNull { text.measureText(it) } ?: 0f
+        if (width > 0 && longest > width) {
+            text.textSize = max(MIN_TITLE * density, text.textSize * width / longest * 0.98f)
+        }
         val layout = if (width > 0 && title.isNotEmpty()) {
             StaticLayout.Builder.obtain(title, 0, title.length, text, width)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
@@ -125,6 +131,7 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
 
     private companion object {
         const val SMALL = 240   // šířka (dp), pod kterou se dlaždice bere jako malá karta
+        const val MIN_TITLE = 13   // dp: menší název už by z dálky nešel přečíst
         const val GAP = 6       // dp: mezera mezi ikonou a názvem
         const val MIN_GLYPH = 18   // dp: menší ikona by byla jen skvrna, to ať raději není
     }
