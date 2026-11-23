@@ -194,6 +194,19 @@ kartou řady; u dlouhého seriálu jsou to řady kolem té naposledy sledované)
 nejlepší verzi (`discover_episode_play`); ruční výběr verze je v nabídce karty dílu. Po návratu
 z přehrávače se výběr v řadách přesune na díl, kterým se pokračuje (`focus` v datech stránky). Tlačítko „Jazyk a kvalita“ otevírá předvolby přehrávání.
 
+Tlačítka (`FlowLayout`) se zalamují na další řádek, aby bylo každé vidět celé; popis se pak zkrátí.
+
+**Skutečná kvalita** (`_real`, `real_fetch`, `_playing_quality`, `video_size` v `app_api.py`; `_verify_best`
+v `app_discover.py`): štítek „HD“ ve výpisu Přehraj.to nese 720p i 1080p, a tak se z něj nepozná, co se
+přehraje. Stránka filmu se proto u verze, kterou pustí tlačítko Přehrát, podívá na stránku videa (jeden
+dotaz, výsledek se pamatuje) a na tlačítko napíše jazyk a kvalitu, ve které se film opravdu pustí:
+„1080p“ = překódovaná verze, „originál 1080p“ / „originál 4K“ = původní soubor (hraje se s účtem). Rozlišení
+původního souboru stránka videa neuvádí: bere se nejvyšší překódovaná verze, nebo víc, když to říká název
+souboru – a po prvním přehrání ho nahradí rozměry obrazu, které nahlásí přehrávač (`onVideoSizeChanged`).
+Ostatní verze mají skutečnou kvalitu, jakmile se jednou pustí; do té doby nesou údaj z výpisu. Verze,
+která se po ověření ukáže jako horší než nejnižší povolená kvalita, vypadne a ověří se další (nejvýš
+`VERIFY_VERSIONS`).
+
 **Předvolby přehrávání** (dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích, tlačítko na stránce
 titulu a Nastavení; cíl typu `choices`, akce `prefs_choices`): jazyk (český dabing / originál s titulky / jedno) a kvalita
 (nejvyšší / 1080p / 720p / nejmenší soubor). Řídí pořadí verzí (`_version_rank`) i výběr varianty
@@ -217,7 +230,8 @@ vznikla; po změně předvolby se varianta vybere znovu.
 **Nejnižší kvalita** (`min_quality`, výchozí „Jen Full HD a vyšší“; `_meets_minimum` v `app_api.py`): z Přehraj.to
 se nabízejí jen verze v rozlišení 1080p a vyšším (Full HD, 2K, 4K) – na stránce titulu, v hledání souborů,
 u dalšího dílu i při stahování řady – a titul, který je jen v nižší kvalitě, se v Objevuj nepočítá mezi dostupné.
-Rozhoduje kvalita z výpisu nebo z názvu souboru; když ji soubor neuvádí, odhadne se z velikosti a délky
+Rozhoduje skutečné rozlišení, když je známé (viz Skutečná kvalita), jinak kvalita z výpisu nebo z názvu
+souboru; když ji soubor neuvádí přesně (nic, nebo jen „HD“), odhadne se z velikosti a délky
 (od 2 Mb/s), a soubor, o kterém se neví nic, se nenabídne. Vlastní soubory v katalogu a stažené soubory se
 neskrývají. Vypíná se v předvolbách „Jazyk a kvalita“ → Nejnižší kvalita → Bez omezení; stránka titulu, který
 je jen v nižší kvalitě, to sama napíše.

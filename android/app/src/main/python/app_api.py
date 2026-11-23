@@ -244,6 +244,7 @@ FULL_HD_BITRATE = 2000000   # b/s: soubor bez uvedené kvality se za Full HD ber
 CAM_RE = re.compile(r"(?<![a-z0-9])(?:cam|camrip|hdcam|ts|hdts|telesync|tc|telecine|kinorip)(?![a-z0-9])", re.I)
 BAD_VIDEOS = "bad_videos"       # verze, které se nepodařilo přehrát
 CHOICE_PREFIX = "choice:"       # verze, kterou si uživatel u titulu sám vybral
+REAL_PREFIX = "real:"           # skutečné rozlišení souboru (stránka videa, přehrávání)
 ART_PREFIX = "art:"             # titul z Objevuj, ze kterého se video pustilo (kvůli obrázku na šířku)
 
 
@@ -254,18 +255,117 @@ def _prefs(settings=None):
     minimum = settings.get("min_quality")
     return {"language": language if language in dict(LANGUAGE_CHOICES) else "dub",
             "quality": quality if quality in dict(QUALITY_CHOICES) else "best",
-            "minimum": minimum if minimum in dict(MINIMUM_CHOICES) else MIN_QUALITY_DEFAULT}
+            "minimum": minimum if minimum in dict(MINIMUM_CHOICES) else MIN_QUALITY_DEFAULT,
+            # s vyplněným účtem Přehraj.to nabízí i původní soubor (jinak jen překódované verze)
+            "account": bool(settings.get("username") and settings.get("password"))}
+
+
+def _exact_token(quality):
+    """Kvalita souboru, jen když ji údaj říká přesně. Samotné „HD“ přesné není: tak Přehraj.to ve výpisu
+    označuje 720p i 1080p (a stejně volně to slovo píší lidé do názvů souborů)."""
+    token = provider.quality_token(quality or "")
+    return "" if token == "HD" and not re.search(r"\d", quality or "") else token
+
+
+def _picture_lines(width, height):
+    """Rozlišení podle skutečných rozměrů obrazu jako počet řádků (2160, 1440, 1080, 720…).
+    Rozhoduje i šířka: širokoúhlý film 1920×800 je Full HD, ne „800p“."""
+    for min_width, min_height, lines in ((3200, 1700, 2160), (2400, 1300, 1440), (1800, 950, 1080), (1200, 650, 720)):
+        if width >= min_width or height >= min_height:
+            return lines
+    return max(int(height), 0)
+
+
+def _lines_label(lines):
+    return "4K" if lines >= 2160 else "%dp" % lines
+
+
+def _real(lib, vid):
+    """Co se o souboru ví doopravdy: ``heights`` = překódované verze, které stránka videa nabízí,
+    ``played`` = rozlišení původního souboru změřené při přehrávání, ``local`` = totéž u staženého."""
+    try:
+        real = json.loads(lib.get_kv(REAL_PREFIX + vid) or "{}")
+    except ValueError:
+        return {}
+    return real if isinstance(real, dict) else {}
+
+
+def _real_note(vid, **changes):
+    with _library() as lib:
+        real = dict(_real(lib, vid), **changes)
+        lib.set_kv(REAL_PREFIX + vid, json.dumps(real))
+    return real
+
+
+def _real_from_streams(vid, streams):
+    """Zapamatuje si, v jakých rozlišeních Přehraj.to soubor opravdu nabízí."""
+    heights = set()
+    for stream in streams:
+        digits = re.match(r"\d+", str(stream.get("resolution") or ""))
+        if stream.get("quality") != "ORIG" and digits:
+            heights.add(int(digits.group()))
+    return _real_note(vid, heights=sorted(heights, reverse=True), checked=int(time.time()))
+
+
+def real_fetch(client, vid):
+    """Podívá se na stránku videa, co Přehraj.to opravdu nabízí (jeden dotaz; výsledek se pamatuje)."""
+    streams, _message = client.get_streams(vid)
+    return _real_from_streams(vid, streams)
+
+
+def _known_lines(video, prefs=None):
+    """Skutečné rozlišení toho, co si uživatel může pustit (počet řádků), nebo 0, když se neví.
+
+    Původní soubor (hraje se s účtem): změřené rozlišení, jinak nejvyšší překódovaná verze – nebo víc,
+    když to říká název souboru (Přehraj.to překódovává nejvýš do 1080p, 4K je jen původní soubor)."""
+    real = video.get("real") or {}
+    heights = real.get("heights") or []
+    if not (prefs or {}).get("account"):
+        return max(heights) if heights else 0
+    if real.get("played"):
+        return real["played"]
+    if not heights:
+        return 0
+    named = {"UHD": 2160, "FHD": 1080}.get(_exact_token(video.get("quality")), 0)
+    return max(max(heights), named)
+
+
+def _playing_quality(video, prefs, saved=False):
+    """Kvalita, ve které se soubor opravdu přehraje („1080p“, „originál 4K“); "" dokud se neví."""
+    real = video.get("real") or {}
+    if saved:
+        return "z disku %s" % _lines_label(real["local"]) if real.get("local") else ""
+    heights = real.get("heights") or []
+    streams = [{"quality": provider.quality_token(str(height)), "lines": height} for height in heights]
+    if prefs.get("account") and (real.get("checked") or real.get("played")):
+        streams.insert(0, {"quality": "ORIG"})
+    if not streams:
+        return ""
+    chosen = _pick_stream(streams, prefs)
+    if chosen["quality"] != "ORIG":
+        return "%dp" % chosen["lines"]
+    lines = _known_lines(video, prefs)
+    return "originál %s" % _lines_label(lines) if lines else "originál"
+
+
+def _shown_quality(video, prefs, saved=False):
+    """Kvalita na kartě verze: skutečná, když je známá; jinak údaj z výpisu nebo z názvu souboru."""
+    return _playing_quality(video, prefs, saved) or video.get("quality") or ""
 
 
 def _meets_minimum(video, prefs):
     """Vyhovuje soubor nejnižší kvalitě, kterou si uživatel přeje vidět (Full HD a vyšší)?
 
-    Rozhoduje kvalita z výpisu nebo z názvu souboru (1080p, 2K, 4K projdou; 720p a nižší ne). Když
-    ji soubor neuvádí, odhadne se z velikosti a délky; soubor, o kterém se neví nic, neprojde."""
+    Rozhoduje skutečné rozlišení, když je známé (stránka videa, přehrávání); jinak kvalita z výpisu
+    nebo z názvu souboru (1080p, 2K, 4K projdou; 720p a nižší ne). Když ji soubor neuvádí přesně
+    (nic, nebo jen „HD“), odhadne se z velikosti a délky; soubor, o kterém se neví nic, neprojde."""
     if (prefs or {}).get("minimum") != "1080":
         return True
+    lines = _known_lines(video, prefs)
+    if lines:
+        return lines >= 1080   # ověřeno na stránce videa nebo při přehrávání
     order = provider.QUALITY_ORDER
-    token = provider.quality_token(video.get("quality") or "")
+    token = _exact_token(video.get("quality"))
     if token:
         return order.index(token) <= order.index("FHD")
     size, duration = _size_bytes(video.get("size")), video.get("duration") or 0
@@ -296,6 +396,10 @@ def _language_rank(lang, prefer):
 
 def _known_quality(listed, named):
     """Kvalita souboru: údaj z výpisu Přehraj.to, a když mu aplikace nerozumí, kvalita z názvu souboru."""
+    if _exact_token(listed):
+        return listed
+    if _exact_token(named):
+        return named       # výpis říká jen „HD“ (nebo nic), název souboru přesně „1080p“
     if provider.quality_token(listed or ""):
         return listed
     return named if provider.quality_token(named or "") else (listed or named or "")
@@ -320,8 +424,10 @@ def _version_rank(video, prefs=None, bad=()):
     """Pořadí verzí filmu nebo dílu podle předvoleb; kino kopie a nefunkční verze až na konec."""
     prefs = prefs or _prefs()
     name = video.get("raw_title") or ""
+    lines = _known_lines(video, prefs)
+    quality = "%dp" % lines if lines else video.get("quality")
     return (bool(CAM_RE.search(name)), video.get("id") in bad, _language_rank(video.get("lang"), prefs["language"]),
-            _quality_rank(video.get("quality"), video.get("size"), prefs["quality"]), name)
+            _quality_rank(quality, video.get("size"), prefs["quality"]), name)
 
 
 def _pick_stream(streams, prefs):
@@ -1194,6 +1300,7 @@ def _stream_link(vid, fresh=False):
         streams, _message = client.get_streams(vid)
         if not streams:
             raise provider.VideoUnavailableError("Video nemá žádný přehratelný soubor")
+        _real_from_streams(vid, streams)
         stream = _pick_stream(streams, prefs)
         url = client.resolve(stream["url"])
         subtitles = stream.get("subtitles") or {}
@@ -1207,8 +1314,26 @@ def _stream_link(vid, fresh=False):
         raise ApiError("Přehraj.to: %s" % error)
     with _library() as lib:
         lib.set_kv(LINK_PREFIX + vid, json.dumps({"url": url, "subtitles": subtitles, "ts": int(time.time()),
-                                                  "quality": prefs["quality"]}))
+                                                  "quality": prefs["quality"], "stream": stream.get("quality")}))
     return url, subtitles
+
+
+def video_size(params):
+    """Přehrávač hlásí skutečné rozměry obrazu: podle nich aplikace ví, v jaké kvalitě soubor opravdu je.
+
+    Počítá se jen původní soubor (ne překódovaná verze, ta je vidět na stránce videa) a stažený soubor."""
+    vid = str(params.get("track") or "")
+    lines = _picture_lines(int(params.get("width") or 0), int(params.get("height") or 0))
+    if not vid or vid.startswith("ivys:") or lines <= 0:
+        return {}
+    if params.get("local"):
+        _real_note(vid, local=lines)
+        return {"lines": lines}
+    with _library() as lib:
+        cached = _link_get(lib, vid)
+    if cached and cached.get("stream") == "ORIG":
+        _real_note(vid, played=lines)
+    return {"lines": lines}
 
 
 def progress_save(params):
@@ -2490,7 +2615,7 @@ ACTIONS.update({
     "home": home, "discover_home": discover_home, "movies": movies, "shows": shows, "show": show, "played": played,
     "search": search,
     "prehrajto_search": prehrajto_search, "search_history": search_history, "play_failed": play_failed,
-    "play": play, "progress_save": progress_save, "link_failed": link_failed,
+    "play": play, "progress_save": progress_save, "link_failed": link_failed, "video_size": video_size,
     "settings_get": settings_get, "settings_set": settings_set, "account_status": account_status,
     "progress": progress, "sync": sync, "quick_sync": quick_sync, "enrich": enrich,
     "repair": repair, "repair_query": repair_query, "repair_apply": repair_apply, "repair_video": repair_video,

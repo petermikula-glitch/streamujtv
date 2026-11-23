@@ -65,6 +65,7 @@ class PlayerActivity : FragmentActivity() {
     private var track = ""
     private var live = false
     private var local = false
+    private var reportedSize = ""   // rozměry obrazu, které už logika zná
     private var diagnostic = ""
     private var subtitleStyle: JSONObject? = null   // vzhled titulků z profilu a nabídka možností
     private var externalName = ""   // oficiální aplikace, která by chráněný pořad přehrála, ale v zařízení není
@@ -348,6 +349,16 @@ class PlayerActivity : FragmentActivity() {
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (player === exo) keepAwake(exo)
+            }
+
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                // skutečné rozměry obrazu: stránka titulu podle nich příště ukáže, v jaké kvalitě soubor je
+                if (player !== exo || live || videoSize.width <= 0 || videoSize.height <= 0) return
+                val size = "$track ${videoSize.width}x${videoSize.height}"
+                if (track.isEmpty() || size == reportedSize) return
+                reportedSize = size
+                Api.call("video_size", JSONObject().put("track", track).put("width", videoSize.width)
+                    .put("height", videoSize.height).put("local", local)) { }
             }
 
             override fun onPlaybackStateChanged(state: Int) {

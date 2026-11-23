@@ -74,24 +74,17 @@
                     android:textColor="@color/text_secondary"
                     android:textSize="16sp" />
 
-                <!-- tlačítek může být pět i víc (Přehraj.to, iVysílání, oblíbené…): pás se posouvá s výběrem -->
-                <HorizontalScrollView
+                <!-- tlačítek může být pět i víc (Přehraj.to, iVysílání, oblíbené…): co se nevejde
+                     na řádek, pokračuje na dalším, aby bylo každé vidět celé -->
+                <cz.petermikula.mojevidea.FlowLayout
+                    android:id="@+id/title_actions"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:clipToPadding="false"
+                    android:paddingStart="2dp"
                     android:paddingTop="4dp"
-                    android:paddingBottom="4dp"
-                    android:scrollbars="none">
-
-                    <LinearLayout
-                        android:id="@+id/title_actions"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:paddingStart="2dp"
-                        android:paddingEnd="2dp" />
-                </HorizontalScrollView>
+                    android:paddingEnd="2dp"
+                    android:paddingBottom="4dp" />
 
                 <ProgressBar
                     android:id="@+id/title_spinner"
@@ -105,6 +98,6 @@
         <FrameLayout
             android:id="@+id/title_rows"
             android:layout_width="match_parent"
-            android:layout_height="250dp" />
+            android:layout_height="256dp" />
     </LinearLayout>
 </FrameLayout>

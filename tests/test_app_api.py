@@ -2469,3 +2469,118 @@ def test_availability_is_verified_in_the_background_while_the_list_is_shown(api,
     settled = api("discover", kind="movie", category="top_rated")
     assert _titles(settled["items"]) == ["Filtr", "Samotáři"] and "refresh" not in settled
     assert "badges" not in settled["items"][1]
+
+
+def _stream_pages(monkeypatch, offered, account=True):
+    """Stránky videí na Přehraj.to: ``{číslo videa: [výšky překódovaných verzí]}``; s účtem i původní soubor."""
+    asked = []
+
+    def get_streams(vid):
+        number = int(vid.split(":")[0])
+        asked.append(number)
+        if number not in offered:
+            raise app_api.provider.VideoUnavailableError("není")
+        streams = [{"quality": "ORIG", "url": "orig:" + vid}] if account else []
+        streams += [{"quality": app_api.provider.quality_token(str(height)), "url": "https://cdn.x/%d.mp4" % height,
+                     "resolution": "%dp" % height} for height in offered[number]]
+        return streams, ""
+
+    original = app_api.provider.make_client
+
+    def make_client(*args, **kwargs):
+        client = original(*args, **kwargs)
+        client.get_streams, client.resolve = get_streams, lambda url: url
+        return client
+
+    monkeypatch.setattr(app_api.provider, "make_client", make_client)
+    return asked
+
+
+def test_play_button_shows_the_quality_that_really_plays(api, monkeypatch):
+    # Štítek „HD“ ve výpisu Přehraj.to nese 720p i 1080p: tlačítko Přehrát proto ukazuje, co nabízí stránka videa.
+    api("settings_set", tmdb_key="k" * 32, username="u@example.com", password="x")
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    hour = 3600
+    found = [_web(41, "Pelisky 1999 CZ", 2 * hour, "6 GB", quality="HD"),
+             _web(42, "Pelisky 1999 CZ.", 2 * hour, "5 GB", quality="HD"),
+             _web(43, "Pelisky 1999 CZ 2160p", 2 * hour, "20 GB", quality="HD")]
+    _catalogue_search(monkeypatch, {"Pelíšky 1999": found})
+    asked = _stream_pages(monkeypatch, {41: [1080, 720], 42: [720], 43: [1080, 720]})
+    page = api("discover_title", **FILM)
+    play = page["actions"][0]
+    # název souboru říká přesně „2160p“, výpis jen „HD“: platí název; s účtem se hraje původní soubor
+    assert (play["title"], play["subtitle"]) == ("Přehrát", "CZ dabing · originál 4K") and asked == [43]
+    cards = page["rows"][0]["items"]
+    assert _titles(cards) == ["CZ dabing · 4K", "CZ dabing · HD", "CZ dabing · HD"]   # na kartě jen rozlišení
+    assert cards[0]["badges"] == ["CZ", "4K"] and cards[1]["badges"] == ["CZ", "HD"]
+    assert api("discover_title", **FILM)["actions"][0]["subtitle"] == "CZ dabing · originál 4K" and asked == [43]   # pamatuje si
+
+    # přehrání verze zjistí, co stránka videa nabízí
+    api("play", **cards[1]["target"]["params"])
+    assert _titles(api("discover_title", **FILM)["rows"][0]["items"]) == [     # puštěná verze je příště první
+        "CZ dabing · 1080p", "CZ dabing · 4K", "CZ dabing · HD"]
+    # přehrávač nahlásí skutečné rozměry obrazu: „2160p“ v názvu neplatilo, původní soubor je jen Full HD
+    api("video_size", track=found[2]["id"], width=1920, height=800)          # nic se nepouštělo: nepočítá se
+    assert api("discover_title", **FILM)["rows"][0]["items"][1]["title"] == "CZ dabing · 4K"
+    api("play", **cards[0]["target"]["params"])
+    assert api("video_size", track=found[2]["id"], width=1920, height=800) == {"lines": 1080}
+    assert sorted(_titles(api("discover_title", **FILM)["rows"][0]["items"])) == [
+        "CZ dabing · 1080p", "CZ dabing · 1080p", "CZ dabing · HD"]
+    assert api("discover_title", **FILM)["actions"][0]["subtitle"] == "CZ dabing · originál 1080p"
+
+    # úsporná předvolba: hraje se překódovaná verze v nejnižším rozlišení
+    api("settings_set", prefer_quality="small")
+    small = api("discover_title", **FILM)["rows"][0]["items"]
+    assert any(title.endswith("· 720p") for title in _titles(small))
+    api("settings_set", prefer_quality="best")
+    assert api("video_size", track="ivys:1", width=1920, height=1080) == {}
+
+
+def test_play_button_without_an_account_shows_the_best_transcoded_version(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    found = [_web(41, "Pelisky 1999 CZ", 7200, "6 GB", quality="HD")]
+    _catalogue_search(monkeypatch, {"Pelíšky 1999": found})
+    _stream_pages(monkeypatch, {41: [1080, 720]}, account=False)
+    assert api("discover_title", **FILM)["actions"][0]["subtitle"] == "CZ dabing · 1080p"
+
+    with app_api._library() as lib:
+        lib.set_kv(app_api.REAL_PREFIX + found[0]["id"], "")
+    _stream_pages(monkeypatch, {})
+    # stránka videa se nenačetla: zůstane údaj z výpisu, stránka titulu kvůli tomu neselže
+    assert api("discover_title", **FILM)["actions"][0]["subtitle"] == "CZ dabing · HD"
+
+
+def test_minimum_quality_follows_the_real_resolution(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32, username="u@example.com", password="x", min_quality="1080")
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    hour = 3600
+    found = [_web(51, "Pelisky 1999 CZ a", 2 * hour, "9 GB", quality="HD"),     # „HD“ ve výpisu, ve skutečnosti 720p
+             _web(52, "Pelisky 1999 CZ b", 2 * hour, "8 GB", quality="HD"),     # „HD“ ve výpisu, ve skutečnosti 1080p
+             _web(53, "Pelisky 1999 CZ c", 2 * hour, "700 MB", quality="HD"),   # malý soubor: Full HD to nebude
+             _web(54, "Pelisky 1999 CZ 720p", 2 * hour, "9 GB", quality="HD")]  # název říká přesně 720p
+    _catalogue_search(monkeypatch, {"Pelíšky 1999": found})
+    asked = _stream_pages(monkeypatch, {51: [720], 52: [1080, 720]})
+    page = api("discover_title", **FILM)
+    # samotné „HD“ soubor nevyřadí (dřív ano); první verze se ale po ověření ukázala jako 720p, a tak vypadla
+    assert asked == [51, 52]
+    assert _titles(page["rows"][0]["items"]) == ["CZ dabing · 1080p"]
+    assert page["actions"][0]["subtitle"] == "CZ dabing · originál 1080p"
+    again = api("discover_title", **FILM)
+    assert asked == [51, 52] and _titles(again["rows"][0]["items"]) == ["CZ dabing · 1080p"]
+
+    # původní soubor se při přehrávání ukázal jako 720p: příště se už nenabízí
+    api("video_size", track=found[1]["id"], width=1280, height=720)
+    assert api("video_size", track=found[1]["id"], width=1280, height=720) == {"lines": 720}
+    with app_api._library() as lib:
+        assert "played" not in app_api._real(lib, found[1]["id"])     # nic se nepouštělo: měření se nepočítá
+    api("play", vid=found[1]["id"], web_result=found[1])
+    api("video_size", track=found[1]["id"], width=1280, height=720)
+    low = api("discover_title", **FILM)
+    assert low["rows"] == [] or "Verze" not in low["rows"][0]["title"]
+    assert "jen v nižší kvalitě než Full HD (nalezeno: 4)" in low["detail"]["plot"]
+
+    assert app_api._picture_lines(3840, 1600) == 2160 and app_api._picture_lines(1920, 800) == 1080
+    assert app_api._picture_lines(1280, 536) == 720 and app_api._picture_lines(720, 404) == 404
+    assert app_api._known_quality("HD", "1080p") == "1080p" and app_api._known_quality("HD", "") == "HD"
+    assert app_api._known_quality("1080p", "720p") == "1080p" and app_api._known_quality("", "HD") == "HD"

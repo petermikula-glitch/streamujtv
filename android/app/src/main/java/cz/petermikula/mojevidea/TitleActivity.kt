@@ -5,7 +5,6 @@ import android.view.ContextThemeWrapper
 import android.view.View
 import android.widget.Button
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.fragment.app.FragmentActivity
 import androidx.leanback.app.RowsSupportFragment
@@ -24,7 +23,7 @@ import org.json.JSONObject
  */
 class TitleActivity : FragmentActivity() {
     private val rows = ArrayObjectAdapter(ListRowPresenter())
-    private lateinit var actions: LinearLayout
+    private lateinit var actions: FlowLayout
     private lateinit var spinner: View
     private lateinit var plot: TextView
     private var call = ""
@@ -34,6 +33,7 @@ class TitleActivity : FragmentActivity() {
     private var meta = ""
     private var csfd = ""
     private var expanded = false
+    private var crowded = false
     private var rowTitles = emptyList<String>()
     private var rowShapes = emptyList<Boolean>()
     private var results: RowsSupportFragment? = null
@@ -45,12 +45,22 @@ class TitleActivity : FragmentActivity() {
         actions = findViewById(R.id.title_actions)
         spinner = findViewById(R.id.title_spinner)
         plot = findViewById(R.id.title_plot)
+        // tlačítka ve dvou řádcích: popis se zkrátí, aby se nad řady karet vešlo všechno
+        actions.onRowCount = { rows ->
+            val name = findViewById<TextView>(R.id.title_name)
+            plot.maxLines = if (rows <= 1) 4 else 2
+            crowded = rows > 1 && name.lineCount > 1   // dlouhý název i dva řádky tlačítek: popis se nevejde
+            if (!expanded) plot.visibility = if (crowded) View.GONE else View.VISIBLE
+        }
         call = intent.getStringExtra(Navigator.EXTRA_CALL).orEmpty()
         params = JSONObject(intent.getStringExtra(Navigator.EXTRA_PARAMS) ?: "{}")
         findViewById<TextView>(R.id.title_name).text = intent.getStringExtra(Navigator.EXTRA_TITLE).orEmpty()
         val results = RowsSupportFragment()
         this.results = results
         results.adapter = rows
+        // karty vybrané řady vždy stejně hluboko pod horním okrajem: nad nimi se vejde celý nadpis řady
+        // (s větším písmem ho horní okraj uřezával)
+        results.setAlignment((ROW_TOP * resources.displayMetrics.density).toInt())
         results.onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
             (item as? Card)?.let {
                 if (it.target.type == "play") played = true
@@ -72,10 +82,10 @@ class TitleActivity : FragmentActivity() {
         expanded = rowsFocused
         val hidden = if (rowsFocused) View.GONE else View.VISIBLE
         findViewById<View>(R.id.title_poster).visibility = hidden
-        plot.visibility = hidden
+        plot.visibility = if (crowded) View.GONE else hidden
         val area = findViewById<View>(R.id.title_rows)
         area.layoutParams = area.layoutParams.apply {
-            height = ((if (rowsFocused) 390 else 250) * resources.displayMetrics.density).toInt()
+            height = ((if (rowsFocused) ROWS_EXPANDED else ROWS_HEIGHT) * resources.displayMetrics.density).toInt()
         }
     }
 
@@ -167,10 +177,7 @@ class TitleActivity : FragmentActivity() {
                     Navigator.open(this@TitleActivity, target, action.optString("title")) { load() }
                 }
             }
-            val place = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            place.marginEnd = (12 * resources.displayMetrics.density).toInt()
-            actions.addView(button, place)
+            actions.addView(button)
         }
         if (!loadedOnce || focused != null) {
             actions.getChildAt((focused ?: 0).coerceAtMost(actions.childCount - 1))?.requestFocus()
@@ -211,5 +218,11 @@ class TitleActivity : FragmentActivity() {
         Glide.with(applicationContext).clear(findViewById<ImageView>(R.id.title_poster))
         Glide.with(applicationContext).clear(findViewById<ImageView>(R.id.title_backdrop))
         super.onDestroy()
+    }
+
+    private companion object {
+        const val ROWS_HEIGHT = 256     // dp: řady karet pod údaji o titulu
+        const val ROWS_EXPANDED = 390   // dp: řady, když je v nich výběr (plakát a popis ustoupí)
+        const val ROW_TOP = 48          // dp: horní okraj karet pod horním okrajem řad
     }
 }

@@ -873,6 +873,8 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
             break
     with api._library() as lib:
         chosen = lib.get_kv(api.CHOICE_PREFIX + choice) if choice else ""
+        # co se o souborech ví doopravdy (stránka videa, přehrávání) – má přednost před štítkem z výpisu
+        reals = {vid: api._real(lib, vid) for vid in found}
         # Verze stažené na disku patří k titulu, i když už je hledání nevrací (nebo zrovna nejde).
         for vid in state.get("downloads", {}):
             if vid in found or not api._saved(state, vid):
@@ -891,6 +893,8 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
         video = dict(parsed, id=result["id"], raw_title=result["title"], thumb=result.get("thumb", ""),
                      size=result.get("size", ""), duration=result.get("duration") or 0)
         video["quality"] = api._known_quality(result.get("quality"), video.get("quality"))
+        if reals.get(result["id"]):
+            video["real"] = reals[result["id"]]
         same = (video["duration"], video["size"], video["quality"], video.get("lang"))
         if video["duration"] and video["size"] and same in seen:
             continue  # tentýž soubor nahraný vícekrát
@@ -901,20 +905,64 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
                          or search_results.is_preview(video["raw_title"], names),
                          "cam": bool(api.CAM_RE.search(video["raw_title"])), "bad": video["id"] in bad,
                          "chosen": bool(chosen) and video["id"] == chosen, "saved": api._saved(state, video["id"])})
-    # Verze v nižší kvalitě, než si uživatel přeje vidět, se nenabízejí (stažená na disku zůstává).
+    return _arrange(versions, state)
+
+
+def _arrange(versions, state):
+    """Verze, které se nabídnou, v pořadí podle předvoleb; ``state["below_minimum"]`` = kolik jich
+    vypadlo, protože jsou v nižší kvalitě, než si uživatel přeje vidět (stažená na disku zůstává)."""
+    prefs, bad = state.get("prefs") or api._prefs(), state.get("bad", ())
     shown = [version for version in versions if version["saved"] or api._meets_minimum(version["video"], prefs)]
     state["below_minimum"] = len(versions) - len(shown)
-    versions = shown
     # stažená verze má přednost (hraje z disku, bez čekání a bez internetu), pak naposledy zvolená
-    versions.sort(key=lambda version: (version["short"], not version["saved"], not version["chosen"]) +
-                  api._version_rank(version["video"], prefs, bad))
+    shown.sort(key=lambda version: (version["short"], not version["saved"], not version["chosen"]) +
+               api._version_rank(version["video"], prefs, bad))
+    return shown
+
+
+VERIFY_VERSIONS = 3   # u tolika verzí nejvýš se stránka titulu podívá, co Přehraj.to opravdu nabízí
+
+
+def _verify_best(versions, state):
+    """Ověří verzi, kterou pustí tlačítko Přehrát: štítek „HD“ ve výpisu Přehraj.to neříká, jestli jde
+    o 720p nebo 1080p, to je vidět až na stránce videa. Když se ukáže, že verze je v nižší kvalitě,
+    než si uživatel přeje, vypadne a ověří se další. Stojí to jeden dotaz na verzi a výsledek se
+    pamatuje; když dotaz selže, zůstane u verze údaj z výpisu."""
+    client = None
+    for _attempt in range(VERIFY_VERSIONS):
+        best = next((version for version in versions if not version["short"]), None)
+        if not best or best["saved"] or best["video"].get("real", {}).get("checked"):
+            break
+        try:
+            client = client or api._client(allow_anonymous=True)
+            best["video"]["real"] = api.real_fetch(client, best["video"]["id"])
+        except (api.ApiError, provider.ProviderError):
+            break
+        hidden = state.get("below_minimum") or 0
+        versions = _arrange(versions, state)
+        state["below_minimum"] += hidden
     return versions
+
+
+def _version_quality(version, state, full=False):
+    """Kvalita verze: ta, ve které se opravdu přehraje, když už je známá (stránka videa, přehrávání);
+    jinak údaj z výpisu Přehraj.to nebo z názvu souboru. Na kartu jen rozlišení („4K“), na tlačítko
+    Přehrát i to, že jde o původní soubor („originál 4K“)."""
+    quality = api._shown_quality(version["video"], state.get("prefs") or api._prefs(), version.get("saved"))
+    if full:
+        return quality
+    return quality.replace("originál", "").replace("z disku", "").strip() or quality
+
+
+def _version_label(version, state, full=False):
+    return " · ".join(part for part in (version["video"].get("lang") or "Jazyk neuveden",
+                                        _version_quality(version, state, full)) if part)
 
 
 def _version_card(version, state, choice=""):
     video, result = version["video"], version["result"]
-    quality = video.get("quality") or ""
-    title = " · ".join(part for part in (video.get("lang") or "Jazyk neuveden", quality) if part)
+    quality = _version_quality(version, state)
+    title = _version_label(version, state)
     notes = [note for flag, note in (("chosen", "naposledy zvolená"), ("short", "ukázka nebo část"),
                                      ("cam", "kino kopie"), ("bad", "nešlo přehrát")) if version[flag]]
     subtitle = " · ".join(part for part in notes + [video.get("size"), _duration_text(video.get("duration")),
@@ -1105,7 +1153,8 @@ def _title_page(params, kind):
     choice = "movie:%s" % params["id"] if params.get("id") else ""
     failed = ""
     try:
-        versions = _find_versions(_names(params), info["year"], None, state, info["runtime"], choice=choice)
+        versions = _verify_best(
+            _find_versions(_names(params), info["year"], None, state, info["runtime"], choice=choice), state)
     except api.ApiError as error:
         # hledání selhalo: stránka zůstane použitelná – údaje, oblíbené, ruční hledání a nový pokus
         versions, failed = [], str(error)
@@ -1121,7 +1170,9 @@ def _title_page(params, kind):
         pass
     elif good:
         best = _version_card(good[0], state, choice)
-        actions.insert(0, {"title": "Přehrát", "subtitle": best["title"], "target": best["target"]})
+        # tlačítko říká, v jakém jazyce a v jaké kvalitě se film opravdu pustí
+        actions.insert(0, {"title": "Přehrát", "subtitle": _version_label(good[0], state, full=True),
+                           "target": best["target"]})
         rows.append({"title": "Verze na Přehraj.to (%d)" % len(good),
                      "items": [_version_card(version, state, choice) for version in good]})
     elif state.get("below_minimum"):
