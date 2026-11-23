@@ -25,5 +25,5 @@
         android:fontFamily="sans-serif-condensed"
         android:maxLines="1"
         android:textColor="@color/text_primary"
-        android:textSize="20sp" />
+        android:textSize="22sp" />
 </LinearLayout>

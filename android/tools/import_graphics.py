@@ -5,8 +5,9 @@
 
 Složka s podklady: ``dlazdice/``, ``objevuj/`` a ``zanry/`` (PNG na šířku, bez textu), ``ikony/*.svg``
 (obrysové, výřez 24 × 24, skupina s ``fill="none"`` a bílou linkou), ``profily/``, ``pruvodce/``,
-``prazdne-stavy/``, ``uvod/`` a ``znacka/`` (Ikona-aplikace.png, Banner-Android-TV.png, Logo.png,
-Pozadi.png nebo Papir.png). Chybějící soubory se přeskočí. Potřebuje knihovnu Pillow.
+``prazdne-stavy/``, ``uvod/`` a ``znacka/`` (Papir.png – kresba papíru pro pozadí, nebo hotové
+Pozadi.png; případně Ikona-aplikace.png, Banner-Android-TV.png a Logo.png – jinak je ze znaku skládá
+``make_brand.py``). Chybějící soubory se přeskočí. Potřebuje knihovnu Pillow.
 
 Malby jsou tuší na čistě bílém pozadí (vzhled „tuš na papíře“): bílá se při převodu odstraní, takže
 motiv v aplikaci leží na barvě papíru. Obrázek, který už průhledné pozadí má, se nemění.
@@ -15,7 +16,7 @@ import os
 import sys
 import xml.etree.ElementTree as ET
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageStat
 
 TILES = {"Archiv": "archive", "Dokumenty": "docs", "Filmy": "movies", "Historie": "past", "Kultura": "culture",
          "Priroda": "nature", "Pro-deti": "kids", "Rady-a-recepty": "advice", "Serialy": "series",
@@ -44,6 +45,8 @@ SVG = "{http://www.w3.org/2000/svg}"
 
 
 SURFACE = (0xE3, 0xDB, 0xC8)   # barva listu papíru, na kterém leží dlaždice a úvodní panel
+PAPER = ((0xD9, 0xD0, 0xBB), (0xC9, 0xBF, 0xA8))   # pozadí obrazovek: vlevo nahoře světlejší, vpravo dole tmavší
+ACCENT = (0xBF, 0x33, 0x27)    # rumělka; červené plochy maleb se na ni sjednotí
 WHITE = 248                    # od této světlosti se bod bere jako čistě bílý podklad (generované obrázky mívají 253–254)
 
 
@@ -62,9 +65,15 @@ def ink(image):
         cover = 255 - white
         if cover:                            # barva bez podkladu: (c - bílá) / krytí
             target = index // 3 * 4
-            points[target] = (red - white) * 255 // cover
-            points[target + 1] = (green - white) * 255 // cover
-            points[target + 2] = (blue - white) * 255 // cover
+            red, green, blue = ((red - white) * 255 // cover, (green - white) * 255 // cover,
+                                (blue - white) * 255 // cover)
+            if cover < 12:                    # sotva znatelný bod: barva by byla jen šum zaokrouhlení
+                red = green = blue = 0
+            elif red - max(green, blue) > 90: # červená plocha: vždy přesně rumělka vzhledu
+                red, green, blue = ACCENT
+            points[target] = red
+            points[target + 1] = green
+            points[target + 2] = blue
             points[target + 3] = cover
     return Image.frombytes("RGBA", plain.size, bytes(points))
 
@@ -82,7 +91,7 @@ def wide(image, size=(480, 270)):
     return image.resize(size, Image.LANCZOS)
 
 
-def motif(image, size=(480, 270), box=(0.50, 0.08, 0.95, 0.72)):
+def motif(image, size=(480, 270), box=(0.40, 0.08, 0.95, 0.72)):
     """Motiv dlaždice se z podkladu vyřízne a posadí do pravé horní části (``box`` v podílech dlaždice):
     všechny motivy jsou pak stejně velké a pod nimi i vlevo zůstává místo na název, ať je na podkladu
     namalovaný jakkoli velký. Obrázek s průhledným pozadím se jen ořízne a zmenší."""
@@ -101,6 +110,20 @@ def motif(image, size=(480, 270), box=(0.50, 0.08, 0.95, 0.72)):
     sheet = Image.new("RGB", size, (255, 255, 255))
     sheet.paste(cut, (int(box[2] * size[0]) - cut.width, int(box[1] * size[1] + (room[1] - cut.height) / 2)))
     return sheet
+
+
+def paper(image, size=(1920, 1080)):
+    """Pozadí obrazovek: z podkladu se vezme jen kresba vláken (světlejší a tmavší místa) a položí se
+    na barvy vzhledu – odstín papíru tak nezávisí na tom, jak teplý vyšel obrázek."""
+    grain = wide(image.convert("L"), size)
+    mean = int(round(ImageStat.Stat(grain).mean[0]))
+    # kresba se bere jen z poloviny: na televizi má být papír sotva znát, ne rušit pod kartami
+    grain = grain.point([max(0, min(255, (value - mean) // 2 + 128)) for value in range(256)])
+    corners = Image.new("RGB", (2, 2))
+    corners.putdata([PAPER[0], tuple((a + b) // 2 for a, b in zip(*PAPER)),
+                     tuple((a + b) // 2 for a, b in zip(*PAPER)), PAPER[1]])
+    sheet = corners.resize(size, Image.BILINEAR)
+    return ImageChops.add(sheet, Image.merge("RGB", (grain, grain, grain)), 1, -128)
 
 
 def number(value):
@@ -216,10 +239,12 @@ def main(source, res):
         sheet.save(os.path.join(res, "drawable-nodpi", "hero_default.webp"), "WEBP", quality=90, method=6)
         done.append("hero_default")
     brand = os.path.join(source, "znacka")
-    paper = next((os.path.join(brand, name) for name in ("Papir.png", "Pozadi.png")
-                  if os.path.exists(os.path.join(brand, name))), None)
-    if paper:
-        wide(Image.open(paper).convert("RGB"), (1920, 1080)).save(
+    if os.path.exists(os.path.join(brand, "Papir.png")):
+        paper(Image.open(os.path.join(brand, "Papir.png"))).save(
+            os.path.join(res, "drawable-nodpi", "app_background_image.webp"), "WEBP", quality=92, method=6)
+        done.append("pozadí")
+    elif os.path.exists(os.path.join(brand, "Pozadi.png")):   # hotové pozadí se bere tak, jak je
+        wide(Image.open(os.path.join(brand, "Pozadi.png")).convert("RGB"), (1920, 1080)).save(
             os.path.join(res, "drawable-nodpi", "app_background_image.webp"), "WEBP", quality=92, method=6)
         done.append("pozadí")
     if os.path.exists(os.path.join(brand, "Banner-Android-TV.png")):

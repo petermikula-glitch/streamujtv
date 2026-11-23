@@ -31,8 +31,7 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
     private val fill = Paint().apply { color = ContextCompat.getColor(context, R.color.surface) }
     private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = ContextCompat.getColor(context, R.color.ink)
-        textSize = 20 * density
-        typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
     private val padding = 14 * density
 
@@ -62,8 +61,8 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
             val portrait = area.height() > area.width()
             val scale = if (portrait) area.width() / width.toFloat()
             else max(area.width() / width.toFloat(), area.height() / height.toFloat())
-            // na malé kartě (verze, díly) je motiv jen v pozadí, ať nepřebíjí název
-            art.alpha = if (area.width() < 240 * density) 90 else 255
+            // na malé kartě (verze, díly) je motiv tlumenější, ať nepřebíjí název
+            art.alpha = if (area.width() < SMALL * density) 150 else 255
             val w = (width * scale).toInt()
             val h = (height * scale).toInt()
             val left = area.right - w
@@ -81,6 +80,8 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
             }
         }
         val width = (area.width() - 2 * padding).toInt()
+        // název čitelný z dálky: na velké dlaždici větší
+        text.textSize = (if (area.width() < SMALL * density) 20 else 24) * density
         if (width > 0 && title.isNotEmpty()) {
             val layout = StaticLayout.Builder.obtain(title, 0, title.length, text, width)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
@@ -105,4 +106,8 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
 
     @Deprecated("Deprecated in Java")
     override fun getOpacity(): Int = PixelFormat.OPAQUE
+
+    private companion object {
+        const val SMALL = 240   // šířka (dp), pod kterou se dlaždice bere jako malá karta
+    }
 }

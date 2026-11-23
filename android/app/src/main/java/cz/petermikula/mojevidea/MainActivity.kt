@@ -148,7 +148,7 @@ class MainFragment : BrowseSupportFragment(), RowsHost {
         }
         val name = android.widget.TextView(context).apply {
             setTextColor(androidx.core.content.ContextCompat.getColor(context, R.color.text_primary))
-            textSize = 16f
+            textSize = 18f
             typeface = android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.NORMAL)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END

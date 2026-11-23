@@ -19,7 +19,7 @@ class CardOverlay(
     private val chip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE61D1B18.toInt() }
     private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xFFF0E9D9.toInt()
-        textSize = 11 * density
+        textSize = 12 * density
         typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
     }
 

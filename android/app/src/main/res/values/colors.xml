@@ -14,7 +14,7 @@
     <color name="accent_bright">#D2452F</color>
     <color name="on_accent">#FFF5EE</color>
     <color name="text_primary">#1D1B18</color>
-    <color name="text_secondary">#5F5A50</color>
+    <color name="text_secondary">#4D483F</color>
     <color name="ink">#1D1B18</color>
     <!-- štítky přes obrázky (jazyk, dostupnost) a stavový řádek: tuš se světlým písmem -->
     <color name="chip_bg">#E61D1B18</color>
@@ -38,5 +38,5 @@
     <color name="lb_error_message">#5F5A50</color>
     <!-- nevybrané řady neztmavnou, ale vyblednou do papíru -->
     <color name="lb_view_dim_mask_color">#D2C9B4</color>
-    <item name="lb_view_dimmed_level" type="fraction">38%</item>
+    <item name="lb_view_dimmed_level" type="fraction">26%</item>
 </resources>
