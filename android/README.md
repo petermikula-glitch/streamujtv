@@ -113,8 +113,8 @@ první sekce, ve které něco je (`start`: Oblíbené, jinak Rozkoukané, jinak 
   (ty mají v popisku „iVysílání“).
 - **Rozkoukané** – nahoře panel s naposledy rozkoukaným videem, řady Filmy a Seriály (obě služby
   pohromadě, naposledy přehrané první), Další díly a dlaždice Naposledy přehrané. Video se sem zařadí
-  po deseti sekundách přehrávání (`IN_PROGRESS_AFTER` v `app_api.py`; doplněk pro Kodi počítá až od
-  jedné minuty).
+  po minutě přehrávání (`IN_PROGRESS_MIN` v `db.py`, stejně jako v doplňku pro Kodi); kratší puštění
+  je jen v Naposledy přehraných.
 - **Objevuj** – velké dlaždice Filmy, Seriály a Hledat a pod nimi řady právě populárních filmů
   a seriálů. Ty mají v datech místo karet `call` a aplikace si je donačte sama až po zobrazení sekce,
   aby hlavní obrazovka nečekala na síť (bez klíče TMDB chybí).
@@ -134,8 +134,20 @@ V záhlaví vedle tlačítka hledání je aktivní profil (obrázek a jméno); k
 **Objevuj** (`app_discover.py`): Přehraj.to nemá katalog podle roku ani žánru, jen hledání podle názvu
 souboru. Seznamy titulů proto dodává TMDB (novinky, populární, nejlépe hodnocené, podle roku, podle
 žánru, československé – země původu `CZ|SK|XC`), a teprve u vybraného titulu se na Přehraj.to hledají
-jeho verze; u seriálu přes řady a díly. Potřebuje klíč TMDB v Nastavení. Dostupnost se ověřuje až po
-otevření titulu, ne u celého seznamu.
+jeho verze; u seriálu přes řady a díly. Potřebuje klíč TMDB v Nastavení.
+
+**Jen dostupné tituly** (`_collect`, `_check_available` v `app_discover.py`): výpisy z Objevuj i řady
+populárních titulů na hlavní obrazovce ukazují jen to, co je k mání – na Přehraj.to, nebo v iVysílání.
+U každého titulu, o kterém to aplikace neví, se jednou hledá na Přehraj.to (u seriálu jeho první díl)
+a jednou v iVysílání (shoda názvu, druhu a u filmu roku), čtyři tituly souběžně. Výsledek se pamatuje
+(`avail:<druh>:<číslo>`): nalezený titul týden, nenalezený dva dny. Protože dostupných titulů bývá na
+stránce TMDB málo, projde výpis najednou až tři stránky, dokud jich nemá dvanáct, nejdéle ale asi
+dvanáct sekund; první otevření výpisu proto chvíli trvá, další jsou hned. Co ověřit nejde (služba
+neodpovídá), ve výpisu zůstane a zkusí se příště; služba, která neodpovídá, se dvě minuty nezkouší.
+Karty mají štítek „Přehraj.to“ a/nebo „iVysílání“. Ve Filtru jde přepnout Dostupnost na „Všechny
+tituly“ – pak se nic neověřuje samo (zůstává dlaždice „Ověřit dostupnost“) a nenalezené mají štítek.
+Titul, který je v iVysílání, má na své stránce tlačítko „Přehrát v iVysílání“ (film) nebo „Díly
+v iVysílání“ (seriál).
 
 **Oblíbené** jsou jen v aplikaci (`favorites.json`): film či seriál z katalogu, nebo titul z Objevuj.
 Mají vlastní sekci v postranní nabídce, filmy a seriály každé svou řadu.

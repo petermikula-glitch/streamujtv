@@ -20,7 +20,8 @@ class ApiResult(val data: JSONObject?, val error: String?, val offline: Boolean 
  */
 object Api {
     private const val TAG = "MojeVidea"
-    private val pool = Executors.newFixedThreadPool(4)
+    // o něco víc vláken, než kolik je obrazovek: výpisy z Objevuj při ověřování dostupnosti chvíli čekají
+    private val pool = Executors.newFixedThreadPool(6)
     // Zápisy (pozice přehrávání) jdou jedním vláknem v pořadí, v jakém vznikly, a čtení na ně počká:
     // hlavní obrazovka po návratu z přehrávače tak vždy vidí už uloženou pozici.
     private val writer = Executors.newSingleThreadExecutor()

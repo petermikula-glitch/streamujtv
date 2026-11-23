@@ -121,8 +121,16 @@ class ListFragment : VerticalGridSupportFragment() {
             showMessage("")
             cards.setItems(Card.skeletons(if (presenter.poster) 10 else 8), null)
         }
+        // Výpis z Objevuj poprvé ověřuje, co je k mání (pár sekund): ať je vidět, že se něco děje.
+        val patience = Runnable {
+            if (isAdded && loading && !loaded) {
+                Toast.makeText(requireContext(), "Ověřuji, co je na Přehraj.to a v iVysílání…", Toast.LENGTH_LONG).show()
+            }
+        }
+        if (call == "discover" && !loaded && params.optString("avail") != "all") handler.postDelayed(patience, 2500)
         Api.call(call, params) { result ->
             loading = false
+            handler.removeCallbacks(patience)
             if (!isAdded) return@call
             val data = result.data
             if (data == null) {

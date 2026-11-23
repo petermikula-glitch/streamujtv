@@ -98,13 +98,8 @@ def _save_settings(values):
     os.replace(temporary, _path("settings.json"))
 
 
-IN_PROGRESS_AFTER = 10   # s; od kdy si aplikace pamatuje, kde se skončilo (krátké puštění taky platí)
-
-
 def _library():
-    lib = db.Library(_path("catalog.db"), video_key=provider.video_key, prefer_ref=provider.prefer_ref)
-    lib.in_progress_min = IN_PROGRESS_AFTER
-    return lib
+    return db.Library(_path("catalog.db"), video_key=provider.video_key, prefer_ref=provider.prefer_ref)
 
 
 def _client(allow_anonymous=False):
