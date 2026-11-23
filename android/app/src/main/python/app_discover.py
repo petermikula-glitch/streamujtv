@@ -959,6 +959,25 @@ def _version_label(version, state, full=False):
                                         _version_quality(version, state, full)) if part)
 
 
+def _file_line(version):
+    """Soubor, který pustí tlačítko Přehrát: název, jak je na Přehraj.to, velikost a délka."""
+    video = version["video"]
+    return "%s: %s" % ("Soubor na disku" if version.get("saved") else "Soubor", " · ".join(
+        part for part in (video["raw_title"], video.get("size"), _duration_text(video.get("duration"))) if part))
+
+
+def _download_action(version, state, params):
+    """Tlačítko na stažení souboru, který pustí tlačítko Přehrát (stažený soubor už tlačítko nepotřebuje)."""
+    entry = state.get("downloads", {}).get(version["video"]["id"])
+    if not entry or entry.get("state") == "failed":
+        return {"title": "Zkusit stáhnout znovu" if entry else "Stáhnout na disk",
+                "subtitle": version["video"].get("size") or "", "target": api._target("download", "download_add", params)}
+    if entry.get("state") == "done":
+        return None
+    return {"title": "Stahuje se" if entry.get("state") == "downloading" else "Čeká na stažení", "subtitle": "",
+            "target": api._target("list", "downloads", {}, "Stahování")}
+
+
 def _version_card(version, state, choice=""):
     video, result = version["video"], version["result"]
     quality = _version_quality(version, state)
@@ -1090,7 +1109,7 @@ def _title_television(kind, params):
 def discover_title(params):
     """Stránka titulu: údaje, tlačítka a řady karet.
 
-    ``{"detail": {title, meta, plot, poster, backdrop}, "actions": [{title, subtitle, target}],
+    ``{"detail": {title, meta, plot, poster, backdrop, file?}, "actions": [{title, subtitle, target}],
     "rows": [{title, items}]}``. U filmu jsou v řadách verze z Přehraj.to a první tlačítko přehraje tu
     nejlepší podle předvoleb; u seriálu jsou v řadě jeho série. Je-li titul i v iVysílání, přibude
     tlačítko, které ho tam přehraje (film) nebo otevře jeho díly.
@@ -1173,6 +1192,11 @@ def _title_page(params, kind):
         # tlačítko říká, v jakém jazyce a v jaké kvalitě se film opravdu pustí
         actions.insert(0, {"title": "Přehrát", "subtitle": _version_label(good[0], state, full=True),
                            "target": best["target"]})
+        # … a který soubor to je (název a velikost, jak je na Přehraj.to), spolu s tlačítkem na jeho stažení
+        detail["file"] = _file_line(good[0])
+        download = _download_action(good[0], state, best["target"]["params"])
+        if download:
+            actions.insert(1, download)
         rows.append({"title": "Verze na Přehraj.to (%d)" % len(good),
                      "items": [_version_card(version, state, choice) for version in good]})
     elif state.get("below_minimum"):

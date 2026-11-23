@@ -40,6 +40,7 @@
                 android:scaleType="centerCrop" />
 
             <LinearLayout
+                android:id="@+id/title_column"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="28dp"
@@ -74,6 +75,18 @@
                     android:textColor="@color/text_secondary"
                     android:textSize="16sp" />
 
+                <!-- soubor, který pustí tlačítko Přehrát: název, velikost a délka -->
+                <TextView
+                    android:id="@+id/title_file"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:ellipsize="end"
+                    android:maxLines="2"
+                    android:textColor="@color/text_primary"
+                    android:textSize="15sp"
+                    android:visibility="gone" />
+
                 <!-- tlačítek může být pět i víc (Přehraj.to, iVysílání, oblíbené…): co se nevejde
                      na řádek, pokračuje na dalším, aby bylo každé vidět celé -->
                 <cz.petermikula.mojevidea.FlowLayout
@@ -98,6 +111,6 @@
         <FrameLayout
             android:id="@+id/title_rows"
             android:layout_width="match_parent"
-            android:layout_height="256dp" />
+            android:layout_height="250dp" />
     </LinearLayout>
 </FrameLayout>

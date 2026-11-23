@@ -194,7 +194,11 @@ kartou řady; u dlouhého seriálu jsou to řady kolem té naposledy sledované)
 nejlepší verzi (`discover_episode_play`); ruční výběr verze je v nabídce karty dílu. Po návratu
 z přehrávače se výběr v řadách přesune na díl, kterým se pokračuje (`focus` v datech stránky). Tlačítko „Jazyk a kvalita“ otevírá předvolby přehrávání.
 
-Tlačítka (`FlowLayout`) se zalamují na další řádek, aby bylo každé vidět celé; popis se pak zkrátí.
+Tlačítka (`FlowLayout`) se zalamují na další řádek, aby bylo každé vidět celé; popis dostane jen tolik
+řádků, kolik nad řadami karet zbývá (`fitPlot`). Nad tlačítky je řádek se souborem, který tlačítko Přehrát
+pustí (`detail.file`: název, jak je na Přehraj.to, velikost a délka), a hned za Přehrát tlačítko
+„Stáhnout na disk“ s velikostí téhož souboru (`_download_action`; u souboru ve frontě vede na Stahování,
+u staženého není a řádek říká „Soubor na disku“).
 
 **Skutečná kvalita** (`_real`, `real_fetch`, `_playing_quality`, `video_size` v `app_api.py`; `_verify_best`
 v `app_discover.py`): štítek „HD“ ve výpisu Přehraj.to nese 720p i 1080p, a tak se z něj nepozná, co se

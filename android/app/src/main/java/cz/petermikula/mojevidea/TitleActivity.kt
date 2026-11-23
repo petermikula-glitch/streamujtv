@@ -26,6 +26,7 @@ class TitleActivity : FragmentActivity() {
     private lateinit var actions: FlowLayout
     private lateinit var spinner: View
     private lateinit var plot: TextView
+    private lateinit var file: TextView
     private var call = ""
     private var params = JSONObject()
     private var shown = ""
@@ -33,7 +34,7 @@ class TitleActivity : FragmentActivity() {
     private var meta = ""
     private var csfd = ""
     private var expanded = false
-    private var crowded = false
+    private var fitted = ""   // pro jaké rozměry už je popis zkrácený
     private var rowTitles = emptyList<String>()
     private var rowShapes = emptyList<Boolean>()
     private var results: RowsSupportFragment? = null
@@ -45,13 +46,9 @@ class TitleActivity : FragmentActivity() {
         actions = findViewById(R.id.title_actions)
         spinner = findViewById(R.id.title_spinner)
         plot = findViewById(R.id.title_plot)
-        // tlačítka ve dvou řádcích: popis se zkrátí, aby se nad řady karet vešlo všechno
-        actions.onRowCount = { rows ->
-            val name = findViewById<TextView>(R.id.title_name)
-            plot.maxLines = if (rows <= 1) 4 else 2
-            crowded = rows > 1 && name.lineCount > 1   // dlouhý název i dva řádky tlačítek: popis se nevejde
-            if (!expanded) plot.visibility = if (crowded) View.GONE else View.VISIBLE
-        }
+        file = findViewById(R.id.title_file)
+        // popis dostane jen tolik řádků, kolik nad řadami karet zbývá: název, soubor a tlačítka mají přednost
+        window.decorView.viewTreeObserver.addOnGlobalLayoutListener { fitPlot() }
         call = intent.getStringExtra(Navigator.EXTRA_CALL).orEmpty()
         params = JSONObject(intent.getStringExtra(Navigator.EXTRA_PARAMS) ?: "{}")
         findViewById<TextView>(R.id.title_name).text = intent.getStringExtra(Navigator.EXTRA_TITLE).orEmpty()
@@ -82,7 +79,9 @@ class TitleActivity : FragmentActivity() {
         expanded = rowsFocused
         val hidden = if (rowsFocused) View.GONE else View.VISIBLE
         findViewById<View>(R.id.title_poster).visibility = hidden
-        plot.visibility = if (crowded) View.GONE else hidden
+        plot.visibility = hidden
+        file.visibility = if (rowsFocused || file.text.isEmpty()) View.GONE else View.VISIBLE
+        fitted = ""   // po návratu k tlačítkům se místo pro popis spočítá znovu
         val area = findViewById<View>(R.id.title_rows)
         area.layoutParams = area.layoutParams.apply {
             height = ((if (rowsFocused) ROWS_EXPANDED else ROWS_HEIGHT) * resources.displayMetrics.density).toInt()
@@ -150,6 +149,8 @@ class TitleActivity : FragmentActivity() {
             }
         }
         plot.text = detail.optString("plot")
+        file.text = detail.optString("file")
+        file.visibility = if (file.text.isEmpty()) View.GONE else View.VISIBLE
         val glide = Glide.with(applicationContext)
         detail.optString("poster").takeIf { it.isNotEmpty() }?.let {
             glide.load(it).timeout(15_000).centerCrop().transition(com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(160))
@@ -210,6 +211,33 @@ class TitleActivity : FragmentActivity() {
         rowShapes = shapes
     }
 
+    /**
+     * Zkrátí popis tak, aby se údaje i tlačítka vešly nad řady karet. Tlačítka bývají ve dvou řádcích
+     * a přibyl řádek se souborem; bez toho by spodní tlačítka zmizela pod řadami.
+     */
+    private fun fitPlot() {
+        if (expanded) return
+        val column = findViewById<View>(R.id.title_column)
+        val pane = column.parent as View
+        val free = pane.height - pane.paddingTop - pane.paddingBottom
+        if (free <= 0 || column.width <= 0) return
+        val state = listOf(free, column.width, actions.rowCount, file.text, plot.text,
+            findViewById<TextView>(R.id.title_name).lineCount, findViewById<TextView>(R.id.title_meta).text).joinToString("|")
+        if (state == fitted) return
+        fitted = state
+        val width = View.MeasureSpec.makeMeasureSpec(column.width, View.MeasureSpec.EXACTLY)
+        val any = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        var lines = if (plot.text.isEmpty()) 0 else PLOT_LINES
+        while (true) {
+            plot.visibility = if (lines == 0) View.GONE else View.VISIBLE
+            if (lines > 0) plot.maxLines = lines
+            column.measure(width, any)
+            if (lines == 0 || column.measuredHeight <= free) break
+            lines--
+        }
+        column.requestLayout()
+    }
+
     private fun showMeta() {
         findViewById<TextView>(R.id.title_meta).text = listOf(meta, csfd).filter { it.isNotEmpty() }.joinToString(" · ")
     }
@@ -221,7 +249,8 @@ class TitleActivity : FragmentActivity() {
     }
 
     private companion object {
-        const val ROWS_HEIGHT = 256     // dp: řady karet pod údaji o titulu
+        const val PLOT_LINES = 4        // tolik řádků popisu nejvýš
+        const val ROWS_HEIGHT = 250     // dp: řady karet pod údaji o titulu
         const val ROWS_EXPANDED = 390   // dp: řady, když je v nich výběr (plakát a popis ustoupí)
         const val ROW_TOP = 48          // dp: horní okraj karet pod horním okrajem řad
     }

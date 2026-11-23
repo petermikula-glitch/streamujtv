@@ -688,7 +688,9 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
     page = api("discover_title", **FILM)
     assert page["detail"] == {"title": "Pelíšky", "meta": "1999 · 86 % · 1 h 56 min · Komedie, Drama",
                               "plot": "Rodinná komedie.", "poster": "https://image.tmdb.org/t/p/w500/p.jpg",
-                              "backdrop": "https://image.tmdb.org/t/p/w1280/b.jpg"}
+                              "backdrop": "https://image.tmdb.org/t/p/w1280/b.jpg",
+                              # který soubor tlačítko Přehrát pustí
+                              "file": "Soubor: Pelisky.1999.CZ.1080p · 4 GB · 2 h 00 min"}
     versions, extras = page["rows"]
     assert versions["title"] == "Verze na Přehraj.to (4)" and extras["title"] == "Ukázky a neúplné soubory"
     # výchozí předvolby: český dabing a nejvyšší kvalita; kino kopie až na konec, duplicita sloučená
@@ -699,7 +701,10 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
     assert "kino kopie" in versions["items"][3]["subtitle"] and versions["items"][1]["badges"] == ["TIT", "2160p"]
     assert "ukázka nebo část" in extras["items"][0]["subtitle"]
     assert best["target"]["params"]["choice"] == "movie:11" and "Stáhnout na disk" in _titles(best["menu"])
-    play, favourite, manual, prefs = page["actions"]
+    play, download, favourite, manual, prefs = page["actions"]
+    # vybraný soubor jde rovnou stáhnout na disk; tlačítko říká, jak je velký
+    assert (download["title"], download["subtitle"]) == ("Stáhnout na disk", "4 GB")
+    assert download["target"] == {"type": "download", "call": "download_add", "params": best["target"]["params"]}
     assert prefs["title"] == "Jazyk a kvalita" and prefs["target"] == {"type": "choices", "call": "prefs_choices", "params": {}}
     assert (play["title"], play["subtitle"]) == ("Přehrát", "CZ dabing · 1080p") and play["target"] == best["target"]
     assert favourite["title"] == "Přidat do oblíbených"
@@ -728,7 +733,7 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
     favorite = _section(api, "favorites")["Filmy"][0]
     assert favorite["title"] == "Pelíšky" and favorite["target"]["type"] == "title"
     assert favorite["target"]["params"]["id"] == 11 and favorite["menu"][-1]["title"] == "Odebrat z oblíbených"
-    assert api("discover_title", **FILM)["actions"][1]["title"] == "Odebrat z oblíbených"
+    assert api("discover_title", **FILM)["actions"][2]["title"] == "Odebrat z oblíbených"
 
     nothing = api("discover_title", kind="movie", id=5, title="Neznámý film", year=2001)
     assert nothing["rows"] == [] and [action["title"] for action in nothing["actions"]] == [
@@ -851,6 +856,10 @@ def test_downloaded_version_comes_first_and_film_plays_without_its_page(api, mon
 
     english = _web(72, "")["id"]                                             # anglická verze je stažená na disku
     api("download_add", vid=english, web_result=found["Pelíšky 1999"][1])
+    api("play", vid=english, web_result=found["Pelíšky 1999"][1], choice="movie:11")
+    waiting = api("discover_title", **FILM)                                  # ve frontě: tlačítko vede na Stahování
+    assert waiting["detail"]["file"] == "Soubor: Pelisky 1999 EN 720p · 1 GB · 2 h 00 min"
+    assert (waiting["actions"][1]["title"], waiting["actions"][1]["target"]["call"]) == ("Čeká na stažení", "downloads")
     disk = tmp_path / "usb"
     disk.mkdir()
     job = api("download_next", dir=str(disk))
@@ -861,6 +870,9 @@ def test_downloaded_version_comes_first_and_film_plays_without_its_page(api, mon
     first = page["rows"][0]["items"][0]
     assert first["target"]["params"]["vid"] == english and first["badges"][0] == "Na disku"   # stažená má přednost
     assert first["subtitle"].startswith("Staženo") and page["actions"][0]["target"] == first["target"]
+    # stránka říká, že se pustí soubor z disku; tlačítko na stažení už není potřeba
+    assert page["detail"]["file"] == "Soubor na disku: Pelisky 1999 EN 720p · 1 GB · 2 h 00 min"
+    assert "Stáhnout na disk" not in _titles(page["actions"])
     assert api("discover_movie_play", **FILM)["local"] is True               # a hraje z disku
 
     del found["Pelíšky 1999"]                                                # z hledání zmizela, na disku zůstala

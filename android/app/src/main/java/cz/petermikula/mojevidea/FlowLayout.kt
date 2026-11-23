@@ -16,10 +16,9 @@ class FlowLayout @JvmOverloads constructor(context: Context, attrs: AttributeSet
     private val gapX = (12 * resources.displayMetrics.density).toInt()
     private val gapY = (8 * resources.displayMetrics.density).toInt()
 
-    /** Kolik řádků tlačítka zabírají; stránka podle toho zkracuje popis, aby se vše vešlo. */
+    /** Kolik řádků tlačítka zabírají. */
     var rowCount = 0
         private set
-    var onRowCount: ((Int) -> Unit)? = null
 
     /** Projde děti a každému určí místo; vrací (šířka nejdelšího řádku, celková výška, počet řádků). */
     private fun arrange(limit: Int, place: ((View, Int, Int) -> Unit)?): Triple<Int, Int, Int> {
@@ -59,10 +58,7 @@ class FlowLayout @JvmOverloads constructor(context: Context, attrs: AttributeSet
         setMeasuredDimension(
             resolveSize(width + paddingLeft + paddingRight, widthMeasureSpec),
             resolveSize(height + paddingTop + paddingBottom, heightMeasureSpec))
-        if (rows != rowCount) {
-            rowCount = rows
-            onRowCount?.let { changed -> post { changed(rows) } }
-        }
+        rowCount = rows
     }
 
     /**
