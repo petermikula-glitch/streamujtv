@@ -89,6 +89,9 @@ class LinkActivity : FragmentActivity() {
             params.put("resume", true)  // „Pokračovat“: naváže bez ptaní
             startActivity(
                 Intent(this, PlayerActivity::class.java)
+                    // přehrávač, který zůstal otevřený pod domovskou obrazovkou, se nahradí: dva nad
+                    // sebou by si navzájem přepisovaly uloženou pozici
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     .putExtra(Navigator.EXTRA_CALL, call)
                     .putExtra(Navigator.EXTRA_PARAMS, params.toString())
             )

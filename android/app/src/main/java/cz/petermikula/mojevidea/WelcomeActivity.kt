@@ -51,7 +51,9 @@ abstract class WelcomeStep : GuidedStepSupportFragment() {
     protected fun text(id: Long): String = findActionById(id)?.description?.toString()?.trim().orEmpty()
 
     protected fun go(step: GuidedStepSupportFragment) {
-        add(requireActivity().supportFragmentManager, step, android.R.id.content)
+        val manager = requireActivity().supportFragmentManager
+        // odpověď dorazila až po odchodu z aplikace (tlačítko Domů): krok se neotevírá, jinak by to spadlo
+        if (!manager.isStateSaved) add(manager, step, android.R.id.content)
     }
 }
 

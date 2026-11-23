@@ -451,10 +451,30 @@ def test_download_failures_and_cancel(api, tmp_path, monkeypatch):
     _fill()
     disk = str(tmp_path)
     api("download_add", vid=REF)
-    job_error = api("download_next", dir=disk)                               # bez přihlášení adresu nezíská
-    assert job_error == {"vid": ""}
+    blocked = api("download_next", dir=disk)                                 # bez přihlášení adresu nezíská
+    assert blocked["error"].startswith("Nejdřív v Nastavení")                # fronta ale zůstane, jak je
+    assert "Chyba" not in api("downloads")["items"][0]["subtitle"]
+
+    genuine = app_api._stream_link
+
+    def offline(vid, fresh=False):
+        try:
+            raise app_api.urllib.error.URLError("síť je pryč")
+        except app_api.urllib.error.URLError:
+            raise app_api.ApiError("Přehraj.to je nedostupné")
+
+    monkeypatch.setattr(app_api, "_stream_link", offline)                    # výpadek sítě: taky nic neselže
+    assert api.raw("download_next", dir=disk)["offline"] is True
+    assert "Chyba" not in api("downloads")["items"][0]["subtitle"]
+
+    def gone(vid, fresh=False):
+        raise app_api.ApiError("Video už na Přehraj.to není dostupné.")
+
+    monkeypatch.setattr(app_api, "_stream_link", gone)                       # chyba jednoho videa: to selže
+    assert api("download_next", dir=disk) == {"vid": ""}
+    monkeypatch.setattr(app_api, "_stream_link", genuine)
     card = api("downloads")["items"][0]
-    assert card["subtitle"].startswith("Chyba: Nejdřív v Nastavení")
+    assert card["subtitle"].startswith("Chyba: Video už na Přehraj.to není")
     assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zkusit stáhnout znovu", "Odebrat ze stahování"]
     api("download_add", vid=REF)                                             # znovu do fronty
     _link(REF, "https://cdn.x/stream?id=5")
@@ -1660,15 +1680,117 @@ def test_titles_that_cannot_be_verified_stay_in_the_list(api, monkeypatch):
     app_api.app_discover._PAUSED.clear()                                     # po pauze se titul ověří
     assert _titles(api("discover", kind="movie", category="popular")["items"]) == ["Filtr"]
 
-    # iVysílání neodpovídá: co je na Přehraj.to, je označené; ostatní zůstanou, dokud se nedá ověřit obojí
+    # iVysílání neodpovídá: rozhoduje Přehraj.to; iVysílání se doplní, až odpoví (bez nového hledání)
     asked = _catalogue_search(monkeypatch, {"Kolja 1996": [_web(40, "Kolja.1996.CZ.1080p", 6000)]})
     monkeypatch.setattr(app_api.app_discover, "_ivys_match", lambda kind, names, year: None)
     partial = api("discover", kind="movie", category="top_rated")["items"]
-    assert _titles(partial) == ["Filtr", "Kolja", "Samotáři"]
-    assert partial[1]["badges"] == ["Přehraj.to"] and partial[2]["badges"] == ["Nenalezeno"]
+    assert _titles(partial) == ["Filtr", "Kolja"] and partial[1]["badges"] == ["Přehraj.to"]
     count = len(asked)
-    monkeypatch.setattr(app_api.app_discover, "_ivys_match", lambda kind, names, year: "")
+    monkeypatch.setattr(app_api.app_discover, "_ivys_match", lambda kind, names, year: "11" if "Samotáři" in names else "")
     app_api.app_discover._PAUSED.clear()
-    assert _titles(api("discover", kind="movie", category="top_rated")["items"]) == ["Filtr", "Kolja"]
+    later = api("discover", kind="movie", category="top_rated")["items"]
+    assert _titles(later) == ["Filtr", "Kolja", "Samotáři"] and later[2]["badges"] == ["iVysílání"]
     assert len(asked) == count                                               # na Přehraj.to se znovu nehledalo
     assert asked and "Zapnout" not in api("discover", kind="movie", category="popular")["empty"]
+
+
+def test_account_change_drops_the_previous_login_and_settings_survive_parallel_writes(api, tmp_path):
+    api("settings_set", username="a@b.cz", password="heslo", tmdb_key="k" * 32)
+    cookies = tmp_path / "cookies.lwp"
+    cookies.write_text("#LWP-Cookies-2.0\n")
+    api("settings_set", prefer_quality="720")                                # jiná volba přihlášení nechá být
+    assert cookies.exists()
+    api("settings_set", password="jine")                                     # jiné heslo: staré přihlášení neplatí
+    assert not cookies.exists()
+    cookies.write_text("#LWP-Cookies-2.0\n")
+    api("settings_set", username="c@d.cz")
+    assert not cookies.exists()
+
+    import threading
+    workers = [threading.Thread(target=lambda n=n: [app_api._remember_search("dotaz %d %d" % (n, i)) or
+                                                    app_api._change_settings(lambda s: s.update(last_sync=i))
+                                                    for i in range(25)]) for n in range(6)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    settings = api("settings_get")                                           # souběžné zápisy nic nesmazaly
+    assert settings["username"] == "c@d.cz" and settings["has_password"] and settings["tmdb_key"] == "k" * 32
+    assert len(api("search_history")["rows"][0]["items"]) == 12
+
+
+def test_interrupted_profile_switch_does_not_mix_profiles(api, monkeypatch):
+    _fill(2)
+    api("progress_save", track=REF, position=1500, total=6000, started=True)
+    api("search", q="pelisky")
+    api("profile_add", avatar="owl", text="Jana")
+    owl = api("profiles")["items"][1]["target"]["params"]["id"]
+
+    def fail(change):
+        raise OSError("disk je plný")
+
+    genuine = app_api._change_settings
+    monkeypatch.setattr(app_api, "_change_settings", fail)                   # přepnutí spadne uprostřed
+    assert "error" in api("profile_switch", id=owl)
+    monkeypatch.setattr(app_api, "_change_settings", genuine)
+    assert api("home")["profile"]["name"] == "Hlavní profil"                 # nic se nepřepnulo ani nepomíchalo
+    assert [item["target"]["params"] for item in _section(api, "progress")["Filmy"]] == [{"vid": REF}]
+    api("profile_switch", id=owl)                                            # druhý pokus projde
+    assert api("home")["profile"]["name"] == "Jana" and list(_section(api, "progress")) == ["Rozkoukané"]
+    assert api("search_history") == {"rows": []}                             # hledané výrazy má každý profil své
+    with app_api._library() as lib:                                          # přepnutí přerušené až po výměně
+        lib.set_kv("profile_live", "p1")                                     # katalogu: platí, čí stav v něm je
+    assert api("home")["profile"]["name"] == "Hlavní profil"
+    with app_api._library() as lib:
+        lib.set_kv("profile_live", owl)
+    api("profile_switch", id="p1")                                           # a původní profil o nic nepřišel
+    assert [item["target"]["params"] for item in _section(api, "progress")["Filmy"]] == [{"vid": REF}]
+    assert _titles(api("search_history")["rows"][0]["items"]) == ["pelisky"]
+
+
+def test_search_survives_a_wrong_password_and_partial_failures_are_not_remembered(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32, username="a@b.cz", password="spatne")
+    logins = []
+
+    class Client(object):
+        def __init__(self, username):
+            self.has_credentials = bool(username)
+
+        def login(self):
+            logins.append(1)
+            raise app_api.provider.LoginError("špatné heslo")
+
+    monkeypatch.setattr(app_api.provider, "make_client", lambda username, password, **kwargs: Client(username))
+    films = [{"id": 11, "title": "Pelíšky", "release_date": "1999-04-08"},
+             {"id": 12, "title": "Kolja", "release_date": "1996-05-15"}]
+    _fake_tmdb(monkeypatch, {"/movie/popular": {"results": films, "total_pages": 1}})
+    asked = []
+
+    def search_catalog(client, query, page, cursor):
+        asked.append((query, client.has_credentials))
+        if query == "Kolja 1996":
+            raise app_api.provider.ProviderError("vypršel čas")                # první dotaz spadne, druhý nic nenajde
+        return ([_web(32, "Pelisky.1999.CZ.1080p", 7000)] if query == "Pelíšky 1999" else []), ""
+
+    monkeypatch.setattr(app_api.provider, "search_catalog", search_catalog)
+    listing = api("discover", kind="movie", category="popular")["items"]
+    assert len(logins) == 1 and not any(logged for _query, logged in asked)  # jedno přihlášení, pak bez účtu
+    assert _titles(listing) == ["Filtr", "Pelíšky", "Kolja"]                 # Kolja: „nevím“, ne „není tam“
+    assert listing[1]["badges"] == ["Přehraj.to"] and "badges" not in listing[2]
+
+
+def test_available_only_list_keeps_looking_and_missing_series_favourite_says_so(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    films = [{"id": 100 + n, "title": "Neznámý %d" % n, "release_date": "2024-01-01"} for n in range(20)]
+    calls = _fake_tmdb(monkeypatch, {"/discover/movie": {"results": films, "total_pages": 9}})
+    _catalogue_search(monkeypatch, {})
+    monkeypatch.setattr(app_api.app_discover, "_ivys_match", lambda kind, names, year: "")
+    listing = api("discover", kind="movie", category="recent")               # tři stránky a nic k mání
+    assert _titles(listing["items"]) == ["Filtr"] and listing["next"]["params"]["page"] == 4
+    assert calls[0][1]["sort_by"] if "sort_by" in calls[0][1] else True      # novinky: podle oblíbenosti…
+    assert "primary_release_date.gte" in calls[0][1] and calls[0][1].get("sort_by") in (None, "popularity.desc")
+    assert api("discover", **listing["next"]["params"])["next"]["params"]["page"] == 7   # další dávka pokračuje
+
+    page = api("discover_title", kind="tv", id=0, title="Archa", year=1996, fid="show:archa")
+    assert page["rows"] == [] and page["detail"]["plot"].startswith("Tento seriál už ve vašem katalogu není")
+    assert "Hledat ručně" in _titles(page["actions"])

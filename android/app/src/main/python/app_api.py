@@ -57,6 +57,10 @@ class ApiError(Exception):
     """Chyba s textem určeným uživateli."""
 
 
+class Blocked(ApiError):
+    """Chyba, která se netýká jednoho videa: chybí nebo selhalo přihlášení, služba je mimo provoz."""
+
+
 # ---------------------------------------------------------------------------
 # Prostředí a nastavení
 # ---------------------------------------------------------------------------
@@ -82,20 +86,35 @@ def _path(name):
     return os.path.join(_STATE["dir"], name)
 
 
+_SETTINGS_LOCK = threading.RLock()   # nastavení mění víc akcí souběžně (hledání, synchronizace, aktualizace)
+
+
 def _settings():
-    try:
-        with open(_path("settings.json"), encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    with _SETTINGS_LOCK:
+        try:
+            with open(_path("settings.json"), encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
 
 
 def _save_settings(values):
-    temporary = _path("settings.json.tmp")
-    with open(temporary, "w", encoding="utf-8") as f:
-        json.dump(values, f, ensure_ascii=False)
-    os.replace(temporary, _path("settings.json"))
+    with _SETTINGS_LOCK:
+        temporary = _path("settings.json.%d.tmp" % threading.get_ident())
+        with open(temporary, "w", encoding="utf-8") as f:
+            json.dump(values, f, ensure_ascii=False)
+        os.replace(temporary, _path("settings.json"))
+
+
+def _change_settings(change):
+    """Přečte nastavení, upraví je funkcí ``change`` a uloží – celé pod zámkem, aby se souběžné změny
+    (hledání a synchronizace, aktualizace…) navzájem nepřepsaly. Vrací nový stav."""
+    with _SETTINGS_LOCK:
+        settings = _settings()
+        change(settings)
+        _save_settings(settings)
+        return settings
 
 
 def _library():
@@ -107,7 +126,7 @@ def _client(allow_anonymous=False):
     if not settings.get("username") or not settings.get("password"):
         if allow_anonymous:
             return provider.make_client("", "")
-        raise ApiError("Nejdřív v Nastavení vyplňte e-mail a heslo k Přehraj.to.")
+        raise Blocked("Nejdřív v Nastavení vyplňte e-mail a heslo k Přehraj.to.")
     return provider.make_client(settings["username"], settings["password"], cookie_file=_path("cookies.lwp"))
 
 
@@ -662,7 +681,7 @@ def _ivysilani_rows(lib):
     categories = []
     try:
         # krátký limit: hlavní obrazovka nesmí bez připojení čekat desítky sekund
-        for category in _cached("ivys:menu", TTL["menu"], lambda: _ivys(timeout=4).menu()):
+        for category in _ivys_quick("ivys:menu", TTL["menu"], lambda: _ivys(timeout=4).menu()):
             categories.append(_card(category["title"], _target(
                 "list", "ivys_category", {"cid": category["id"]}, category["title"]), "iVysílání",
                 icon=IVYS_ICONS.get(category["title"], "folder")))
@@ -862,10 +881,11 @@ def search(params):
 
 
 def _remember_search(query):
-    settings = _settings()
-    history = [item for item in settings.get("search_history") or [] if isinstance(item, str) and item != query]
-    settings["search_history"] = ([query] + history)[:12]
-    _save_settings(settings)
+    def change(settings):
+        history = [item for item in settings.get("search_history") or [] if isinstance(item, str) and item != query]
+        settings["search_history"] = ([query] + history)[:12]
+
+    _change_settings(change)
 
 
 def search_history(params):
@@ -1004,7 +1024,8 @@ def play(params):
                 "position": position, "title": title, "track": vid, "live": False, "hls": False, "tracks": tracks}
     url, subtitles = _stream_link(vid, bool(params.get("fresh")))
     return {"url": url, "local": False, "headers": {"User-Agent": provider.USER_AGENT},
-            "subtitles": list(subtitles.values()), "position": position, "title": title,
+            "subtitles": list(subtitles.values()), "subtitle_langs": [_subtitle_lang(key) for key in subtitles],
+            "position": position, "title": title,
             "track": vid, "live": False, "hls": False, "tracks": tracks}
 
 
@@ -1013,6 +1034,13 @@ def _video_title(video, meta):
     if video["kind"] == "episode" and video["episode"]:
         title = "%s %d×%02d" % (title, video["season"], video["episode"])
     return title
+
+
+def _subtitle_lang(label):
+    """Kód jazyka titulků pro přehrávač z označení na Přehraj.to (CZ, EN, SK…)."""
+    code = str(label or "").strip().lower()[:3]
+    return {"cz": "cs", "cze": "cs", "ces": "cs", "en": "en", "eng": "en", "sk": "sk", "slo": "sk",
+            "slk": "sk"}.get(code, code if code.isalpha() else "")
 
 
 def _stream_link(vid, fresh=False):
@@ -1031,9 +1059,11 @@ def _stream_link(vid, fresh=False):
         url = client.resolve(stream["url"])
         subtitles = stream.get("subtitles") or {}
     except provider.LoginError:
-        raise ApiError("Přihlášení k Přehraj.to se nezdařilo. Zkontrolujte e-mail a heslo v Nastavení.")
+        raise Blocked("Přihlášení k Přehraj.to se nezdařilo. Zkontrolujte e-mail a heslo v Nastavení.")
     except provider.VideoUnavailableError:
         raise ApiError("Video už na Přehraj.to není dostupné.")
+    except (provider.TemporaryError, provider.RateLimited) as error:
+        raise Blocked("Přehraj.to: %s" % error)
     except provider.ProviderError as error:
         raise ApiError("Přehraj.to: %s" % error)
     with _library() as lib:
@@ -1111,14 +1141,26 @@ def prefs_choices(params):
 
 
 def settings_set(params):
-    settings = _settings()
-    for key in ("username", "password", "tmdb_key", "download_dir", "prefer_language", "prefer_quality"):
-        if key in params and params[key] is not None:
-            settings[key] = str(params[key]).strip()
-    for key in ("delete_watched", "onboarded"):   # přepínače
-        if key in params and params[key] is not None:
-            settings[key] = bool(params[key])
-    _save_settings(settings)
+    account = []
+
+    def change(settings):
+        before = (settings.get("username"), settings.get("password"))
+        for key in ("username", "password", "tmdb_key", "download_dir", "prefer_language", "prefer_quality"):
+            if key in params and params[key] is not None:
+                settings[key] = str(params[key]).strip()
+        for key in ("delete_watched", "onboarded"):   # přepínače
+            if key in params and params[key] is not None:
+                settings[key] = bool(params[key])
+        account.append(before != (settings.get("username"), settings.get("password")))
+
+    _change_settings(change)
+    if account[0]:
+        # Jiný účet nebo heslo: uložené přihlášení patřilo tomu předchozímu. Kdyby zůstalo, aplikace
+        # by dál pracovala s původním účtem a i špatné heslo by vypadalo jako správné.
+        try:
+            os.remove(_path("cookies.lwp"))
+        except OSError:
+            pass
     return settings_get({})
 
 
@@ -1169,9 +1211,7 @@ def sync(params):
         if stats.get("incomplete"):
             return {"message": "Výpis se nepodařilo načíst celý (%d videí). Nic se neodebralo, zkuste to znovu."
                     % stats["total"]}
-        settings = _settings()
-        settings["last_sync"] = int(time.time())
-        _save_settings(settings)
+        _change_settings(lambda settings: settings.update(last_sync=int(time.time())))
         enriched = _enrich()
         return {"message": "Videí: %d, nových: %d, odebraných: %d. %s" % (
             stats["total"], stats["new"], stats["removed"], enriched)}
@@ -1240,11 +1280,33 @@ def _ivys_call(work):
         raise ApiError(str(error))
 
 
+_IVYS_DOWN = {"until": 0}   # iVysílání neodpovídalo: hlavní obrazovka se na ně chvíli neptá
+IVYS_DOWN_FOR = 90
+
+
+def _ivys_quick(key, ttl, load):
+    """Data iVysílání pro hlavní obrazovku: z mezipaměti, jinak krátký dotaz; po výpadku se půldruhé
+    minuty neptá vůbec, aby se hlavní obrazovka nezdržovala při každém návratu."""
+    if _IVYS_DOWN["until"] > time.time():
+        with _library() as lib:
+            value = lib.cache_get("app:" + key)
+        if value is None:
+            raise ivysilani.IvysilaniError("iVysílání teď neodpovídá")
+        return value
+    try:
+        return _cached(key, ttl, load)
+    except ivysilani.IvysilaniError:
+        _IVYS_DOWN["until"] = time.time() + IVYS_DOWN_FOR
+        raise
+
+
 def ivys_live(params):
     try:
         # "quick": řada na hlavní obrazovce – program se nesmí načítat desítky sekund
-        timeout = 4 if params.get("quick") else None
-        channels = _cached("ivys:live", TTL["live"], lambda: _ivys(timeout=timeout).live_now())
+        if params.get("quick"):
+            channels = _ivys_quick("ivys:live", TTL["live"], lambda: _ivys(timeout=4).live_now())
+        else:
+            channels = _cached("ivys:live", TTL["live"], lambda: _ivys().live_now())
     except ivysilani.IvysilaniError:
         channels = []  # program je jen doplněk – kanály zůstanou i bez něj
     listed = {channel["channel"] for channel in channels}
@@ -1597,6 +1659,10 @@ def download_next(params):
         try:
             url, subtitles = _stream_link(vid, bool(params.get("fresh")))
         except ApiError as error:
+            if isinstance(error, Blocked) or _offline(error):
+                # Výpadek spojení nebo přihlášení se netýká jednoho videa: fronta zůstane, jak je,
+                # a služba to zkusí později. Jinak by krátký výpadek označil za nepovedené všechno.
+                raise
             download_fail({"vid": vid, "error": str(error)})
             continue
         suffix = os.path.splitext(urllib.parse.urlparse(url).path)[1].lower()
@@ -1621,7 +1687,8 @@ def download_next(params):
             _save_downloads(items)
         return {"vid": vid, "title": entry.get("title") or "", "url": url,
                 "headers": {"User-Agent": provider.USER_AGENT}, "path": target, "part": target + ".part",
-                "subtitles": tracks}
+                # známá velikost rozpracovaného souboru: navazuje se jen na tentýž soubor
+                "total": int(entry.get("total") or 0), "subtitles": tracks}
 
 
 def download_progress(params):
@@ -1720,9 +1787,7 @@ def update_check(params):
         version = tag[len(UPDATE_TAG):]
         if asset and asset.get("browser_download_url") and (best is None or _version(version) > _version(best[0])):
             best = (version, asset, release)
-    settings = _settings()
-    settings["update_checked"] = int(time.time())
-    _save_settings(settings)
+    _change_settings(lambda settings: settings.update(update_checked=int(time.time())))
     if best is None or _version(best[0]) <= _version(current):
         return {"available": False, "current": current}
     version, asset, release = best

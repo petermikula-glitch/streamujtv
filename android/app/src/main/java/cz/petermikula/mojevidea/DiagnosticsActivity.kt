@@ -38,9 +38,9 @@ class DiagnosticsActivity : FragmentActivity() {
             val level = drm.getPropertyString("securityLevel")
             "$level, verze ${drm.getPropertyString(MediaDrm.PROPERTY_VERSION)}" to true
         } finally {
-            drm.close()
+            if (android.os.Build.VERSION.SDK_INT >= 28) drm.close() else @Suppress("DEPRECATION") drm.release()
         }
-    } catch (error: Exception) {
+    } catch (error: Throwable) {
         "zařízení ho nepodporuje (${error.javaClass.simpleName})" to false
     }
 

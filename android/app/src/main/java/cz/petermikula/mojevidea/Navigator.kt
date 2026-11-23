@@ -160,6 +160,7 @@ object Navigator {
 
     /** Dlouhá operace (synchronizace, metadata): okno s průběhem, na konci výsledek. */
     fun runCommand(activity: FragmentActivity, title: String, target: Target, onChanged: () -> Unit) {
+        if (activity.isFinishing || activity.isDestroyed) return
         val dialog = AlertDialog.Builder(activity)
             .setTitle(title)
             .setMessage("Pracuji…")
@@ -182,7 +183,15 @@ object Navigator {
         Api.call(target.call, target.params) { result ->
             finished = true
             handler.removeCallbacks(poll)
-            if (activity.isFinishing || activity.isDestroyed) return@call
+            if (activity.isFinishing || activity.isDestroyed) {
+                // obrazovka mezitím zanikla: okno zavřít, ať po ní nezůstane viset
+                try {
+                    if (dialog.isShowing) dialog.dismiss()
+                } catch (error: IllegalArgumentException) {
+                    // okno už systém odstranil s obrazovkou
+                }
+                return@call
+            }
             if (dialog.isShowing) dialog.dismiss()
             val data = result.data
             val message = if (result.ok) data?.optString("message").orEmpty() else result.error.orEmpty()

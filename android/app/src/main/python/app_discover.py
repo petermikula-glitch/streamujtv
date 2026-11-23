@@ -30,6 +30,7 @@ ONLY_ENOUGH = 12                 # výpis „jen dostupné“: tolik titulů sta
 ONLY_PAGES = 3                   # …a víc stránek TMDB kvůli nim najednou neprojde,
 ONLY_SECONDS = 12                # ani když ověřování trvá déle než tolik sekund
 CHECK_PAUSE = 120                # služba, která neodpovídá, se tolik sekund nezkouší (výpis na ni nečeká)
+CHECK_WAIT = 20                  # déle výpis nečeká, až doběhne jiné ověřování
 _PAUSED = {}                     # {"prehrajto" | "ivysilani": do kdy se nezkouší}
 _CHECK_LOCK = threading.Lock()   # ověřování běží nejvýš jedno (řady hlavní obrazovky se nepředbíhají)
 CHECK_BATCH = 20                 # kolik titulů ověří jedno „Ověřit dostupnost“
@@ -151,12 +152,10 @@ def favorites_check(params):
     titulů najednou (jedno hledání na film). Titul, který se ještě neověřoval, se jen zapamatuje –
     upozornění patří až změně. Nalezený titul má na kartě štítek „Nově“, dokud ho uživatel neotevře.
     """
-    settings = api._settings()
     now = int(time.time())
-    if not params.get("force") and now - int(settings.get("favorites_checked") or 0) < FAVORITES_EVERY:
+    if not params.get("force") and now - int(api._settings().get("favorites_checked") or 0) < FAVORITES_EVERY:
         return {"found": []}
-    settings["favorites_checked"] = now
-    api._save_settings(settings)
+    api._change_settings(lambda settings: settings.update(favorites_checked=now))
     with api._library() as lib:
         state = api._state(lib)
     prefs, mark = state["prefs"], _prefs_mark(state["prefs"])
@@ -280,6 +279,10 @@ def _known(lib, kind, ids):
             continue
         count = int(entry.get("n") or 0)
         television = entry.get("iv") if isinstance(entry.get("iv"), str) else None
+        # údaj o iVysílání má vlastní stáří: záznam se přepisuje i tehdy, když se iVysílání neověřovalo
+        if television is not None and \
+                now - (entry.get("its") or entry.get("ts") or 0) >= (AVAILABLE_TTL if television else MISSING_TTL):
+            television = None
         if now - (entry.get("ts") or 0) < (AVAILABLE_TTL if count or television else MISSING_TTL):
             known[key] = {"n": count, "iv": television}
     return known
@@ -310,9 +313,9 @@ def _remember_availability(kind, tmdb_id, count, television=None):
             except ValueError:
                 old = None
             if isinstance(old, dict) and isinstance(old.get("iv"), str):
-                entry["iv"] = old["iv"]
+                entry["iv"], entry["its"] = old["iv"], old.get("its") or old.get("ts") or 0
         else:
-            entry["iv"] = television
+            entry["iv"], entry["its"] = television, entry["ts"]
         lib.set_kv(key, json.dumps(entry))
 
 
@@ -353,16 +356,18 @@ def _check_available(kind, items, state):
     první díl) a jedno v iVysílání, pár titulů souběžně. Výsledek si pamatuje (viz ``_known``);
     co se zjistit nepodařilo, zůstane neznámé a zkusí se příště. Vrací čerstvý stav všech titulů."""
     ids = [item["id"] for item in items]
-    with _CHECK_LOCK:
+    if not _CHECK_LOCK.acquire(timeout=CHECK_WAIT):
+        # jiné ověřování běží moc dlouho (opuštěné výpisy): vrátit, co se ví, a nedržet další vlákno
+        with api._library() as lib:
+            return _known(lib, kind, ids)
+    try:
         with api._library() as lib:
             known = _known(lib, kind, ids)
         todo = [item for item in items
                 if "%s:%s" % (kind, item["id"]) not in known or known["%s:%s" % (kind, item["id"])]["iv"] is None]
         if not todo:
             return known
-        client = api._client(allow_anonymous=True)   # jeden klient pro všechna hledání (jedno přihlášení)
-        client.request_timeout = 5
-        client.request_retries = 0
+        client = _search_client(timeout=5)   # jeden klient pro všechna hledání (jedno přihlášení)
 
         def paused(service):
             return _PAUSED.get(service, 0) > time.time()
@@ -377,7 +382,7 @@ def _check_available(kind, items, state):
                 try:
                     versions = _find_versions(names, year if kind == "movie" else 0,
                                               None if kind == "movie" else (1, 1), state, pages=1, client=client,
-                                              queries_max=3)
+                                              queries_max=3, strict=True)
                     count = len([version for version in versions if not version["short"]])
                 except api.ApiError:
                     _PAUSED["prehrajto"] = time.time() + CHECK_PAUSE
@@ -395,12 +400,14 @@ def _check_available(kind, items, state):
                 _remember_availability(kind, tmdb_id, count, television)
         with api._library() as lib:
             return _known(lib, kind, ids)
+    finally:
+        _CHECK_LOCK.release()
 
 
 def _missing(known, kind, item):
-    """Titul je ověřený a není na Přehraj.to ani v iVysílání."""
+    """Titul se na Přehraj.to hledal a není tam, a aplikace o něm neví ani z iVysílání."""
     entry = known.get("%s:%s" % (kind, item["id"]))
-    return bool(entry) and not entry["n"] and entry["iv"] == ""
+    return bool(entry) and not entry["n"] and not entry["iv"]
 
 
 def _collect(params, state, enough=ONLY_ENOUGH, pages_max=ONLY_PAGES):
@@ -452,7 +459,9 @@ def discover(params):
         state = api._state(lib)
     items, last, pages = _collect(params, state)
     cards = [_item_card(item, kind, state) for item in items]
-    following = {"call": "discover", "params": dict(params, page=last + 1)} if last < pages and cards else None
+    # „jen dostupné“: další stránka se nabízí, i když z těchto nevyšlo nic – aplikace pak hledá dál sama
+    following = {"call": "discover", "params": dict(params, page=last + 1)} \
+        if last < pages and (cards or not everything) else None
     if everything and kind == "movie" and cards and len(state["available"]) < len(cards):
         # u výpisu všech titulů se dostupnost neověřuje sama, jen na požádání
         cards.insert(0, api._card("Ověřit dostupnost", api._target("command", "discover_check", dict(params, page=page)),
@@ -490,7 +499,7 @@ FILTER_KEYS = ("genre", "year", "origin", "rating", "sort")
 
 
 def _default_sort(params):
-    return {"top_rated": "rating", "recent": "new"}.get(params.get("category") or "", "popular")
+    return {"top_rated": "rating"}.get(params.get("category") or "", "popular")
 
 
 def _periods():
@@ -568,9 +577,8 @@ def _list_items(params):
     filtered = any(params.get(key) for key in FILTER_KEYS)
     if category in ("popular", "top_rated") and not filtered:
         return client.browse(kind, category, page)
-    if category == "recent" and not filtered:
-        # novinky: filmy za poslední tři měsíce, u seriálů právě vysílané
-        return client.browse(kind, "recent" if kind == "movie" else "on_the_air", page)
+    if category == "recent" and not filtered and kind == "tv":
+        return client.browse(kind, "on_the_air", page)   # novinky u seriálů: právě vysílané
     date = "primary_release_date" if kind == "movie" else "first_air_date"
     filters = {"with_genres": params.get("genre") or "", "with_origin_country": params.get("origin") or "",
                "with_cast": params.get("cast") or ""}
@@ -583,6 +591,8 @@ def _list_items(params):
     if rating.isdigit():
         # hodnocení od pár hlasujících nic neříká
         filters["vote_average.gte"], filters["vote_count.gte"] = int(rating) / 10.0, 50
+    # Novinky filmů bez dalších filtrů: poslední tři měsíce podle oblíbenosti. Řazení podle data by
+    # nabídlo stovky neznámých premiér z celého světa, ze kterých není k mání skoro nic.
     sort = params.get("sort") or (_default_sort(params) if filtered else "popular")
     today = time.strftime("%Y-%m-%d")
     if sort == "rating":
@@ -703,7 +713,25 @@ def _duration_text(seconds):
     return "%d h %02d min" % divmod(minutes, 60) if minutes >= 60 else "%d min" % minutes
 
 
-def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", client=None, queries_max=4):
+def _search_client(timeout=8):
+    """Klient pro veřejné hledání na Přehraj.to. Hledat jde i bez přihlášení: když přihlášení selže
+    (špatné heslo), hledá se bez něj – jinak by každý dotaz zkoušel přihlášení znovu a hledání by
+    vypadalo jako výpadek."""
+    client = api._client(allow_anonymous=True)
+    if client.has_credentials:
+        try:
+            client.login()
+        except provider.LoginError:
+            client = provider.make_client("", "")
+        except provider.ProviderError:
+            pass   # výpadek: ohlásí ho až samo hledání
+    client.request_timeout = timeout
+    client.request_retries = 0
+    return client
+
+
+def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", client=None, queries_max=4,
+                   strict=False):
     """Verze titulu (nebo dílu) na Přehraj.to, vyčištěné a seřazené podle předvoleb.
 
     Vrací ``[{"video", "result", "short", "cam", "bad", "chosen"}]``. Hledá se více variantami názvu;
@@ -711,9 +739,7 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
     stejně jako kino kopie a verze, které se dřív nepodařilo přehrát. Stejné soubory se slučují.
     """
     if client is None:
-        client = api._client(allow_anonymous=True)
-        client.request_timeout = 8
-        client.request_retries = 0
+        client = _search_client()
     wanted = search_results.aliases(*names)
     kind = "episode" if position else "movie"
     queries = []
@@ -755,7 +781,8 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
                 found[vid] = ({"id": vid, "title": video["raw_title"], "thumb": video.get("thumb") or "",
                                "size": video.get("size") or "", "duration": video.get("duration") or 0,
                                "quality": video.get("quality") or ""}, nameparser.parse(video["raw_title"]))
-    if not found and queries and failed == len(queries):
+    # ``strict`` (ověřování dostupnosti): i jediný nepovedený dotaz znamená „nevím“, ne „není tam“
+    if not found and queries and (failed == len(queries) or (strict and failed)):
         raise api.ApiError("Hledání na Přehraj.to se nezdařilo. Zkuste to znovu.")
     versions, seen = [], set()
     for result, parsed in found.values():
@@ -953,6 +980,11 @@ def _title_page(params, kind):
     actions = [{"title": toggle["title"], "subtitle": "", "target": toggle["target"]},
                {"title": "Hledat ručně", "subtitle": "", "target": api._target("search", "search", {"q": title})},
                {"title": "Jazyk a kvalita", "subtitle": "", "target": api._target("choices", "prefs_choices", {})}]
+    if kind == "tv" and not params.get("id"):
+        # oblíbený seriál, který už v katalogu není a TMDB ho nezná: díly nejdou dohledat po řadách
+        detail["plot"] = ("Tento seriál už ve vašem katalogu není. Zkuste „Hledat ručně“.\n\n"
+                          + (detail.get("plot") or "")).strip()
+        return {"detail": detail, "actions": actions, "rows": []}, False
     if kind == "tv" and params.get("id"):
         rows, play = _series_rows(params, state)
         if play:

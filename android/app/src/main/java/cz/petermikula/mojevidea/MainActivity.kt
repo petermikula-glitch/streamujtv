@@ -35,6 +35,11 @@ class MainActivity : FragmentActivity() {
  * (akce `home`). Vedle tlačítka hledání je aktivní profil; kliknutím se přepíná.
  */
 class MainFragment : BrowseSupportFragment(), RowsHost {
+    private companion object {
+        /** Úvodní kroky už proběhly (obrazovku umí systém vytvořit znovu, třeba po připojení ovladače). */
+        var started = false
+    }
+
     private class Section(val title: String, val icon: String, val rows: JSONArray, val hero: org.json.JSONObject?)
 
     private var rail: android.widget.LinearLayout? = null
@@ -280,7 +285,11 @@ class MainFragment : BrowseSupportFragment(), RowsHost {
             if (!isAdded) return@call
             val data = result.data
             if (data == null) {
-                if (!loadedOnce) showMessage(result.error ?: "Nepodařilo se načíst obsah.")
+                if (!loadedOnce) {
+                    showMessage(result.error ?: "Nepodařilo se načíst obsah.")
+                    handler.removeCallbacks(refresh)
+                    handler.postDelayed(refresh, 5000)  // zkusit znovu samo: z prázdné obrazovky není jak
+                }
                 return@call
             }
             // dokud se stahuje, obnovovat řadu Stažené (stejná data nic nepřekreslí)
@@ -308,10 +317,11 @@ class MainFragment : BrowseSupportFragment(), RowsHost {
                 }, null)
                 // po spuštění rovnou sekce, ve které něco je (Oblíbené, jinak Rozkoukané, jinak Objevuj)
                 val start = data.optInt("start")
-                if (!loadedOnce && start in 1 until fresh.size) setSelectedPosition(start, false)
+                if (!loadedOnce && !started && start in 1 until fresh.size) setSelectedPosition(start, false)
             }
             WatchNext.sync(requireContext())  // řada „Pokračovat ve sledování“ na domovské obrazovce televize
-            if (!loadedOnce) {
+            if (!loadedOnce && !started) {
+                started = true
                 // po startu: navázat na rozpracované stahování a zeptat se na novou verzi
                 if (data.optBoolean("pending")) DownloadService.start(requireContext())
                 Updater.checkOnStart(requireActivity())
@@ -383,11 +393,17 @@ class SectionFragment : RowsSupportFragment() {
         /** Naposledy načtené karty donačítaných řad: při návratu do sekce jsou vidět hned. */
         private val remembered = HashMap<String, List<Card>>()
 
+        // Stránka sekce vzniká znovu při každém výběru v nabídce. Stav načítání je proto společný:
+        // rozpracovaný dotaz se nespouští podruhé (jen se na něj počká) a čerstvý výsledek se neptá znovu.
+        private val fetchedAt = HashMap<String, Long>()
+        private val failed = HashSet<String>()
+        private val waiting = HashMap<String, MutableList<() -> Unit>>()
+        private const val FRESH_MS = 30_000L
+
         fun create(index: Int) = SectionFragment().apply { arguments = Bundle().apply { putInt(INDEX, index) } }
     }
 
-    private val fetched = HashMap<String, List<Card>>()  // výsledky donačítaných řad (prázdný = nepovedlo se)
-    private val pending = HashSet<String>()
+    private var forced = false  // po příkazu uživatele: donačítané řady načíst znovu, i když jsou čerstvé
 
     private val rows = ArrayObjectAdapter(ClassPresenterSelector().apply {
         // úvodní panel: bez zvětšení při výběru (je přes celou šířku) a bez nadpisu řady
@@ -404,18 +420,28 @@ class SectionFragment : RowsSupportFragment() {
 
     /** Po příkazu z nabídky karty (oblíbené, stažení): obsah hostitele i donačítané řady znovu. */
     private fun changed() {
+        forced = true
         host()?.load()
         refresh(reload = true)
     }
 
     private fun fetch(key: String, call: String, params: org.json.JSONObject) {
-        if (!pending.add(key)) return
+        val done = { if (isAdded) refresh() }
+        waiting[key]?.let {
+            it.add(done)  // tentýž dotaz už běží (jiná stránka téže sekce): jen počkat na výsledek
+            return
+        }
+        waiting[key] = mutableListOf(done)
         Api.call(call, params) { result ->
-            pending.remove(key)
             val cards = Card.list(result.data?.optJSONArray("items"))
-            fetched[key] = cards
-            if (cards.isNotEmpty()) remembered[key] = cards
-            if (isAdded) refresh()
+            fetchedAt[key] = android.os.SystemClock.elapsedRealtime()
+            if (cards.isEmpty()) {
+                failed.add(key)
+            } else {
+                failed.remove(key)
+                remembered[key] = cards
+            }
+            waiting.remove(key)?.forEach { it() }
         }
     }
 
@@ -442,7 +468,9 @@ class SectionFragment : RowsSupportFragment() {
 
     fun refresh(reload: Boolean = false) {
         val list = host()?.rowsOf(requireArguments().getInt(INDEX)) ?: return
-        if (reload) fetched.clear()
+        val force = forced
+        forced = false
+        val now = android.os.SystemClock.elapsedRealtime()
         val names = ArrayList<String>()
         val items = ArrayList<List<Card>>()
         val tiles = ArrayList<Boolean>()  // mřížka velkých dlaždic
@@ -469,11 +497,13 @@ class SectionFragment : RowsSupportFragment() {
             // donačítaná řada: tvar karet je daný předem, aby se řada při načtení nepřestavovala
             val params = row.optJSONObject("params") ?: org.json.JSONObject()
             val key = "$call|$params"
-            if (key !in fetched) fetch(key, call, params)
-            val known = fetched[key]?.takeIf { it.isNotEmpty() } ?: remembered[key]
+            // načíst: poprvé, po příkazu uživatele, a při změně obsahu jen když je výsledek starší
+            val age = fetchedAt[key]?.let { now - it }
+            if (age == null || force || (reload && age > FRESH_MS)) fetch(key, call, params)
+            val known = remembered[key]
             items.add(when {
                 known != null -> known
-                key in fetched -> listOf(Card.from(org.json.JSONObject()
+                key in failed && key !in waiting -> listOf(Card.from(org.json.JSONObject()
                     .put("title", "Nepodařilo se načíst").put("subtitle", "Zkusit znovu").put("icon", "sync")
                     .put("target", org.json.JSONObject().put("type", "refresh"))))
                 else -> Card.skeletons(6)

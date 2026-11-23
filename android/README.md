@@ -142,8 +142,12 @@ U každého titulu, o kterém to aplikace neví, se jednou hledá na Přehraj.to
 a jednou v iVysílání (shoda názvu, druhu a u filmu roku), čtyři tituly souběžně. Výsledek se pamatuje
 (`avail:<druh>:<číslo>`): nalezený titul týden, nenalezený dva dny. Protože dostupných titulů bývá na
 stránce TMDB málo, projde výpis najednou až tři stránky, dokud jich nemá dvanáct, nejdéle ale asi
-dvanáct sekund; první otevření výpisu proto chvíli trvá, další jsou hned. Co ověřit nejde (služba
-neodpovídá), ve výpisu zůstane a zkusí se příště; služba, která neodpovídá, se dvě minuty nezkouší.
+dvanáct sekund; první otevření výpisu proto chvíli trvá, další jsou hned. Když dávka nepřinese nic,
+aplikace hledá na dalších stránkách sama (nejvýš pětkrát po sobě). Rozhoduje Přehraj.to: titul, který
+se tam hledal a není, se schová, pokud o něm aplikace neví z iVysílání. Titul, u kterého hledání
+selhalo (i jen zčásti), ve výpisu zůstane bez štítku a zkusí se příště; služba, která neodpovídá, se
+dvě minuty nezkouší. Hledá se i se špatně zadaným heslem (bez přihlášení). Novinky filmů jsou tituly
+posledních tří měsíců podle oblíbenosti.
 Karty mají štítek „Přehraj.to“ a/nebo „iVysílání“. Ve Filtru jde přepnout Dostupnost na „Všechny
 tituly“ – pak se nic neověřuje samo (zůstává dlaždice „Ověřit dostupnost“) a nenalezené mají štítek.
 Titul, který je v iVysílání, má na své stránce tlačítko „Přehrát v iVysílání“ (film) nebo „Díly
@@ -190,7 +194,9 @@ Když se postranní nabídka sbalí, zůstane vlevo úzká lišta ikon sekcí.
 a předvolby přehrávání. Tabulky katalogu se nemění (sdílí je doplněk pro Kodi): osobní stav patří
 vždy aktivnímu profilu a při přepnutí se uloží do `profile_<id>.json` a nahradí stavem druhého
 profilu. Katalog, stažené soubory a přihlášení jsou společné. Při víc profilech se aplikace po startu
-zeptá, kdo se dívá. Přepíná se kliknutím na profil v záhlaví hlavní obrazovky nebo dlaždicí
+zeptá, kdo se dívá. Osobní jsou i naposledy hledané výrazy. Čí stav v katalogu právě je, si katalog
+pamatuje sám (`profile_live`), takže přerušené přepnutí profily nepomíchá.
+Přepíná se kliknutím na profil v záhlaví hlavní obrazovky nebo dlaždicí
 v Nástrojích; nový profil se po výběru obrázku zeptá na jméno. Jméno se ukládá i potvrzením na
 klávesnici televize (cíl typu `input`, `Navigator.askText`).
 
@@ -266,6 +272,11 @@ na disk“. Stahuje služba v popředí (`DownloadService`), takže pokračuje i
 navázat na rozpracovaný soubor a při chybě to zkusí znovu s novou adresou. Evidenci a frontu vede
 logika v Pythonu (`downloads.json`; akce `download_*` v `app_api.py`), stažený soubor má při přehrávání
 přednost před streamem a hraje i bez internetu. Pořady z iVysílání se nestahují.
+
+Chyba jednoho videa (už není dostupné) označí jen to video. Výpadek připojení, služby nebo přihlášení
+se žádného videa netýká: fronta zůstane, jak je, a služba až deset minut čeká na připojení
+(`download_next` vrací chybu, ne další položku). Pokus, který kus souboru stáhl, se nepočítá jako
+marný. Navazuje se jen na tentýž soubor – jiná celková délka na serveru znamená stahovat znovu.
 
 Aplikace zapisuje do vlastní složky na disku (`Android/data/cz.petermikula.mojevidea/files`), k čemuž
 nepotřebuje žádné oprávnění; Android tuto složku při odinstalaci aplikace smaže. Úložiště se volí

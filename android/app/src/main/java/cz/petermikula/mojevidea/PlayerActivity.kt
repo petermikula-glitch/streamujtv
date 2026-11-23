@@ -28,6 +28,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -45,6 +46,7 @@ class PlayerActivity : FragmentActivity() {
         const val SAVE_EVERY_MS = 15_000L
         const val NEXT_COUNTDOWN = 10  // sekund, než se další díl spustí sám
         const val ASK_RESUME_AFTER_MS = 60_000L  // kratší rozkoukání se naváže bez ptaní
+        const val HEALTHY_AFTER_MS = 120_000L    // po takové době hraní se chyba bere jako nová, ne opakovaná
     }
 
     private var player: ExoPlayer? = null
@@ -61,6 +63,14 @@ class PlayerActivity : FragmentActivity() {
     private var diagnostic = ""
     private var started = false
     private var retried = false
+    private var visible = false          // obrazovka je vidět (mezi onStart a onStop)
+    private var forcedPosition = -1L     // nový pokus po chybě naváže přesně tam, kde přehrávač byl
+    private var lastStream: JSONObject? = null
+    private var subtitleUrls = emptyList<String>()
+    private var withoutSubtitles = false // titulky se nepodařilo načíst: video běží bez nich
+
+    /** Přehrávání chvíli běží bez potíží: další výpadek má zase nárok na nový pokus. */
+    private val healthy = Runnable { retried = false }
     private var choice = ""          // titul z Objevuj, ke kterému video patří (pro návrh dalšího dílu)
     private var inspected = false   // u chráněného pořadu už proběhl pokus najít adresu licence v manifestu
     private lateinit var top: View
@@ -152,6 +162,11 @@ class PlayerActivity : FragmentActivity() {
         spinner.visibility = View.VISIBLE
         Api.call(call, params) { result ->
             if (isFinishing || isDestroyed) return@call
+            if (!visible) {
+                // uživatel mezitím odešel (tlačítko Domů): nic se nespouští, jinak by video hrálo na pozadí
+                finish()
+                return@call
+            }
             val data = result.data
             if (data == null) {
                 fail(result.error ?: "Video se nepodařilo spustit.")
@@ -161,8 +176,19 @@ class PlayerActivity : FragmentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        visible = true
+    }
+
     /** Rozkoukané video: zeptat se, jestli navázat, nebo začít znovu. */
     private fun play(stream: JSONObject) {
+        val forced = forcedPosition
+        forcedPosition = -1
+        if (forced >= 0) {
+            begin(stream, forced)  // nový pokus po chybě: pozici určuje přehrávač, ne uložený stav
+            return
+        }
         val position = (stream.optDouble("position", 0.0) * 1000).toLong()
         val asks = position >= ASK_RESUME_AFTER_MS && !stream.optBoolean("live") &&
             !params.optBoolean("resume") && !params.optBoolean("fresh") && !params.optBoolean("online") &&
@@ -191,6 +217,7 @@ class PlayerActivity : FragmentActivity() {
     }
 
     private fun begin(stream: JSONObject, position: Long) {
+        lastStream = stream
         track = stream.optString("track")
         choice = stream.optString("choice").ifEmpty { params.optString("choice") }
         local = stream.optBoolean("local")  // soubor stažený na disku: cesta místo adresy
@@ -210,18 +237,22 @@ class PlayerActivity : FragmentActivity() {
 
         val subtitles = ArrayList<MediaItem.SubtitleConfiguration>()
         val list = stream.optJSONArray("subtitles")
+        val languages = stream.optJSONArray("subtitle_langs")  // jazyk každých titulků, pokud ho logika zná
+        val urls = ArrayList<String>()
         for (index in 0 until (list?.length() ?: 0)) {
             val url = list!!.optString(index)
             if (url.isEmpty()) continue
+            urls.add(url)
             val mime = if (url.substringBefore('?').endsWith(".srt", true)) MimeTypes.APPLICATION_SUBRIP else MimeTypes.TEXT_VTT
             subtitles.add(
                 MediaItem.SubtitleConfiguration.Builder(source(url))
                     .setMimeType(mime)
-                    .setLanguage("cs")
+                    .setLanguage(languages?.optString(index).orEmpty().ifEmpty { "cs" })
                     .setSelectionFlags(if (index == 0) C.SELECTION_FLAG_DEFAULT else 0)
                     .build()
             )
         }
+        subtitleUrls = urls
         val item = MediaItem.Builder().setUri(source(stream.optString("url"))).setSubtitleConfigurations(subtitles)
         if (stream.optBoolean("hls")) item.setMimeType(MimeTypes.APPLICATION_M3U8)
         if (stream.optBoolean("dash")) item.setMimeType(MimeTypes.APPLICATION_MPD)
@@ -243,6 +274,12 @@ class PlayerActivity : FragmentActivity() {
             .setEnableDecoderFallback(true)
         val exo = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
+            // zvuk si přehrávač hlídá se systémem: když začne hrát jiná aplikace, video se pozastaví
+            .setAudioAttributes(
+                androidx.media3.common.AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
+                true,
+            )
             .build()
         // zvuk a titulky: naposledy zvolené u tohoto seriálu, jinak čeština
         val remembered = stream.optJSONObject("tracks")
@@ -264,8 +301,20 @@ class PlayerActivity : FragmentActivity() {
         player = exo
         playerView.player = exo
         exo.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (player !== exo) return
+                keepAwake(exo)
+                handler.removeCallbacks(healthy)
+                if (isPlaying) handler.postDelayed(healthy, HEALTHY_AFTER_MS)
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (player === exo) keepAwake(exo)
+            }
+
             override fun onPlaybackStateChanged(state: Int) {
                 if (player !== exo) return  // přehrávač, který už byl nahrazen dalším videem
+                keepAwake(exo)
                 if (state == Player.STATE_READY) {
                     message.visibility = View.GONE
                     spinner.visibility = View.GONE
@@ -302,28 +351,47 @@ class PlayerActivity : FragmentActivity() {
                 // Uvolňovaný přehrávač umí ohlásit chybu ještě po nahrazení (např. když se uvolnění
                 // protáhne): nesmí shodit video, které už hraje místo něj.
                 if (player !== exo) return
+                val resumeAt = exo.currentPosition.coerceAtLeast(0)
+                // Nenačetly se titulky (zvláštní soubor vedle videa): kvůli nim video nepadne, pustí se bez nich.
+                val broken = generateSequence<Throwable>(error) { it.cause }.take(6)
+                    .filterIsInstance<HttpDataSource.HttpDataSourceException>().firstOrNull()?.dataSpec?.uri?.toString()
+                val stream = lastStream
+                if (!withoutSubtitles && stream != null && broken != null && broken in subtitleUrls) {
+                    withoutSubtitles = true
+                    android.widget.Toast.makeText(this@PlayerActivity, "Titulky se nepodařilo načíst, pouštím bez nich.",
+                        android.widget.Toast.LENGTH_LONG).show()
+                    val plain = JSONObject(stream.toString()).put("subtitles", org.json.JSONArray())
+                    handler.post { if (!isFinishing && !isDestroyed && visible) begin(plain, resumeAt) }
+                    return
+                }
                 if (!inspected && track.startsWith("ivys:") && error.errorCode in 6000..6999) {
                     // Chráněný pořad a přehrávač licenci nezískal: logika se podívá do manifestu sama
                     // (zná víc zápisů adresy licence) a zkusí se to ještě jednou.
                     inspected = true
                     params.put("inspect", true)
+                    forcedPosition = resumeAt
                     resolve()
                     return
                 }
                 // Zapamatovaná adresa souboru mohla vypršet: jednou ji zahodit a načíst novou.
                 if (!retried && !live && track.isNotEmpty() && !track.startsWith("ivys:")) {
                     retried = true
-                    val resumeAt = exo.currentPosition
                     Api.call("link_failed", JSONObject().put("track", track)) {
                         if (isFinishing || isDestroyed) return@call
                         if (resumeAt > 0) saveProgress(ended = false)
                         params.put("fresh", true)
+                        params.remove("restart")  // „od začátku“ platilo pro první spuštění, ne pro nový pokus
                         if (local) params.put("online", true)  // stažený soubor nejde přehrát: zkusit stream
+                        // navázat tam, kde přehrávač byl (uložený stav může být jinde, nebo žádný)
+                        forcedPosition = resumeAt
                         resolve()
                     }
                 } else {
-                    // verze, která nejde přehrát ani s novou adresou: příště se nenabídne jako první
-                    if (!live && track.isNotEmpty()) Api.send("play_failed", JSONObject().put("track", track))
+                    // Verze, která nejde přehrát ani s novou adresou: příště se nenabídne jako první.
+                    // Výpadek připojení za to nemůže – ten o souboru nic neříká.
+                    val network = error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                        error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+                    if (!live && track.isNotEmpty() && !network) Api.send("play_failed", JSONObject().put("track", track))
                     fail(describe(error))
                 }
             }
@@ -335,6 +403,12 @@ class PlayerActivity : FragmentActivity() {
         playerView.requestFocus()
         handler.removeCallbacks(saver)
         handler.postDelayed(saver, SAVE_EVERY_MS)
+    }
+
+    /** Obrazovka zůstává rozsvícená, jen když video opravdu hraje nebo se načítá – ne při pauze či chybě. */
+    private fun keepAwake(exo: ExoPlayer) {
+        playerView.keepScreenOn = exo.playWhenReady &&
+            (exo.playbackState == Player.STATE_READY || exo.playbackState == Player.STATE_BUFFERING)
     }
 
     private fun saveProgress(ended: Boolean, first: Boolean = false) {
@@ -453,6 +527,10 @@ class PlayerActivity : FragmentActivity() {
         val ended = track
         Api.call("play_next", JSONObject().put("track", ended).put("choice", choice)) { result ->
             if (isFinishing || isDestroyed || ended != track) return@call
+            if (!visible) {
+                finish()  // uživatel mezitím odešel: další díl se na pozadí nenabízí ani nespouští
+                return@call
+            }
             val next = result.data?.optJSONObject("next")
             val target = next?.let { Target.from(it.optJSONObject("target")) }
             if (next == null || target == null || target.type.isEmpty()) {
@@ -491,6 +569,7 @@ class PlayerActivity : FragmentActivity() {
             started = false
             retried = false
             inspected = false
+            withoutSubtitles = false
             resolve()
         } else {
             Navigator.open(this, target, "")
@@ -546,6 +625,8 @@ class PlayerActivity : FragmentActivity() {
 
     private fun release() {
         handler.removeCallbacks(saver)
+        handler.removeCallbacks(healthy)
+        playerView.keepScreenOn = false
         val old = player
         player = null  // nejdřív odpojit: posluchač uvolňovaného přehrávače už nic neřídí
         playerView.player = null
@@ -561,6 +642,7 @@ class PlayerActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
+        visible = false
         saveProgress(ended = false)
         WatchNext.sync(this, delayMs = 1500)  // až se uloží pozice
         if (isFinishing) release()

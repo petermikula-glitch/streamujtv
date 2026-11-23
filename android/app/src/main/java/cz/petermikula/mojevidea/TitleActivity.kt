@@ -34,6 +34,8 @@ class TitleActivity : FragmentActivity() {
     private var meta = ""
     private var csfd = ""
     private var expanded = false
+    private var rowTitles = emptyList<String>()
+    private var rowShapes = emptyList<Boolean>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,7 +85,7 @@ class TitleActivity : FragmentActivity() {
             spinner.visibility = View.GONE
             val data = result.data
             if (data == null) {
-                if (!loadedOnce) plot.text = result.error
+                if (!loadedOnce) showFailure(result.error ?: "Stránku titulu se nepodařilo načíst.")
                 return@call
             }
             val raw = data.toString()
@@ -92,6 +94,19 @@ class TitleActivity : FragmentActivity() {
             bind(data)
             loadedOnce = true
         }
+    }
+
+    /** Stránka se vůbec nenačetla: chyba musí být vidět (popis se při výběru v řadách skrývá) a jít zopakovat. */
+    private fun showFailure(text: String) {
+        expand(false)
+        plot.text = text
+        actions.removeAllViews()
+        val button = Button(ContextThemeWrapper(this, R.style.TitleButton), null, 0).apply {
+            this.text = "Zkusit znovu"
+            setOnClickListener { load() }
+        }
+        actions.addView(button)
+        button.requestFocus()
     }
 
     private fun bind(data: JSONObject) {
@@ -141,18 +156,31 @@ class TitleActivity : FragmentActivity() {
             actions.getChildAt((focused ?: 0).coerceAtMost(actions.childCount - 1))?.requestFocus()
         }
 
-        val fresh = ArrayList<ListRow>()
+        val names = ArrayList<String>()
+        val found = ArrayList<List<Card>>()
         val items = data.optJSONArray("rows")
         for (index in 0 until (items?.length() ?: 0)) {
             val row = items!!.optJSONObject(index) ?: continue
-            val found = Card.list(row.optJSONArray("items"))
-            val cards = ArrayObjectAdapter(CardPresenter(CardPresenter.posterShape(found)) { card ->
-                Navigator.menu(this, card) { load() }
-            })
-            cards.addAll(0, found)
-            fresh.add(ListRow(HeaderItem(index.toLong(), row.optString("title")), cards))
+            names.add(row.optString("title"))
+            found.add(Card.list(row.optJSONArray("items")))
         }
-        rows.setItems(fresh, null)
+        val shapes = found.map { CardPresenter.posterShape(it) }
+        if (names == rowTitles && shapes == rowShapes && rows.size() == names.size) {
+            // stejné řady (po návratu z přehrávače): vyměnit jen změněné karty, výběr zůstane na svém dílu
+            for (index in names.indices) {
+                ((rows.get(index) as ListRow).adapter as ArrayObjectAdapter).setItems(found[index], Card.DIFF)
+            }
+        } else {
+            rows.setItems(names.indices.map { index ->
+                val cards = ArrayObjectAdapter(CardPresenter(shapes[index]) { card ->
+                    Navigator.menu(this, card) { load() }
+                })
+                cards.addAll(0, found[index])
+                ListRow(HeaderItem(index.toLong(), names[index]), cards)
+            }, null)
+        }
+        rowTitles = names
+        rowShapes = shapes
     }
 
     private fun showMeta() {

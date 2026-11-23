@@ -60,6 +60,16 @@ class ListFragment : VerticalGridSupportFragment() {
     private var next: JSONObject? = null
     private var loading = false
     private var loaded = false  // už se zobrazil skutečný obsah (ne jen zástupné karty)
+    // Číslo výpisu: odpověď, která patří staršímu (jiný filtr, nové načtení), se zahodí.
+    private var generation = 0
+    private var reloadWanted = false  // obnovení, které přišlo během načítání další stránky
+    private var emptyBatches = 0  // kolik dávek po sobě nepřineslo žádný titul (výpis „jen dostupné“)
+    // Výpis z Objevuj poprvé ověřuje, co je k mání (pár sekund): ať je vidět, že se něco děje.
+    private val patience = Runnable {
+        if (isResumed && loading && !loaded) {
+            Toast.makeText(requireContext(), "Ověřuji, co je na Přehraj.to a v iVysílání…", Toast.LENGTH_LONG).show()
+        }
+    }
     private var backdrop: Backdrop? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,32 +118,38 @@ class ListFragment : VerticalGridSupportFragment() {
 
     override fun onResume() {
         super.onResume()
-        // po návratu z přehrávače se mění rozkoukanost a zhlédnutí; první stránku stačí načíst znovu
-        if (resumed && next == null && cards.size() <= 80) reload(quiet = true)
+        // po návratu z přehrávače se mění rozkoukanost a zhlédnutí; výpis se obnoví v rozsahu, v jakém
+        // je načtený (dlouhé výpisy ne – znamenalo by to řadu dotazů)
+        if (resumed && cards.size() <= 80) reload(quiet = true)
         resumed = true
     }
 
     private fun reload(quiet: Boolean = false) {
-        if (loading) return
+        if (loading) {
+            reloadWanted = true  // provede se, až doběhne rozpracované načítání
+            return
+        }
         loading = true
+        val ticket = ++generation
+        // obnovovaný výpis má mít zase tolik karet, kolik jich uživatel načetl: jinak by po akci
+        // z nabídky karty nebo po návratu z přehrávače spadl na první stránku a výběr s ním
+        val wanted = if (loaded) cards.size() else 0
         if (!loaded) {
             // místo textu „Načítám…“ obrysy karet v budoucím tvaru
             showMessage("")
             cards.setItems(Card.skeletons(if (presenter.poster) 10 else 8), null)
+            if (call == "discover" && params.optString("avail") != "all") handler.postDelayed(patience, 2500)
         }
-        // Výpis z Objevuj poprvé ověřuje, co je k mání (pár sekund): ať je vidět, že se něco děje.
-        val patience = Runnable {
-            if (isAdded && loading && !loaded) {
-                Toast.makeText(requireContext(), "Ověřuji, co je na Přehraj.to a v iVysílání…", Toast.LENGTH_LONG).show()
-            }
-        }
-        if (call == "discover" && !loaded && params.optString("avail") != "all") handler.postDelayed(patience, 2500)
         Api.call(call, params) { result ->
-            loading = false
+            if (ticket != generation) return@call
             handler.removeCallbacks(patience)
-            if (!isAdded) return@call
+            if (!isAdded) {
+                loading = false
+                return@call
+            }
             val data = result.data
             if (data == null) {
+                loading = false
                 // prázdná obrazovka s chybou musí říct, co se stalo; přes plný výpis stačí krátké upozornění
                 if (!loaded) {
                     cards.clear()
@@ -147,13 +163,40 @@ class ListFragment : VerticalGridSupportFragment() {
                 }
                 return@call
             }
-            fill(data)
+            gather(data, ArrayList(Card.list(data.optJSONArray("items"))), data.optJSONObject("next"), wanted, ticket, 1)
         }
     }
 
-    /** Zobrazí první stránku výpisu; karty jiného tvaru, než má tahle mřížka, předá mřížce nové. */
-    private fun fill(data: JSONObject) {
-        val list = Card.list(data.optJSONArray("items"))
+    /** Donačte další stránky obnovovaného výpisu, dokud nemá tolik karet jako předtím, a pak ho zobrazí. */
+    private fun gather(first: JSONObject, list: ArrayList<Card>, following: JSONObject?, wanted: Int, ticket: Int, pages: Int) {
+        if (following == null || list.size >= wanted || pages >= 12) {
+            loading = false
+            fill(first, list, following)
+            return
+        }
+        Api.call(following.optString("call"), following.optJSONObject("params") ?: JSONObject()) { result ->
+            if (ticket != generation) return@call
+            if (!isAdded) {
+                loading = false
+                return@call
+            }
+            val data = result.data
+            if (data == null) {
+                loading = false
+                fill(first, list, following)  // co se načetlo, to se zobrazí; zbytek se dotáhne posunem
+                return@call
+            }
+            list.addAll(Card.list(data.optJSONArray("items")))
+            gather(first, list, data.optJSONObject("next"), wanted, ticket, pages + 1)
+        }
+    }
+
+    /** Zobrazí výpis; karty jiného tvaru, než má tahle mřížka, předá mřížce nové. */
+    private fun fill(
+        data: JSONObject,
+        list: List<Card> = Card.list(data.optJSONArray("items")),
+        following: JSONObject? = data.optJSONObject("next"),
+    ) {
         loaded = true
         if (list.isNotEmpty() && CardPresenter.posterShape(list) != presenter.poster) {
             handler.removeCallbacks(refresh)
@@ -170,8 +213,32 @@ class ListFragment : VerticalGridSupportFragment() {
         val same = cards.size() == list.size &&
             (0 until cards.size()).all { (cards.get(it) as? Card)?.key == list[it].key }
         cards.setItems(list, if (same) Card.DIFF else null)
-        next = data.optJSONObject("next")
-        showMessage(if (cards.size() == 0) emptyText else "", emptyArt)
+        next = following
+        emptyBatches = 0
+        settle()
+    }
+
+    /** Karty, které jsou obsahem (ne jen ovládáním výpisu, jako Filtr). */
+    private fun contentCount(): Int =
+        (0 until cards.size()).count { (cards.get(it) as? Card)?.target?.type != "filter" }
+
+    /**
+     * Po každém načtení: prázdný výpis to řekne (i když v něm zůstává karta Filtr); výpis „jen dostupné“,
+     * kterému dávka nepřinesla nic, hledá dál sám – ale ne donekonečna.
+     */
+    private fun settle() {
+        if (reloadWanted) {
+            reloadWanted = false
+            reload(quiet = true)
+            return
+        }
+        val empty = contentCount() == 0
+        if (empty && next != null && emptyBatches < 5) {
+            showMessage("Hledám další tituly, které jsou k mání…")
+            loadNext()
+        } else {
+            showMessage(if (empty) emptyText else "", emptyArt)
+        }
     }
 
     private var message: TextView? = null
@@ -218,6 +285,7 @@ class ListFragment : VerticalGridSupportFragment() {
 
     override fun onPause() {
         handler.removeCallbacks(refresh)
+        handler.removeCallbacks(patience)
         super.onPause()
     }
 
@@ -270,6 +338,8 @@ class ListFragment : VerticalGridSupportFragment() {
         next = null
         loaded = false
         loading = false
+        reloadWanted = false
+        generation++  // rozpracované odpovědi starého filtru se zahodí
         reload()
     }
 
@@ -277,12 +347,21 @@ class ListFragment : VerticalGridSupportFragment() {
         val following = next ?: return
         if (loading) return
         loading = true
+        val ticket = generation
         Api.call(following.optString("call"), following.optJSONObject("params") ?: JSONObject()) { result ->
+            if (ticket != generation) return@call  // mezitím jiný filtr nebo nové načtení
             loading = false
             if (!isAdded) return@call
-            val data = result.data ?: return@call
-            cards.addAll(cards.size(), Card.list(data.optJSONArray("items")))
+            val data = result.data
+            if (data == null) {
+                if (contentCount() == 0) showMessage(emptyText, emptyArt)
+                return@call
+            }
+            val items = Card.list(data.optJSONArray("items"))
+            cards.addAll(cards.size(), items)
             next = data.optJSONObject("next")
+            emptyBatches = if (items.isEmpty()) emptyBatches + 1 else 0
+            settle()
         }
     }
 }

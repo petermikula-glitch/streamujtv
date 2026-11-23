@@ -19,7 +19,9 @@ AVATARS = (("clapper", "Klapka"), ("popcorn", "Popcorn"), ("crown", "Koruna"), (
            ("rocket", "Raketa"))
 TABLES = ("history", "watched_marks", "progress_hidden", "ivys_history", "ivys_favorites")
 KV_PREFIXES = ("choice:", "last_season:", "recent_series", "tracks:")
-SETTINGS = ("prefer_language", "prefer_quality")
+# osobní položky nastavení: předvolby, naposledy hledané a čas posledního hlídání oblíbených
+SETTINGS = ("prefer_language", "prefer_quality", "search_history", "favorites_checked")
+LIVE = "profile_live"            # čí osobní stav je právě v katalogu (zapisuje se spolu s ním)
 TRACKS_PREFIX = "tracks:"        # zvuk a titulky naposledy zvolené u seriálu nebo filmu
 _LOCK = threading.Lock()
 
@@ -42,6 +44,13 @@ def _load():
     if not profiles:
         profiles = [{"id": "p1", "name": "Hlavní profil", "avatar": AVATARS[0][0]}]
     active = data.get("active")
+    if len(profiles) > 1:
+        # Přepnutí, které se nedokončilo (pád, vypnutí): rozhoduje, čí stav v katalogu opravdu je.
+        # Jinak by se při dalším přepnutí uložil cizí stav do souboru původního profilu.
+        with api._library() as lib:
+            live = lib.get_kv(LIVE)
+        if live in [item["id"] for item in profiles]:
+            active = live
     if active not in [item["id"] for item in profiles]:
         active = profiles[0]["id"]
     return {"active": active, "profiles": profiles}
@@ -72,8 +81,9 @@ def _snapshot(lib):
             "settings": {key: settings[key] for key in SETTINGS if settings.get(key)}}
 
 
-def _restore(lib, snapshot):
-    """Nahradí osobní stav uloženým (prázdný u nového profilu)."""
+def _restore(lib, snapshot, owner):
+    """Nahradí osobní stav uloženým (prázdný u nového profilu) a ve stejném kroku si do katalogu
+    poznamená, čí stav to je."""
     for table in TABLES:
         columns = [row[1] for row in lib.conn.execute("PRAGMA table_info(%s)" % table).fetchall()]
         lib.conn.execute("DELETE FROM %s" % table)
@@ -88,14 +98,18 @@ def _restore(lib, snapshot):
     for key, value in (snapshot.get("kv") or {}).items():
         if key.startswith(KV_PREFIXES):
             lib.conn.execute("INSERT OR REPLACE INTO settings_kv (k, v) VALUES (?, ?)", (key, value))
-    lib.conn.commit()
+    # Soubory (předvolby, oblíbené) se zapisují před potvrzením změn v katalogu: když zápis selže,
+    # katalog zůstane u původního profilu a nic se nepomíchá.
+    def change(settings):
+        for key in SETTINGS:
+            settings.pop(key, None)
+        settings.update({key: value for key, value in (snapshot.get("settings") or {}).items() if key in SETTINGS})
+
+    api._change_settings(change)
     favorites = snapshot.get("favorites")
     app_discover._save_favorites(favorites if isinstance(favorites, dict) else {})
-    settings = api._settings()
-    for key in SETTINGS:
-        settings.pop(key, None)
-    settings.update({key: value for key, value in (snapshot.get("settings") or {}).items() if key in SETTINGS})
-    api._save_settings(settings)
+    lib.conn.execute("INSERT OR REPLACE INTO settings_kv (k, v) VALUES (?, ?)", (LIVE, owner))
+    lib.conn.commit()
 
 
 def current():
@@ -234,7 +248,7 @@ def profile_switch(params):
                 with open(temporary, "w", encoding="utf-8") as f:
                     json.dump(_snapshot(lib), f, ensure_ascii=False)
                 os.replace(temporary, _file(data["active"]))
-                _restore(lib, snapshot if isinstance(snapshot, dict) else {})
+                _restore(lib, snapshot if isinstance(snapshot, dict) else {}, target["id"])
             data["active"] = target["id"]
             _save(data)
         return {"message": "", "close": True, "toast": "Dívá se: %s" % target["name"]}

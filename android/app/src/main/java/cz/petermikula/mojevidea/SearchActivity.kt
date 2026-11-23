@@ -82,8 +82,12 @@ class SearchActivity : FragmentActivity() {
 
         input = findViewById(R.id.search_text)
         findViewById<ImageButton>(R.id.search_voice).setOnClickListener { listen(it) }
-        input.setOnEditorActionListener { view, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE) {
+        input.setOnEditorActionListener { view, actionId, event ->
+            // Enter z připojené klávesnice nebo z ovladače v telefonu chodí jako stisk klávesy, ne jako akce
+            val enter = actionId == EditorInfo.IME_NULL && event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER
+            if (enter && event?.action != android.view.KeyEvent.ACTION_DOWN) {
+                true  // puštění klávesy: hledání už spustil stisk
+            } else if (actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE || enter) {
                 val keyboard = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 keyboard.hideSoftInputFromWindow(view.windowToken, 0)
                 search(view.text.toString().trim())

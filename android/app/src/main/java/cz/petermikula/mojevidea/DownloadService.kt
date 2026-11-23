@@ -36,6 +36,9 @@ class DownloadService : Service() {
         private const val CHANNEL = "downloads"
         private const val NOTIFICATION = 41
         private const val ATTEMPTS = 4
+        private const val OFFLINE_WAITS = 20            // tolikrát služba počká na připojení (10 minut)
+        private const val OFFLINE_WAIT_MS = 30_000L
+        private const val PROGRESS_BYTES = 8L shl 20    // pokus, který stáhl aspoň tolik, nebyl marný
         private const val RESERVE = 64L shl 20          // místo, které má na disku zůstat volné
         private const val FAT_LIMIT = (4L shl 30) - 1   // největší soubor na FAT32
         @Volatile private var working = false
@@ -99,6 +102,7 @@ class DownloadService : Service() {
         try {
             var attempt = 0
             var last = ""
+            var waits = 0
             while (!stopping) {
                 val preferred = Api.callBlocking("settings_get").data?.optString("download_dir").orEmpty()
                 val volume = Storage.target(this, preferred)
@@ -108,9 +112,17 @@ class DownloadService : Service() {
                 )
                 val job = next.data
                 if (job == null) {
+                    // Výpadek připojení: fronta zůstává, služba chvíli počká a zkusí to znovu.
+                    if (next.offline && waits < OFFLINE_WAITS) {
+                        waits++
+                        showProgress("Čekám na připojení k internetu…", -1)
+                        Thread.sleep(OFFLINE_WAIT_MS)
+                        continue
+                    }
                     toast(next.error ?: "Stahování se nepodařilo spustit.")
                     return
                 }
+                waits = 0
                 val vid = job.optString("vid")
                 if (vid.isEmpty()) return
                 if (vid != last) {
@@ -118,6 +130,7 @@ class DownloadService : Service() {
                     last = vid
                 }
                 val title = job.optString("title")
+                val before = File(job.optString("part")).length()
                 when (val outcome = transfer(job)) {
                     is Outcome.Done -> {
                         Api.callBlocking(
@@ -134,6 +147,9 @@ class DownloadService : Service() {
                     }
                     Outcome.Paused -> return  // položka zůstává rozpracovaná; naváže se při příštím spuštění
                     is Outcome.Failed -> {
+                        // pokus, který kus souboru stáhl, se nepočítá jako marný: velký soubor na slabém
+                        // připojení se stáhne na víc navázání
+                        if (File(job.optString("part")).length() > before + PROGRESS_BYTES) attempt = 0
                         attempt++
                         Log.w(TAG, "Stahování $vid: ${outcome.message} (pokus $attempt)")
                         if (!outcome.retry || attempt >= ATTEMPTS) {
@@ -180,6 +196,16 @@ class DownloadService : Service() {
                 return Outcome.Failed("Server soubor nevydal (HTTP $code).", code in setOf(401, 403, 404, 410, 429) || code >= 500)
             }
             if (code == HttpURLConnection.HTTP_OK) existing = 0  // server pokračování neumí: od začátku
+            if (code == HttpURLConnection.HTTP_PARTIAL && existing > 0) {
+                // Navazuje se jen na tentýž soubor: jiná celková délka znamená jinou verzi (jiná kvalita,
+                // náhradní soubor) a spojením by vznikl poškozený soubor.
+                val whole = opened.getHeaderField("Content-Range")?.substringAfter('/', "")?.toLongOrNull() ?: 0L
+                val expected = job.optLong("total")
+                if (whole > 0 && expected > 0 && whole != expected) {
+                    part.delete()
+                    return Outcome.Failed("Soubor na serveru se změnil, stahuji ho znovu od začátku.", true)
+                }
+            }
             val length = opened.contentLengthLong
             val total = if (length > 0) existing + length else 0L
             if (total > FAT_LIMIT && Storage.isFat(folder)) {

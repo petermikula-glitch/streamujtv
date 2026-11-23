@@ -45,9 +45,12 @@ class Card(
     /** Totožnost karty (kam vede) – nezávisle na tom, jak je zrovna vykreslená. */
     val key: String get() = target.type + "|" + target.call + "|" + target.params + "|" + title
 
+    /** Nabídka karty jako text: změní-li se (stahování, oblíbené), karta se musí navázat znovu. */
+    private val menuKey: String get() = menu.joinToString(";") { it.title + "|" + it.target.call + "|" + it.target.params }
+
     fun sameLook(other: Card): Boolean = title == other.title && subtitle == other.subtitle &&
         image == other.image && progress == other.progress && wide == other.wide && watched == other.watched &&
-        icon == other.icon && badges == other.badges
+        icon == other.icon && badges == other.badges && menuKey == other.menuKey
 
     companion object {
         /** Při obnově výpisu se překreslí jen změněné karty a výběr zůstane na místě. */
