@@ -366,10 +366,13 @@ def _summary(versions):
 def _card_fields(item):
     """Co si seznam dostupných titulů pamatuje o titulu, aby z něj šla postavit karta bez dotazu na TMDB."""
     date = item.get("release_date") or item.get("first_air_date") or ""
-    return {"t": item.get("title") or item.get("name") or "",
-            "o": item.get("original_title") or item.get("original_name") or "",
-            "y": int(date[:4]) if date[:4].isdigit() else 0, "rd": date[:10],
-            "p": item.get("poster_path") or "", "v": int(round((item.get("vote_average") or 0) * 10))}
+    fields = {"t": item.get("title") or item.get("name") or "",
+              "o": item.get("original_title") or item.get("original_name") or "",
+              "y": int(date[:4]) if date[:4].isdigit() else 0, "rd": date[:10],
+              "p": item.get("poster_path") or "", "v": int(round((item.get("vote_average") or 0) * 10))}
+    if item.get("_fresh"):
+        fields["f"] = int(time.time())   # titul z nabídky samotného Přehraj.to: počítá se jako nově přidaný
+    return fields
 
 
 def _remember_availability(kind, tmdb_id, count, television=None, year=0, extra=None):
@@ -396,6 +399,14 @@ def _remember_availability(kind, tmdb_id, count, television=None, year=0, extra=
         entry.update(extra or {})
         if not count:
             entry.pop("f", None)
+        elif old.get("n"):
+            # už tam byl: „odkdy“ se nemění (ani když ho mezitím nabídlo samo Přehraj.to)
+            if "f" in old:
+                entry["f"] = old["f"]
+            else:
+                entry.pop("f", None)
+        elif "f" in (extra or {}):
+            pass
         elif not old.get("n"):
             released = entry.get("rd") or ""
             try:

@@ -2924,3 +2924,44 @@ def test_playback_puts_background_checks_on_hold(api):
     discover._VERIFY["hold"] = 0
     api("progress_save", track="1:x:0000000000000001", position=100, total=100, ended=True)
     assert discover._VERIFY["hold"] == 0                                      # konec přehrávání už nic neodkládá
+
+
+def test_titles_the_site_itself_offers_join_the_list(api, monkeypatch):
+    # Co nabízí samo Přehraj.to (úvodní stránka, výpisy z ní), se přiřadí k titulům a ověří běžnou cestou.
+    index, discover = app_api.app_index, app_api.app_discover
+    api("settings_set", tmdb_key="k" * 32)
+    monkeypatch.setattr(index, "GAP", 0)
+    monkeypatch.setattr(discover, "_ivys_match", lambda kind, names, year: "")
+    offered = [_web(71, "Duna 2021 CZ dabing 1080p", 9000, "9 GB", "HD"), _web(72, "Duna.2021.EN.2160p", 9000, "20 GB", "HD"),
+               _web(73, "Archa S01E02 CZ", 2700), _web(74, "Neznamy soubor bez roku", 5000),
+               _web(75, "Jiny film 1990 CZ", 5000), _web(76, "Duna 2021 CZ trailer", 120)]
+    monkeypatch.setattr(app_api.provider, "offered", lambda client, max_pages=3: (
+        offered, [("Úvodní stránka", "https://prehraj.to/", 4), ("Nejnovější", "https://prehraj.to/nove", 2)]))
+    results = {"/search/movie": {"results": [
+        {"id": 500, "title": "Duna", "original_title": "Dune", "release_date": "2021-09-15", "poster_path": "/d.jpg"},
+        {"id": 501, "title": "Duna", "original_title": "Dune", "release_date": "1984-12-14"}]},
+        "/search/tv": {"results": [{"id": 77, "name": "Archa", "first_air_date": "1996-01-01"}]}}
+    calls = _fake_tmdb(monkeypatch, results)
+    asked = _catalogue_search(monkeypatch, {"Duna 2021": offered[:2], "Archa": [offered[2]]})
+    report = index.harvest()
+    assert (report["files"], report["titles"], report["matched"]) == (6, 4, 2) and "error" not in report
+    # „Jiny film 1990“ se k Duně (1984/2021) nepřiřadí: název nesedí; soubor bez roku se nepřiřazuje vůbec
+    assert {params.get("query") for path, params in calls if path == "/search/movie"} == {"Duna", "Jiny film"}
+    with app_api._library() as lib:
+        known = discover._known(lib, "movie", [500, 501])
+    assert known == {"movie:500": {"n": 2, "iv": "", "d": "cz", "q": 2160}}
+    fresh = api("discover_fresh")["items"]                                   # nabídka webu = nově na Přehraj.to
+    assert sorted(_titles(fresh)) == ["Archa", "Duna"] and len(asked) >= 2
+    duna = next(card for card in fresh if card["title"] == "Duna")
+    assert duna["badges"] == ["Přehraj.to", "CZ", "4K"] and duna["target"]["params"]["id"] == 500
+    assert index.harvest() is None                                           # hned znovu se web nečte
+    line = next(line for line in api("diagnostics")["lines"] if line["label"] == "Nabídka Přehraj.to")
+    assert "souborů 6, titulů 4, přiřazeno 2; stránky: Úvodní stránka (4), Nejnovější (2)" in line["value"]
+
+    def broken(client, max_pages=3):
+        raise app_api.provider.ProviderError("HTTP 503")
+
+    monkeypatch.setattr(app_api.provider, "offered", broken)                 # výpadek: jen zpráva, nic se nerozbije
+    assert index.harvest(force=True)["error"] == "HTTP 503"
+    assert "nepodařilo se: HTTP 503" in index.harvest_text()
+    assert sorted(_titles(api("discover_fresh")["items"])) == ["Archa", "Duna"]

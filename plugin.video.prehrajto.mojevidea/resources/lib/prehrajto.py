@@ -259,6 +259,45 @@ def parse_video_list(page):
     return items
 
 
+# Slova, podle kterých se mezi odkazy úvodní stránky poznají výpisy, které web sám nabízí
+# (nejnovější, nejsledovanější, populární, doporučené…); porovnává se bez diakritiky.
+_OFFER_WORDS = ("nov", "nejsled", "nejobl", "nejlep", "popul", "doporu", "trend", "top")
+OFFER_PAGES = 3   # nejvýš tolik takových výpisů se projde
+
+
+def _plain(text):
+    """Malými písmeny a bez diakritiky – pro hrubé porovnání slov."""
+    table = str.maketrans("áäčďéěíľĺňóôřŕšťúůýž", "aacdeeillnoorrstuuyz")
+    return (text or "").lower().translate(table)
+
+
+def parse_offer_links(page, current_url):
+    """Odkazy na výpisy, které web sám nabízí: ``[(text odkazu, adresa)]``.
+
+    Bere jen odkazy na tentýž web, které nevedou na video, na účet ani na hledání, a jejichž text
+    nebo adresa obsahuje některé ze slov ``_OFFER_WORDS``. Podobu úvodní stránky neznáme předem,
+    proto se nic nepředpokládá: když takové odkazy nejsou, vrátí prázdný seznam."""
+    out, seen = [], set()
+    for m in re.finditer(r"<a\b([^>]*)>(.*?)</a>", strip_comments(page), re.S):
+        href = _attrs(m.group(1)).get("href", "")
+        if not href or href.startswith("#"):
+            continue
+        absolute = urllib.parse.urljoin(current_url, html.unescape(href))
+        parts = urllib.parse.urlsplit(absolute)
+        if parts.scheme != "https" or (parts.hostname or "").lower() not in ("prehraj.to", "www.prehraj.to"):
+            continue
+        first = parts.path.strip("/").split("/")[0].lower()
+        if not first or first in _RESERVED or PAGE_URL_RE.match(parts.path):
+            continue
+        text = _text(m.group(2))
+        probe = _plain(text + " " + parts.path)
+        address = urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
+        if any(word in probe for word in _OFFER_WORDS) and address not in seen:
+            seen.add(address)
+            out.append((text[:60] or first, address))
+    return out
+
+
 def parse_pagination(page, current_url):
     """Další stránky výpisu: ``?page=2``, ``?videoListing-page=2``, ``/nahrana-videa/2``."""
     section = urllib.parse.urlsplit(current_url).path.rstrip("/").split("/")[-1] or "profil"
@@ -790,6 +829,35 @@ class PrehrajtoClient(object):
                 next_page = candidate
                 break
         return parse_video_list(body), next_page
+
+    def offered(self, max_pages=OFFER_PAGES):
+        """Co web sám nabízí: videa z úvodní stránky a z výpisů, na které odkazuje (nejnovější,
+        nejsledovanější…). Vrací ``(videa, [(název stránky, adresa, počet videí | -1 při chybě)])``.
+
+        Čte jen to, co web ukáže přihlášenému uživateli (nebo návštěvníkovi), stejným způsobem jako
+        výsledky hledání; nic se neodhaduje ani neobchází."""
+        if self.has_credentials:
+            try:
+                self.login()
+            except PrehrajtoError:
+                pass   # bez přihlášení web ukáže, co ukáže návštěvníkovi
+        page, final = self._get("/")
+        videos = parse_video_list(page)
+        report = [("Úvodní stránka", final, len(videos))]
+        seen = {video["id"].rsplit(":", 1)[-1] for video in videos}
+        for text, url in parse_offer_links(page, final)[:max_pages]:
+            try:
+                body, _final = self._get(url)
+            except PrehrajtoError:
+                report.append((text, url, -1))
+                continue
+            found = parse_video_list(body)
+            report.append((text, url, len(found)))
+            for video in found:
+                if video["id"].rsplit(":", 1)[-1] not in seen:
+                    seen.add(video["id"].rsplit(":", 1)[-1])
+                    videos.append(video)
+        return videos, report
 
     def my_videos(self, progress=None, known=None):
         self.login()

@@ -261,6 +261,12 @@ si pamatuje (`index:state`), celý plán opakuje nejdřív po `CYCLE_EVERY`. Vý
 a nejlepší známé rozlišení), údaje pro kartu a čas `f`, odkdy je titul na Přehraj.to: podle něj je řada
 a výpis „Nově na Přehraj.to“ (`discover_fresh`; titul, který tam dřív nebyl a přibyl, nebo čerstvá novinka).
 Karty mají štítky CZ/SK (dabing) a 4K, filtr výpisu umí „jen s dabingem“. Stav je v Diagnostice.
+Vedle seznamů TMDB se nejvýš jednou za `HARVEST_EVERY` čte i to, co nabízí samo Přehraj.to (`harvest`;
+`PrehrajtoClient.offered`): videa z úvodní stránky a z výpisů, na které odkazuje (odkazy se slovy jako
+nejnovější, nejsledovanější, top…). Názvy souborů se rozeberou, přiřadí k titulům TMDB jen při jisté shodě
+(stejný název a u filmu i rok, `_match`) a tituly se ověří běžnou cestou – dostanou se tak do výpisů i do
+řady „Nově na Přehraj.to“. Podobu těch stránek se nepodařilo ověřit předem (web mimo ČR soubory nevrací):
+když na nich videa nejsou, nestane se nic a řádek „Nabídka Přehraj.to“ v Diagnostice řekne, co web nabídl.
 
 **Hodnocení a plakáty** se doplňují samy (`_auto_enrich`, volá se z `quick_sync` po otevření aplikace, i bez
 přihlášení k Přehraj.to): nové tituly hned, ty, u kterých doplnění selhalo, znovu po šesti hodinách

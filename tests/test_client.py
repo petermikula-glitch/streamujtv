@@ -324,3 +324,22 @@ def test_listing_that_repeats_a_page_is_not_complete():
     videos = client.fetch_listing(prehrajto.UPLOADS_PATH, delay=0)
     assert videos and client.listing_complete is False
     assert prehrajto.MAX_LISTING_PAGES >= 1000
+
+
+def test_reads_what_the_site_itself_offers():
+    home = '''<html><nav><a href="/profil">Profil</a> <a href="/hledej/x">Hledat</a>
+        <a href="/nejnovejsi-videa">Nejnovější</a> <a href="https://prehraj.to/top/tyden?x=1#y">TOP týdne</a>
+        <a href="/podminky">Podmínky</a> <a href="https://jinde.cz/nove">Nové jinde</a>
+        <a href="/kontakt">Kontakt</a> <a href="/nejnovejsi-videa">Nejnovější znovu</a></nav>
+        <a href="/duna-2021-cz-dabing/00000000000000a1" title="Duna 2021 CZ dabing">Duna</a></html>'''
+    newest = '''<a href="/f1-2025-cz/00000000000000b2" title="F1 2025 CZ">F1</a>
+        <a href="/duna-2021-cz-dabing/00000000000000a1" title="Duna 2021 CZ dabing">Duna</a>'''
+    assert prehrajto.parse_offer_links(home, "https://prehraj.to/") == [
+        ("Nejnovější", "https://prehraj.to/nejnovejsi-videa"), ("TOP týdne", "https://prehraj.to/top/tyden?x=1")]
+    assert prehrajto.parse_offer_links("<html>nic</html>", "https://prehraj.to/") == []
+    client = Fake({"/nejnovejsi-videa": (newest, None, "", 200), "/top/tyden": ("<p>nic</p>", None, "", 200),
+                   "https://prehraj.to/": (home, None, "", 200)})     # (vše ostatní: úvodní stránka)
+    videos, report = provider.offered(client)
+    assert [video["title"] for video in videos] == ["Duna 2021 CZ dabing", "F1 2025 CZ"]   # stejné video jen jednou
+    assert [(name, count) for name, _url, count in report] == [
+        ("Úvodní stránka", 1), ("Nejnovější", 2), ("TOP týdne", 0)]                        # stránka bez videí nevadí

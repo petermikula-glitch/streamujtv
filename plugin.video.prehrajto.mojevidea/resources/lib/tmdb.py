@@ -244,6 +244,16 @@ class Tmdb(object):
                         "year": int(date[:4]) if date[:4].isdigit() else 0})
         return out
 
+    def candidates(self, title, year=0, want_series=False):
+        """Tituly, které TMDB najde pod daným názvem, tak jak je vrací (stejný tvar jako položky
+        seznamů): pro přiřazení názvu souboru k titulu, o kterém rozhodne volající."""
+        kind = "tv" if want_series else "movie"
+        params = {"query": title, "include_adult": "false"}
+        if year:
+            params["first_air_date_year" if want_series else "year"] = year
+        results = self._get("/search/" + kind, **params).get("results") or []
+        return [item for item in results[:10] if isinstance(item, dict) and item.get("id")]
+
     def find(self, title, year=0, want_series=False):
         kind = "tv" if want_series else "movie"
         params = {"query": title, "include_adult": "false"}

@@ -2818,6 +2818,7 @@ def diagnostics(params):
     prefs = _prefs(settings)
     add("Předvolby", "%s, %s" % (dict(LANGUAGE_CHOICES)[prefs["language"]], dict(QUALITY_CHOICES)[prefs["quality"]]))
     add("Seznam dostupných titulů", app_index.summary_text())
+    add("Nabídka Přehraj.to", app_index.harvest_text())
     errors = ["%s  %s: %s" % (time.strftime("%d.%m. %H:%M", time.localtime(entry.get("time") or 0)),
                               entry.get("action") or "", entry.get("text") or "") for entry in _errors()]
     # zkušební předání oficiální aplikaci ČT: obrazovka podle něj zjistí, co aplikace v zařízení přijímá

@@ -9,16 +9,26 @@ Výpis, který už je projitý, se pak ukáže hned; a protože se prochází zn
 samy i tituly, které se na Přehraj.to objevily nově (řada „Nově na Přehraj.to“).
 
 Prochází se jen, dokud aplikace běží, nikdy během přehrávání ani když na výsledek hledání někdo čeká.
+
+Vedle seznamů TMDB se čte i to, co nabízí samo Přehraj.to (``harvest``): videa z jeho úvodní stránky
+a z výpisů, na které odkazuje. Tak se do seznamu dostanou i tituly, které v žebříčcích TMDB nejsou.
 """
 
 import json
 import threading
 import time
 
+import nameparser
+import provider
+import search_results
+
 import app_api as api
 import app_discover as discover
 from tmdb import TmdbError
 
+HARVEST_KEY = "index:harvest"    # co naposledy nabídlo samo Přehraj.to (zpráva pro Diagnostiku)
+HARVEST_EVERY = 6 * 3600         # nabídka Přehraj.to se čte nejvýš jednou za tuto dobu
+HARVEST_TITLES = 40              # tolik titulů z ní se nejvýš zkusí přiřadit a ověřit
 STATE_KEY = "index:state"        # kde se v plánu skončilo a kolik se dnes ověřilo
 CYCLE_EVERY = 20 * 3600          # celý plán se prochází znovu nejdřív po této době
 DAILY_LIMIT = 1500               # tolik titulů nejvýš se za den ověří na pozadí
@@ -139,10 +149,105 @@ def step(limit=None):
             "checked": checked, "failed": failed}
 
 
+def _match(tmdb, group):
+    """Titul TMDB, který odpovídá názvu souboru – jen při jisté shodě: stejný název (český nebo
+    původní) a u filmu i rok (soubor ho musí uvádět, nejvýš o rok jinak). Jinak ``None``: raději
+    titul vynechat než přiřadit cizí."""
+    series = group["kind"] == "tv"
+    if not series and not group["year"]:
+        return None
+    target = search_results.normalize(group["title"])
+    for item in tmdb.candidates(group["title"], group["year"], want_series=series):
+        names = {search_results.normalize(item.get(name) or "")
+                 for name in ("title", "name", "original_title", "original_name")}
+        date = item.get("release_date") or item.get("first_air_date") or ""
+        year = int(date[:4]) if date[:4].isdigit() else 0
+        if target in names and (series or abs(year - group["year"]) <= 1):
+            return item
+    return None
+
+
+def harvest(force=False):
+    """Zařadí do seznamu to, co nabízí samo Přehraj.to (úvodní stránka a výpisy, na které odkazuje).
+
+    Názvy souborů se rozeberou (``nameparser``), přiřadí k titulům TMDB (``_match``) a tituly se
+    ověří běžnou cestou – tím se dostanou do výpisů a do řady „Nově na Přehraj.to“. Podobu stránek
+    neznáme předem: když na nich videa nejsou nebo je nejde přiřadit, nestane se nic a zpráva
+    v Diagnostice řekne, co web nabídl. Vrací zprávu, nebo ``None``, když ještě není čas."""
+    with api._library() as lib:
+        try:
+            last = json.loads(lib.get_kv(HARVEST_KEY) or "{}")
+        except ValueError:
+            last = {}
+        shared = api._state(lib)
+    now = time.time()
+    if not force and now - float((last or {}).get("ts") or 0) < HARVEST_EVERY:
+        return None
+    report = {"ts": int(now), "files": 0, "titles": 0, "matched": 0, "pages": []}
+    try:
+        videos, pages = provider.offered(discover._search_client())
+        report["pages"] = [[name, count] for name, _url, count in pages]
+        report["files"] = len(videos)
+        groups = {}
+        for video in videos:
+            raw = video.get("title") or ""
+            parsed = nameparser.parse(raw)
+            if not parsed["title"] or api.CAM_RE.search(raw) or search_results.is_preview(raw, (parsed["title"],)):
+                continue
+            kind = "tv" if parsed["kind"] == "episode" else "movie"
+            key = (kind, search_results.normalize(parsed["title"]), parsed["year"] if kind == "movie" else 0)
+            groups.setdefault(key, {"kind": kind, "title": parsed["title"], "year": key[2]})
+        report["titles"] = len(groups)
+        tmdb = discover._tmdb()
+        matched = {"movie": [], "tv": []}
+        for group in list(groups.values())[:HARVEST_TITLES]:
+            item = _match(tmdb, group)
+            if item and item["id"] not in [known["id"] for known in matched[group["kind"]]]:
+                matched[group["kind"]].append(dict(item, _fresh=True))
+        report["matched"] = len(matched["movie"]) + len(matched["tv"])
+        for kind, items in matched.items():
+            with api._library() as lib:
+                known = discover._known(lib, kind, [item["id"] for item in items])
+            todo = [item for item in items if _wanted(known, kind, item)]
+            for start in range(0, len(todo), CHUNK):
+                if _CRAWL["stop"]:
+                    break
+                discover._check_available(kind, todo[start:start + CHUNK], shared)
+                if start + CHUNK < len(todo):
+                    time.sleep(GAP)
+    except (provider.ProviderError, TmdbError, api.ApiError) as error:
+        report["error"] = str(error)[:200]
+    with api._library() as lib:
+        lib.set_kv(HARVEST_KEY, json.dumps(report))
+    return report
+
+
+def harvest_text():
+    """Co naposledy nabídlo samo Přehraj.to – řádek do Diagnostiky."""
+    with api._library() as lib:
+        try:
+            report = json.loads(lib.get_kv(HARVEST_KEY) or "{}")
+        except ValueError:
+            report = {}
+    if not report:
+        return "zatím se nečetla"
+    when = time.strftime("%d.%m. %H:%M", time.localtime(report.get("ts") or 0))
+    if report.get("error"):
+        return "%s – nepodařilo se: %s" % (when, report["error"])
+    pages = ", ".join("%s (%s)" % (name, count if count >= 0 else "chyba") for name, count in report.get("pages") or [])
+    return "%s – souborů %d, titulů %d, přiřazeno %d; stránky: %s" % (
+        when, report.get("files") or 0, report.get("titles") or 0, report.get("matched") or 0, pages or "žádné")
+
+
 def _loop():
     failures = 0
     try:
         time.sleep(START_DELAY)            # start aplikace má přednost: nejdřív ať se načte, co je na obrazovce
+        try:
+            if not busy():
+                harvest()                  # nejdřív to, co nabízí samo Přehraj.to
+        except Exception as error:         # neznámá podoba stránek nesmí zastavit zbytek
+            api._remember_error("nabídka Přehraj.to", error)
         while not _CRAWL["stop"]:
             if busy():
                 time.sleep(2)
