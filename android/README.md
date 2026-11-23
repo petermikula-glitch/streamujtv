@@ -1,4 +1,7 @@
-# Moje videa – aplikace pro Android TV
+# Promítárna – aplikace pro Android TV
+
+Aplikace se dříve jmenovala „Moje videa“. Vnitřní označení (`cz.petermikula.mojevidea`) a název
+instalačního souboru (`MojeVidea-<verze>.apk`) zůstávají, aby aktualizace navazovaly.
 
 Samostatná aplikace pro Android TV, která dělá totéž co doplněk pro Kodi: katalog videí
 z vašeho účtu Přehraj.to a sekce iVysílání České televize. Kodi k ní není potřeba.
@@ -93,8 +96,8 @@ obrysová ikona `ic_tile_<název>`. Ze zápisu `ikona:barva` (např. `folder:mov
 barevné odstíny kategorií tento vzhled nemá.
 
 Zatím jsou v aplikaci jen prozatímní malby (`movies`, `series`, `discover_new`, `discover_popular`,
-`discover_top`, `discover_year`), prozatímní logo a pozadí; ostatní dlaždice mají obrysovou ikonu,
-dokud nedorazí úplná sada maleb.
+`discover_top`, `discover_year`), prozatímní logo, banner, ikona aplikace a pozadí; ostatní dlaždice
+mají obrysovou ikonu, dokud nedorazí úplná sada maleb.
 
 - Ilustrace mají: `live`, `series`, `movies`, `docs`, `news`, `sport`, `kids`, `fun`, `past`,
   `culture`, `advice`, `nature`, `society`, `spirit`, `archive`; dlaždice Objevuj `discover_new`,
