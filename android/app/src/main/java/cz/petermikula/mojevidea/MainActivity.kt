@@ -386,7 +386,7 @@ class MainFragment : BrowseSupportFragment(), RowsHost {
                     Navigator.open(activity, Target.from(items[0].optJSONObject("target")), items[0].optString("title")) { load() }
                 }
                 .setNegativeButton("Později", null)
-                .show()
+                .showStyled()
             load()  // karta v Oblíbených dostane štítek „Nově“
         }
     }

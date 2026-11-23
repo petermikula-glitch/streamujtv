@@ -62,7 +62,7 @@ object Updater {
                     download(activity, data.optString("url"), data.optString("sha256"))
                 }
                 .setNegativeButton("Později", null)
-                .show()
+                .showStyled()
         }
     }
 
@@ -87,6 +87,7 @@ object Updater {
             .setCancelable(false)
             .create()
         dialog.show()
+        Dialogs.polish(dialog)
         val context = activity.applicationContext
         Thread({
             val file = File(context.cacheDir, "update.apk")
@@ -113,7 +114,7 @@ object Updater {
                         .setTitle("Aktualizace se nezdařila")
                         .setMessage(error)
                         .setPositiveButton("OK", null)
-                        .show()
+                        .showStyled()
                 }
             }
         }, "update").start()

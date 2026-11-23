@@ -160,7 +160,7 @@ class PreferencesStep : WelcomeStep() {
         val names = (0 until options.length()).map { options.optJSONObject(it)?.optString("title").orEmpty() }
         android.app.AlertDialog.Builder(requireContext())
             .setTitle(title)
-            .setItems(names.toTypedArray()) { _, which ->
+            .setAdapter(Dialogs.items(requireContext(), names)) { _, which ->
                 val value = options.optJSONObject(which)?.optString("id").orEmpty()
                 Api.call("settings_set", JSONObject().put(key, value)) { result ->
                     if (!isAdded) return@call
@@ -168,7 +168,7 @@ class PreferencesStep : WelcomeStep() {
                     show(id, list, key)
                 }
             }
-            .show()
+            .showStyled()
     }
 
     override fun onGuidedActionClicked(action: GuidedAction) {

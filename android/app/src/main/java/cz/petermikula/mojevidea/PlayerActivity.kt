@@ -237,12 +237,12 @@ class PlayerActivity : FragmentActivity() {
         var chosen = false
         AlertDialog.Builder(this)
             .setTitle(stream.optString("title"))
-            .setItems(arrayOf("Pokračovat od ${clockText(position)}", "Přehrát od začátku")) { _, which ->
+            .setAdapter(Dialogs.items(this, listOf("Pokračovat od ${clockText(position)}", "Přehrát od začátku"))) { _, which ->
                 chosen = true
                 begin(stream, if (which == 0) position else 0)
             }
             .setOnDismissListener { if (!chosen && !isFinishing) finish() }  // Zpět: nic se nepřehraje
-            .show()
+            .showStyled()
     }
 
     private fun clockText(ms: Long): String {
@@ -501,7 +501,7 @@ class PlayerActivity : FragmentActivity() {
         AlertDialog.Builder(this)
             .setTitle(if (text) "Titulky" else "Zvuková stopa")
             .apply { if (text) setNeutralButton("Velikost a pozadí") { _, _ -> chooseSubtitleStyle() } }
-            .setSingleChoiceItems(names.toTypedArray(), current) { dialog, which ->
+            .setSingleChoiceItems(Dialogs.choices(this, names), current) { dialog, which ->
                 val builder = exo.trackSelectionParameters.buildUpon()
                 if (text && which == 0) {
                     builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
@@ -515,7 +515,7 @@ class PlayerActivity : FragmentActivity() {
                 exo.trackSelectionParameters = builder.build()
                 dialog.dismiss()
             }
-            .show()
+            .showStyled()
     }
 
     /** Vzhled titulků podle profilu: velikost jako násobek výchozí, pozadí černé, poloprůhledné, nebo jen obrys. */
@@ -588,6 +588,7 @@ class PlayerActivity : FragmentActivity() {
         dialog.window?.setGravity(android.view.Gravity.TOP)
         dialog.window?.setDimAmount(0f)
         dialog.show()
+        Dialogs.polish(dialog)
         sizeButton.requestFocus()
     }
 

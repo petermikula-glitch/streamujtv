@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Zvýraznění vybrané položky nabídky: rumělkový pruh vlevo a tónovaný podklad. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="#33BF3327" />
+        </shape>
+    </item>
+    <item android:gravity="start" android:width="5dp">
+        <shape>
+            <solid android:color="@color/accent" />
+        </shape>
+    </item>
+</layer-list>

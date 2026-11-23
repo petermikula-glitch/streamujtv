@@ -24,10 +24,10 @@ object Navigator {
         if (card.menu.isEmpty() || activity.isFinishing || activity.isDestroyed) return
         AlertDialog.Builder(activity)
             .setTitle(card.title)
-            .setItems(card.menu.map { it.title }.toTypedArray()) { _, which ->
+            .setAdapter(Dialogs.items(activity, card.menu.map { it.title })) { _, which ->
                 open(activity, card.menu[which].target, card.title, onChanged)
             }
-            .show()
+            .showStyled()
     }
 
     fun open(activity: FragmentActivity, target: Target, title: String, onChanged: () -> Unit = {}) {
@@ -106,7 +106,7 @@ object Navigator {
                 .setMessage("${confirm.optString("text")}\n\n$space")
                 .setPositiveButton("Stáhnout") { _, _ -> proceed() }
                 .setNegativeButton("Zrušit", null)
-                .show()
+                .showStyled()
         }
     }
 
@@ -126,12 +126,12 @@ object Navigator {
             val groups = (0 until list.length()).mapNotNull { list.optJSONObject(it) }
             AlertDialog.Builder(activity)
                 .setTitle(data.optString("title"))
-                .setItems(groups.map { "${it.optString("title")}: ${it.optString("value")}" }.toTypedArray()) { _, which ->
-                    val found = groups[which].optJSONArray("options") ?: return@setItems
+                .setAdapter(Dialogs.items(activity, groups.map { "${it.optString("title")}: ${it.optString("value")}" })) { _, which ->
+                    val found = groups[which].optJSONArray("options") ?: return@setAdapter
                     val options = (0 until found.length()).mapNotNull { found.optJSONObject(it) }
                     AlertDialog.Builder(activity)
                         .setTitle(groups[which].optString("title"))
-                        .setSingleChoiceItems(options.map { it.optString("title") }.toTypedArray(),
+                        .setSingleChoiceItems(Dialogs.choices(activity, options.map { it.optString("title") }),
                             options.indexOfFirst { it.optBoolean("current") }) { dialog, chosen ->
                             dialog.dismiss()
                             val params = options[chosen].optJSONObject("params") ?: return@setSingleChoiceItems
@@ -141,9 +141,9 @@ object Navigator {
                                 onChanged()
                             }
                         }
-                        .show()
+                        .showStyled()
                 }
-                .show()
+                .showStyled()
         }
     }
 
@@ -160,6 +160,9 @@ object Navigator {
             hint = target.params.optString("value").ifEmpty { target.params.optString("hint") }
             setSingleLine()
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+            // barvy napevno: systémové se na některých televizích na světlém okně ztrácejí
+            setTextColor(androidx.core.content.ContextCompat.getColor(activity, R.color.text_primary))
+            setHintTextColor(androidx.core.content.ContextCompat.getColor(activity, R.color.text_secondary))
         }
         var saved = false
         val save = {
@@ -188,6 +191,7 @@ object Navigator {
             }
         }
         dialog.show()
+        Dialogs.polish(dialog)
     }
 
     /** Dlouhá operace (synchronizace, metadata): okno s průběhem, na konci výsledek. */
@@ -199,6 +203,7 @@ object Navigator {
             .setCancelable(false)
             .create()
         dialog.show()
+        Dialogs.polish(dialog)
         val handler = Handler(Looper.getMainLooper())
         var finished = false
         val poll = object : Runnable {
@@ -244,7 +249,7 @@ object Navigator {
                     .setMessage(message)
                     .setPositiveButton("OK", null)
                     .setOnDismissListener { finished() }
-                    .show()
+                    .showStyled()
             } else {
                 finished()
             }

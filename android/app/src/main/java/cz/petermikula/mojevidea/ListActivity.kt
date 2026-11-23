@@ -339,10 +339,10 @@ class ListFragment : VerticalGridSupportFragment() {
                 (if (reset != null) listOf("Zrušit filtry") else emptyList())
             android.app.AlertDialog.Builder(requireContext())
                 .setTitle(data.optString("title").ifEmpty { "Filtr" })
-                .setItems(names.toTypedArray()) { _, which ->
-                    if (which >= groups.size) applyFilter(reset ?: return@setItems) else chooseFilter(groups[which])
+                .setAdapter(Dialogs.items(requireContext(), names)) { _, which ->
+                    if (which >= groups.size) applyFilter(reset ?: return@setAdapter) else chooseFilter(groups[which])
                 }
-                .show()
+                .showStyled()
         }
     }
 
@@ -351,12 +351,12 @@ class ListFragment : VerticalGridSupportFragment() {
         val options = (0 until list.length()).mapNotNull { list.optJSONObject(it) }
         android.app.AlertDialog.Builder(requireContext())
             .setTitle(group.optString("title"))
-            .setSingleChoiceItems(options.map { it.optString("title") }.toTypedArray(),
+            .setSingleChoiceItems(Dialogs.choices(requireContext(), options.map { it.optString("title") }),
                 options.indexOfFirst { it.optBoolean("current") }) { dialog, which ->
                 dialog.dismiss()
                 options[which].optJSONObject("params")?.let { applyFilter(it) }
             }
-            .show()
+            .showStyled()
     }
 
     /** Stejný výpis s jinými parametry, od začátku. */

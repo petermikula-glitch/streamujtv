@@ -110,7 +110,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
         val names = (0 until options.length()).map { options.optJSONObject(it)?.optString("title").orEmpty() }
         android.app.AlertDialog.Builder(requireContext())
             .setTitle(title)
-            .setItems(names.toTypedArray()) { _, which ->
+            .setAdapter(Dialogs.items(requireContext(), names)) { _, which ->
                 val value = options.optJSONObject(which)?.optString("id").orEmpty()
                 Api.call("settings_set", JSONObject().put(key, value)) { result ->
                     val data = result.data
@@ -119,7 +119,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
                     showChoice(id, list, key)
                 }
             }
-            .show()
+            .showStyled()
     }
 
     /** Popis zvoleného úložiště; bez volby se použije první připojený USB disk. */
@@ -137,7 +137,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
         }
         android.app.AlertDialog.Builder(context)
             .setTitle(if (volumes.any { it.removable }) "Kam stahovat" else "Kam stahovat (USB disk není připojený)")
-            .setItems(volumes.map { it.description }.toTypedArray()) { _, which ->
+            .setAdapter(Dialogs.items(context, volumes.map { it.description })) { _, which ->
                 downloadDir = volumes[which].dir.absolutePath
                 Api.call("settings_set", JSONObject().put("download_dir", downloadDir)) {
                     if (!isAdded) return@call
@@ -145,7 +145,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
                     DownloadService.start(requireContext())  // co čekalo na disk, může začít
                 }
             }
-            .show()
+            .showStyled()
     }
 
     override fun onViewCreated(view: android.view.View, savedInstanceState: Bundle?) {
