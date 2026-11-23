@@ -33,7 +33,10 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.common.text.Cue
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import org.json.JSONObject
 import java.io.File
 
@@ -63,6 +66,7 @@ class PlayerActivity : FragmentActivity() {
     private var live = false
     private var local = false
     private var diagnostic = ""
+    private var subtitleStyle: JSONObject? = null   // vzhled titulků z profilu a nabídka možností
     private var externalName = ""   // oficiální aplikace, která by chráněný pořad přehrála, ale v zařízení není
     private var started = false
     private var retried = false
@@ -158,6 +162,9 @@ class PlayerActivity : FragmentActivity() {
         )
         call = intent.getStringExtra(Navigator.EXTRA_CALL).orEmpty()
         params = JSONObject(intent.getStringExtra(Navigator.EXTRA_PARAMS) ?: "{}")
+        Api.call("subtitle_style") { result ->
+            if (!isFinishing && !isDestroyed) result.data?.let { applySubtitleStyle(it) }
+        }
         resolve()
     }
 
@@ -493,6 +500,7 @@ class PlayerActivity : FragmentActivity() {
         val current = available.indexOfFirst { it.isSelected }.let { if (text) it + 1 else it }
         AlertDialog.Builder(this)
             .setTitle(if (text) "Titulky" else "Zvuková stopa")
+            .apply { if (text) setNeutralButton("Velikost a pozadí") { _, _ -> chooseSubtitleStyle() } }
             .setSingleChoiceItems(names.toTypedArray(), current) { dialog, which ->
                 val builder = exo.trackSelectionParameters.buildUpon()
                 if (text && which == 0) {
@@ -508,6 +516,79 @@ class PlayerActivity : FragmentActivity() {
                 dialog.dismiss()
             }
             .show()
+    }
+
+    /** Vzhled titulků podle profilu: velikost jako násobek výchozí, pozadí černé, poloprůhledné, nebo jen obrys. */
+    private fun applySubtitleStyle(style: JSONObject) {
+        subtitleStyle = style
+        val view = playerView.subtitleView ?: return
+        val scale = style.optDouble("scale", 1.0).toFloat()
+        view.setApplyEmbeddedFontSizes(false)   // velikost určuje uživatel, ne soubor s titulky
+        view.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale)
+        val white = android.graphics.Color.WHITE
+        val black = android.graphics.Color.BLACK
+        val clear = android.graphics.Color.TRANSPARENT
+        view.setStyle(when (style.optString("background")) {
+            "outline" -> CaptionStyleCompat(white, clear, clear, CaptionStyleCompat.EDGE_TYPE_OUTLINE, black, null)
+            "shade" -> CaptionStyleCompat(white, 0x99000000.toInt(), clear, CaptionStyleCompat.EDGE_TYPE_NONE, black, null)
+            else -> CaptionStyleCompat(white, black, clear, CaptionStyleCompat.EDGE_TYPE_NONE, black, null)
+        })
+    }
+
+    /**
+     * Velikost a pozadí titulků s okamžitým náhledem: každé stisknutí přepne na další možnost a hned
+     * ji ukáže na titulcích pod oknem (když zrovna žádné nejsou, na ukázkové větě). Volba se ukládá k profilu.
+     */
+    private fun chooseSubtitleStyle() {
+        val style = subtitleStyle ?: return
+        val view = playerView.subtitleView
+        fun options(name: String) = style.optJSONArray(name)?.let { list ->
+            (0 until list.length()).mapNotNull { list.optJSONObject(it) }
+        }.orEmpty()
+        val sizes = options("sizes")
+        val backgrounds = options("backgrounds")
+        if (sizes.isEmpty() || backgrounds.isEmpty()) return
+        var size = sizes.indexOfFirst { it.optString("id") == style.optString("size") }.coerceAtLeast(0)
+        var background = backgrounds.indexOfFirst { it.optString("id") == style.optString("background") }.coerceAtLeast(0)
+        val padding = (20 * resources.displayMetrics.density).toInt()
+        // tlačítka ve vzhledu aplikace: na televizi musí být poznat, které je vybrané
+        val sizeButton = Button(this, null, 0, R.style.TitleButton)
+        val backgroundButton = Button(this, null, 0, R.style.TitleButton)
+        fun show() {
+            sizeButton.text = "Velikost: ${sizes[size].optString("title")}"
+            backgroundButton.text = "Pozadí: ${backgrounds[background].optString("title")}"
+            val current = JSONObject(style.toString()).put("size", sizes[size].optString("id"))
+                .put("scale", sizes[size].optDouble("scale", 1.0)).put("background", backgrounds[background].optString("id"))
+            applySubtitleStyle(current)
+            if (player?.currentCues?.cues.isNullOrEmpty()) {
+                view?.setCues(listOf(Cue.Builder().setText("Ukázka titulků: takhle budou vypadat.").build()))
+            }
+        }
+        fun save() = Api.send("subtitle_style_set", JSONObject().put("size", sizes[size].optString("id"))
+            .put("background", backgrounds[background].optString("id")))
+        sizeButton.setOnClickListener { size = (size + 1) % sizes.size; show(); save() }
+        backgroundButton.setOnClickListener { background = (background + 1) % backgrounds.size; show(); save() }
+        val content = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(padding, padding / 2, padding, 0)
+            val spaced = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = padding / 2 }
+            addView(sizeButton, spaced)
+            addView(backgroundButton, spaced)
+        }
+        show()
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Vzhled titulků")
+            .setView(content)
+            .setPositiveButton("Hotovo", null)
+            .setOnDismissListener { view?.setCues(player?.currentCues?.cues ?: emptyList()) }
+            .create()
+        // okno nahoře a bez ztmavení obrazu, aby na titulky dole bylo dobře vidět
+        dialog.window?.setGravity(android.view.Gravity.TOP)
+        dialog.window?.setDimAmount(0f)
+        dialog.show()
+        sizeButton.requestFocus()
     }
 
     /** Jazyk právě hrající zvukové stopy a titulků (`off` = titulky jsou, ale vypnuté). */
@@ -561,7 +642,7 @@ class PlayerActivity : FragmentActivity() {
 
     /** Po dokoukání: logika navrhne další díl seriálu nebo další film série; jinak se přehrávač zavře. */
     private fun offerNext() {
-        if (live || track.isEmpty() || track.startsWith("ivys:")) {
+        if (live || track.isEmpty()) {
             finish()
             return
         }

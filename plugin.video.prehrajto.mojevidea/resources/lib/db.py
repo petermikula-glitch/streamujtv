@@ -1238,6 +1238,17 @@ class Library(object):
             "ORDER BY last_played DESC, idec LIMIT ?", (IN_PROGRESS_MIN, IN_PROGRESS_MAX, int(limit))).fetchall()
         return [dict(row) for row in rows]
 
+    def ivys_entry(self, idec):
+        """Záznam o přehrávání jednoho dílu (pořad, název, pozice), nebo None."""
+        row = self.conn.execute("SELECT * FROM ivys_history WHERE idec=?", (idec,)).fetchone()
+        return dict(row) if row else None
+
+    def ivys_show_history(self, show_id, limit=100):
+        """Přehrávané díly jednoho pořadu, naposledy přehrané první."""
+        rows = self.conn.execute("SELECT * FROM ivys_history WHERE show_id=? ORDER BY last_played DESC, idec LIMIT ?",
+                                 (str(show_id), int(limit))).fetchall()
+        return [dict(row) for row in rows]
+
     def ivys_remove_history(self, idec=None):
         with self.conn:
             if idec:

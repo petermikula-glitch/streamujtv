@@ -228,6 +228,22 @@ nabídka existuje, připomene aplikace při prvních třech spuštěních jednor
 začíná velkým panelem s tlačítkem Pokračovat; obrázek je z metadat titulu, jinak výchozí ilustrace.
 Když se postranní nabídka sbalí, zůstane vlevo úzká lišta ikon sekcí.
 
+**Další díl v iVysílání** (`ivys_next`, `_ivys_following` v `app_api.py`): po dokoukání dílu z iVysílání
+přehrávač nabídne další díl téhož pořadu – podle pořadí ve výpisu ČT, ať je řazený od nejnovějšího,
+nebo od nejstaršího. Sám se nespouští. Výpis pořadu začíná kartou **Pokračovat** (rozkoukaný díl,
+jinak první nezhlédnutý po naposledy dokoukaném) a oblíbený pořad má v nabídce karty „Pokračovat
+dalším dílem“. U hodně dlouhých pořadů se díl uprostřed výpisu nemusí najít (prochází se nejvýš
+`IVYS_NEXT_PAGES` stránek od každého konce) – pak se nenabídne nic.
+
+**Rychlá kontrola účtu** (`quick_sync`): po otevření aplikace (nejvýš jednou za čtvrt hodiny) se na
+pozadí načte výpis účtu jen po první stránku bez nového videa, nová videa se přidají a doplní se
+k nim metadata. Nic se při tom neodebírá – to dělá jen úplná synchronizace z Nástrojů. Bez přihlášení,
+s prázdným katalogem nebo při chybě se nestane nic (chyba je jen v Diagnostice).
+
+**Vzhled titulků** (`subtitle_style` v `app_extras.py`): v nabídce titulků v přehrávači je „Velikost
+a pozadí“ – čtyři velikosti a pozadí černé, poloprůhledné, nebo jen obrys. Změna je vidět hned na
+titulcích pod oknem a ukládá se k profilu.
+
 **Profily** (`app_extras.py`): každý profil má vlastní Rozkoukané, Oblíbené, Moje pořady z iVysílání
 a předvolby přehrávání. Tabulky katalogu se nemění (sdílí je doplněk pro Kodi): osobní stav patří
 vždy aktivnímu profilu a při přepnutí se uloží do `profile_<id>.json` a nahradí stavem druhého
@@ -336,6 +352,11 @@ Aplikace zapisuje do vlastní složky na disku (`Android/data/cz.petermikula.moj
 nepotřebuje žádné oprávnění; Android tuto složku při odinstalaci aplikace smaže. Úložiště se volí
 v Nastavení, bez volby se použije první připojený USB disk. Disk má být ve formátu exFAT – FAT32
 neuloží soubor větší než 4 GB (aplikace na to upozorní předem).
+
+Před stažením celé řady se aplikace zeptá (`confirm` u cíle karty; `space_question` v `app_extras.py`):
+ukáže, kolik dílů se stáhne, odhad potřebného místa tam, kde katalog velikosti souborů zná, a volné
+místo na disku pro stahování. U řady z Objevuj je velikost známá až po vyhledání dílů – napíše ji
+výsledná zpráva.
 
 ## Aktualizace
 

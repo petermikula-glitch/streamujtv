@@ -12,6 +12,8 @@ class Target(
     val title: String,
     /** Výpis plakátů: mřížka se rovnou připraví v tomto tvaru. */
     val poster: Boolean = false,
+    /** Dotaz před provedením (stažení celé řady): `title`, `text` a odhad potřebného místa `bytes`. */
+    val confirm: JSONObject? = null,
 ) {
     companion object {
         fun from(json: JSONObject?): Target {
@@ -22,6 +24,7 @@ class Target(
                 params = target.optJSONObject("params") ?: JSONObject(),
                 title = target.optString("title"),
                 poster = target.optBoolean("poster"),
+                confirm = target.optJSONObject("confirm"),
             )
         }
     }

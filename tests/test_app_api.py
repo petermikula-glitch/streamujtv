@@ -1347,7 +1347,10 @@ def test_whole_season_is_queued_and_watched_downloads_can_be_removed(api, tmp_pa
     _fill(3)
     season = api("show", key="show:archa")["items"][-1]
     assert (season["title"], season["subtitle"]) == ("Stáhnout 1. řadu", "3 dílů na disk")
-    assert season["target"] == {"type": "download", "call": "download_season", "params": {"key": "show:archa", "season": 1}}
+    assert season["target"] == {"type": "download", "call": "download_season", "params": {"key": "show:archa", "season": 1},
+                                # před zařazením celé řady se aplikace zeptá; volné místo doplní sama
+                                "confirm": {"title": "Stáhnout 1. řadu?", "bytes": 0,
+                                            "text": "3 díly. Velikost souborů není známá."}}
     assert api("download_season", **season["target"]["params"]) == {
         "message": "Zařazeno ke stažení: 3 dílů (1. řada).", "start": True}
     assert len(api("downloads")["items"]) == 3
@@ -1383,6 +1386,154 @@ def test_whole_season_is_queued_and_watched_downloads_can_be_removed(api, tmp_pa
     assert result == {"message": "Zařazeno ke stažení: 2 dílů. 1 dílů jsem na Přehraj.to nenašel.", "start": True}
     queued = [entry["vid"] for entry in app_api._downloads().values()]
     assert _web(81, "")["id"] in queued and _web(83, "")["id"] in queued and _web(84, "")["id"] not in queued
+
+
+def test_season_download_states_how_much_space_it_needs(api, monkeypatch):
+    with app_api._library() as lib:
+        for number, size in ((1, "1.5 GB"), (2, "700 MB"), (3, "")):
+            raw = "Archa.S01E%02d.CZ" % number
+            lib.upsert_video("%d:archa:%016x" % (10 + number, 10 + number), raw, "account", nameparser.parse(raw),
+                             size=size)
+    season = api("show", key="show:archa")["items"][-1]
+    assert season["target"]["confirm"] == {"title": "Stáhnout 1. řadu?", "bytes": int(1.5 * 1024 ** 3) + 700 * 1024 ** 2,
+                                           "text": "3 díly, asi 2,2 GB a 1 díl neznámé velikosti."}
+    assert api("download_season", **season["target"]["params"])["message"] == (
+        "Zařazeno ke stažení: 3 dílů (1. řada). Potřeba asi 2,2 GB a 1 díl neznámé velikosti.")
+
+    api("settings_set", tmdb_key="k" * 32)                                   # řada z Objevuj: velikost až po vyhledání
+    _catalogue_search(monkeypatch, {"Krakonoš S01E01": [_web(81, "Krakonos S01E01 CZ", size="1 GB")],
+                                    "Krakonoš S01E02": [_web(82, "Krakonos S01E02 CZ", size="2 GB")]})
+    _fake_tmdb(monkeypatch, {"/tv/88/season/1": {"episodes": [{"episode_number": n, "name": "Díl"} for n in (1, 2)]}})
+    whole = api("discover_season", kind="tv", id=88, title="Krakonoš", season=1)["items"][-1]
+    assert whole["target"]["confirm"]["bytes"] == 0 and whole["target"]["confirm"]["text"].startswith("2 díly. Díly se")
+    assert api(whole["target"]["call"], **whole["target"]["params"])["message"] == (
+        "Zařazeno ke stažení: 2 dílů. Potřeba asi 3,0 GB.")
+
+
+def test_quick_sync_after_opening_adds_new_videos_and_never_removes(api, monkeypatch):
+    _fill(2)                                                    # katalog: Pelíšky (2 verze) a dva díly Archy
+    asked = []
+
+    class Client(object):
+        listing_complete = False
+        listing_partial = True                                  # výpis skončil u známých videí
+
+        def my_videos(self, progress=None, known=None):
+            asked.append(known)
+            return [{"id": "50:novinka:00000000000000cc", "title": "Novinka.2024.CZ.1080p", "duration": 5400}]
+
+    made = []
+    monkeypatch.setattr(app_api.provider, "make_client", lambda *a, **k: made.append(1) or Client())
+    monkeypatch.setattr(app_api.catalog, "enrich", lambda lib, metas, **kw: {
+        "ok": len(metas), "notfound": 0, "csfd_blocked": False})
+    assert api("quick_sync") == {"new": 0, "skipped": "account"} and not made     # bez přihlášení se nic neděje
+    api("settings_set", username="a@b.cz", password="heslo")
+    with app_api._library() as lib:
+        before = lib.count_videos()
+    result = api("quick_sync")
+    assert result == {"new": 1, "toast": "Nová videa z účtu: 1"}
+    assert asked and asked[0] and len(asked[0]) == before        # klient dostal, co katalog už má
+    with app_api._library() as lib:
+        assert lib.count_videos() == before + 1                  # nové přibylo, nic se neodebralo
+    assert api("quick_sync") == {"new": 0, "skipped": "recent"} and len(asked) == 1   # hned znovu se neptá
+    assert api("progress") == {"text": "", "busy": False}
+
+    def failing(*a, **k):
+        raise app_api.provider.LoginError("špatné heslo")
+
+    monkeypatch.setattr(app_api.provider, "make_client", failing)
+    assert api("quick_sync", force=True) == {"new": 0, "skipped": "error"}        # potichu, bez chybové hlášky
+    assert api("progress")["busy"] is False
+
+
+def test_quick_sync_leaves_the_first_load_to_the_full_sync(api, monkeypatch):
+    api("settings_set", username="a@b.cz", password="heslo")
+    monkeypatch.setattr(app_api.provider, "make_client", lambda *a, **k: pytest.fail("prázdný katalog: nic se nestahuje"))
+    assert api("quick_sync") == {"new": 0, "skipped": "empty"}
+
+
+def _ordered_episodes(api):
+    """Zkušební služba vrací díly vždy stejně; tady je seřadí podle toho, o co klient žádá."""
+    genuine = api.service.graphql
+
+    def graphql(name, variables):
+        if name == "GetEpisodes" and variables["programmeId"] in ("pp", "pv"):
+            items = list(api.service.episodes)                  # od nejstaršího (Díl 1) po nejnovější (Díl 50)
+            if variables["orderBy"] == "newest":
+                items.reverse()
+            page = items[variables["offset"]:variables["offset"] + variables["limit"]]
+            return {"data": {"programme": {"id": "x", "episodes": {"totalCount": len(items), "items": page}}}}
+        return genuine(name, variables)
+
+    api.service.graphql = graphql
+    return [item["id"] for item in api.service.episodes]
+
+
+def test_ivysilani_offers_the_next_episode_without_starting_it(api):
+    idecs = _ordered_episodes(api)                               # pořad 13 „Na plovárně“ řadí od nejnovějšího
+    stream = api("ivys_play", idec=idecs[5])                     # Díl 6
+    api("progress_save", track=stream["track"], position=1320, total=1326, ended=True)
+    following = api("play_next", track=stream["track"])["next"]
+    assert following == {"title": "Další díl", "subtitle": "Na plovárně · 7/50 Díl 7", "auto": False,
+                         "target": {"type": "play", "call": "ivys_play", "params": {"idec": idecs[6]}}}
+    api("ivys_play", idec=idecs[49])                             # nejnovější díl: další už není
+    assert api("play_next", track="ivys:" + idecs[49])["next"] is None
+    api("ivys_play", idec=idecs[9])                              # Díl 10 je první na druhé stránce výpisu od nejnovějšího
+    assert api("play_next", track="ivys:" + idecs[9])["next"]["target"]["params"] == {"idec": idecs[10]}
+    api("ivys_play", idec="211522160100014")                     # díl, který ve výpisu pořadu není
+    assert api("play_next", track="ivys:211522160100014")["next"] is None
+    assert api("play_next", track="ivys:999")["next"] is None    # o dílu se nic neví
+
+    # pořad řazený od nejstaršího (12 „Vyprávěj“): následuje díl za ním, i přes hranici stránky
+    with app_api._library() as lib:
+        for idec in (idecs[39], idecs[49]):
+            lib.ivys_touch(idec, "12", "Díl", "Vyprávěj")
+    assert api("play_next", track="ivys:" + idecs[39])["next"]["target"]["params"] == {"idec": idecs[40]}
+    assert api("play_next", track="ivys:" + idecs[49])["next"] is None
+
+
+def test_ivysilani_show_starts_with_where_to_continue(api):
+    idecs = _ordered_episodes(api)
+    assert not api("ivys_show", id="13")["items"][0]["title"].startswith("Pokračovat")     # nic se nepřehrávalo
+    stream = api("ivys_play", idec=idecs[5])
+    api("progress_save", track=stream["track"], position=400, total=1326)
+    first = api("ivys_show", id="13")["items"][0]
+    assert (first["subtitle"], first["progress"]) == ("Rozkoukaný díl", 30)
+    assert first["target"] == {"type": "play", "call": "ivys_play", "params": {"idec": idecs[5]}}
+    api("progress_save", track=stream["track"], position=1320, total=1326, ended=True)
+    first = api("ivys_show", id="13")["items"][0]
+    assert (first["title"], first["subtitle"]) == ("Pokračovat: 7/50 Díl 7", "První nezhlédnutý díl")
+    assert first["target"]["params"] == {"idec": idecs[6]}
+    assert not api("ivys_show", id="13", offset=40)["items"][0]["title"].startswith("Pokračovat")   # jen na začátku
+
+    # zkratka z oblíbeného pořadu pustí tentýž díl rovnou
+    api("ivys_favorite", id="13")
+    with app_api._library() as lib:
+        card = next(card for card in app_api.ivys_favorite_cards(lib) if card["title"] == "Na plovárně")
+    shortcut = next(item for item in card["menu"] if item["title"] == "Pokračovat dalším dílem")["target"]
+    assert shortcut == {"type": "play", "call": "ivys_play", "params": {"show": "13", "following": True}}
+    assert api("ivys_play", **shortcut["params"])["track"] == "ivys:" + idecs[6]
+    assert "nic nedokoukali" in api("ivys_play", show="12", following=True)["error"]
+
+
+def test_subtitle_style_belongs_to_the_profile(api):
+    style = api("subtitle_style")
+    assert (style["size"], style["background"], style["scale"]) == ("normal", "solid", 1.0)
+    assert [item["id"] for item in style["sizes"]] == ["small", "normal", "large", "huge"]
+    assert [item["id"] for item in style["backgrounds"]] == ["solid", "shade", "outline"]
+    changed = api("subtitle_style_set", size="large", background="shade")
+    assert (changed["size"], changed["background"], changed["scale"]) == ("large", "shade", 1.3)
+    assert api("subtitle_style_set", size="obří", background="duha")["size"] == "large"    # neznámé hodnoty nic nezmění
+
+    api("profile_add", avatar="owl", text="Děti")               # jiný profil má vlastní vzhled titulků
+    main, other = api("profiles")["items"][:2]
+    api(other["target"]["call"], **other["target"]["params"])
+    assert (api("subtitle_style")["size"], api("subtitle_style")["background"]) == ("normal", "solid")
+    api("subtitle_style_set", size="huge")
+    api(main["target"]["call"], **main["target"]["params"])
+    assert (api("subtitle_style")["size"], api("subtitle_style")["background"]) == ("large", "shade")
+    api(other["target"]["call"], **other["target"]["params"])
+    assert api("subtitle_style")["size"] == "huge"
 
 
 def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):

@@ -20,7 +20,8 @@ AVATARS = (("clapper", "Klapka"), ("popcorn", "Popcorn"), ("crown", "Koruna"), (
 TABLES = ("history", "watched_marks", "progress_hidden", "ivys_history", "ivys_favorites")
 KV_PREFIXES = ("choice:", "last_season:", "recent_series", "tracks:")
 # osobní položky nastavení: předvolby, naposledy hledané a čas posledního hlídání oblíbených
-SETTINGS = ("prefer_language", "prefer_quality", "search_history", "favorites_checked")
+SETTINGS = ("prefer_language", "prefer_quality", "search_history", "favorites_checked",
+            "subtitle_size", "subtitle_background")
 LIVE = "profile_live"            # čí osobní stav je právě v katalogu (zapisuje se spolu s ním)
 TRACKS_PREFIX = "tracks:"        # zvuk a titulky naposledy zvolené u seriálu nebo filmu
 _LOCK = threading.Lock()
@@ -348,6 +349,40 @@ def track_prefs(params):
 
 
 # ---------------------------------------------------------------------------
+# Vzhled titulků (patří k profilu)
+# ---------------------------------------------------------------------------
+
+# velikost písma jako násobek výchozí velikosti přehrávače
+SUBTITLE_SIZES = (("small", "Menší", 0.8), ("normal", "Běžná", 1.0), ("large", "Větší", 1.3),
+                  ("huge", "Největší", 1.6))
+SUBTITLE_BACKGROUNDS = (("solid", "Černé"), ("shade", "Poloprůhledné"), ("outline", "Bez pozadí, jen obrys"))
+
+
+def subtitle_style(params):
+    """Vzhled titulků pro přehrávač: zvolená velikost a pozadí a nabídka možností."""
+    settings = api._settings()
+    size = settings.get("subtitle_size")
+    size = size if size in {item[0] for item in SUBTITLE_SIZES} else "normal"
+    background = settings.get("subtitle_background")
+    background = background if background in dict(SUBTITLE_BACKGROUNDS) else "solid"
+    return {"size": size, "background": background,
+            "scale": next(scale for name, _title, scale in SUBTITLE_SIZES if name == size),
+            "sizes": [{"id": name, "title": title, "scale": scale} for name, title, scale in SUBTITLE_SIZES],
+            "backgrounds": [{"id": name, "title": title} for name, title in SUBTITLE_BACKGROUNDS]}
+
+
+def subtitle_style_set(params):
+    def change(settings):
+        if params.get("size") in {item[0] for item in SUBTITLE_SIZES}:
+            settings["subtitle_size"] = params["size"]
+        if params.get("background") in dict(SUBTITLE_BACKGROUNDS):
+            settings["subtitle_background"] = params["background"]
+
+    api._change_settings(change)
+    return subtitle_style({})
+
+
+# ---------------------------------------------------------------------------
 # Stažení celé řady (seriál z vlastního katalogu)
 # ---------------------------------------------------------------------------
 
@@ -360,6 +395,40 @@ def season_counts(videos):
     return {season: len(numbers) for season, numbers in episodes.items()}
 
 
+def season_sizes(videos):
+    """{řada: (bajty dílů se známou velikostí, počet dílů, u kterých velikost známá není)}."""
+    sizes = {}
+    for video in videos:
+        if not video["episode"]:
+            continue
+        known, unknown = sizes.get(video["season"], (0, 0))
+        size = api._size_bytes(video.get("size"))
+        sizes[video["season"]] = (known + size, unknown + (0 if size else 1))
+    return sizes
+
+
+def episodes_text(count):
+    """Počet dílů slovy: „1 díl“, „3 díly“, „8 dílů“."""
+    return "%d %s" % (count, "díl" if count == 1 else "díly" if 2 <= count <= 4 else "dílů")
+
+
+def size_note(known, unknown):
+    """Odhad místa slovy: „asi 9,6 GB“, s poznámkou o dílech bez známé velikosti; prázdné, když není znát nic."""
+    if not known:
+        return ""
+    return "asi %s" % api._size_text(known) + (" a %s neznámé velikosti" % episodes_text(unknown) if unknown else "")
+
+
+def space_question(title, count, known=0, unknown=0, note=""):
+    """Dotaz před stažením víc souborů najednou; volné místo na disku k němu doplní aplikace.
+
+    ``bytes`` je odhad potřebného místa (0 = neznámý)."""
+    text = episodes_text(count)
+    estimate = size_note(known, unknown)
+    text += ", %s." % estimate if estimate else ". %s" % (note or "Velikost souborů není známá.")
+    return {"title": title, "text": text, "bytes": int(known)}
+
+
 def download_season(params):
     key, season = params.get("key") or "", int(params.get("season") or 0)
     with api._library() as lib:
@@ -370,10 +439,10 @@ def download_season(params):
                 continue
             rank = api._version_rank(video, state["prefs"], state["bad"])
             if video["episode"] not in best or rank < best[video["episode"]][0]:
-                best[video["episode"]] = (rank, video["id"])
+                best[video["episode"]] = (rank, video["id"], video.get("size"))
     if not best:
         raise api.ApiError("V této řadě nejsou žádné díly.")
-    added = 0
+    added, known, unknown = 0, 0, 0
     for episode in sorted(best):
         vid = best[episode][1]
         entry = state["downloads"].get(vid) or {}
@@ -381,14 +450,18 @@ def download_season(params):
             continue
         api.download_add({"vid": vid})
         added += 1
+        size = api._size_bytes(best[episode][2])
+        known, unknown = known + size, unknown + (0 if size else 1)
     if not added:
         return {"message": "Všechny díly této řady už jsou stažené nebo ve frontě."}
-    return {"message": "Zařazeno ke stažení: %d dílů (%d. řada)." % (added, season), "start": True}
+    estimate = size_note(known, unknown)
+    return {"message": "Zařazeno ke stažení: %d dílů (%d. řada).%s" % (
+        added, season, " Potřeba %s." % estimate if estimate else ""), "start": True}
 
 
 ACTIONS = {
     "profiles": profiles, "profile_avatars": profile_avatars, "profile_add": profile_add,
     "profile_rename": profile_rename, "profile_avatar": profile_avatar, "profile_delete": profile_delete,
     "profile_switch": profile_switch, "watch_next": watch_next, "track_prefs": track_prefs,
-    "download_season": download_season,
+    "download_season": download_season, "subtitle_style": subtitle_style, "subtitle_style_set": subtitle_style_set,
 }

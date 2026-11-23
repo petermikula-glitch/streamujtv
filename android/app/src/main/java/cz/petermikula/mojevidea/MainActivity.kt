@@ -269,6 +269,23 @@ class MainFragment : BrowseSupportFragment(), RowsHost {
     override fun onResume() {
         super.onResume()
         load()  // po návratu z přehrávače nebo nastavení se mění Rozkoukané i katalog
+        quickSync()
+    }
+
+    /**
+     * Po otevření aplikace se na pozadí zkontroluje, jestli na účtu nepřibyla videa. Jak často se smí
+     * ptát, hlídá logika; nová videa se rovnou ukážou, jinak se nestane nic.
+     */
+    private fun quickSync() {
+        Api.call("quick_sync") { result ->
+            if (!isAdded) return@call
+            val data = result.data ?: return@call
+            if (data.optInt("new") <= 0) return@call
+            data.optString("toast").takeIf { it.isNotEmpty() }?.let {
+                android.widget.Toast.makeText(requireContext(), it, android.widget.Toast.LENGTH_LONG).show()
+            }
+            load()
+        }
     }
 
     override fun rowsOf(index: Int): JSONArray? = sections.getOrNull(index)?.rows

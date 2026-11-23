@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
+import org.json.JSONObject
 
 /** Otevře cíl karty: výpis, přehrávač, hledání, nastavení, nebo provede příkaz. */
 object Navigator {
@@ -30,6 +31,13 @@ object Navigator {
     }
 
     fun open(activity: FragmentActivity, target: Target, title: String, onChanged: () -> Unit = {}) {
+        if (target.confirm != null) {
+            // nejdřív se zeptat (a ukázat volné místo); po potvrzení tentýž cíl bez dotazu
+            askSpace(activity, target.confirm) {
+                open(activity, Target(target.type, target.call, target.params, target.title, target.poster), title, onChanged)
+            }
+            return
+        }
         when (target.type) {
             "list" -> activity.startActivity(
                 Intent(activity, ListActivity::class.java)
@@ -75,6 +83,30 @@ object Navigator {
                     onChanged()
                 }
             }
+        }
+    }
+
+    /**
+     * Dotaz před stažením víc souborů najednou: co se stáhne, kolik místa to zabere (ví logika)
+     * a kolik je na disku pro stahování volno (ví aplikace).
+     */
+    private fun askSpace(activity: FragmentActivity, confirm: JSONObject, proceed: () -> Unit) {
+        Api.call("settings_get") { result ->
+            if (activity.isFinishing || activity.isDestroyed) return@call
+            val volume = Storage.target(activity, result.data?.optString("download_dir").orEmpty())
+            val needed = confirm.optLong("bytes")
+            val space = when {
+                volume == null -> "Disk pro stahování teď není připojený – stahování počká, až ho připojíte."
+                needed > 0 && needed > volume.free ->
+                    "${volume.description}.\nNa disku není dost místa: stáhne se jen část."
+                else -> "${volume.description}."
+            }
+            AlertDialog.Builder(activity)
+                .setTitle(confirm.optString("title"))
+                .setMessage("${confirm.optString("text")}\n\n$space")
+                .setPositiveButton("Stáhnout") { _, _ -> proceed() }
+                .setNegativeButton("Zrušit", null)
+                .show()
         }
     }
 

@@ -1243,8 +1243,11 @@ def discover_season(params):
     cards = [_episode_card(params, season, number, episodes[number], state, played.get(number))
              for number in sorted(episodes, key=int)]
     if cards:
-        cards.append(api._card("Stáhnout celou řadu", api._target("command", "discover_download_season", params),
-                               "Vyhledá a zařadí všechny díly", icon="download"))
+        target = api._target("command", "discover_download_season", params)
+        target["confirm"] = api.app_extras.space_question(
+            "Stáhnout celou řadu?", min(len(cards), SEASON_DOWNLOAD_MAX),
+            note="Díly se nejdřív vyhledají na Přehraj.to; kolik místa zaberou, se ukáže potom.")
+        cards.append(api._card("Stáhnout celou řadu", target, "Vyhledá a zařadí všechny díly", icon="download"))
     return {"items": cards, "next": None, "empty": "TMDB u této řady neuvádí žádné díly."}
 
 
@@ -1256,7 +1259,7 @@ def discover_download_season(params):
         with api._library() as lib:
             state = api._state(lib)
         numbers = sorted(episodes, key=int)[:SEASON_DOWNLOAD_MAX]
-        added, missing = 0, 0
+        added, missing, known, unknown = 0, 0, 0, 0
         for index, number in enumerate(numbers, 1):
             api._STATE["progress"] = "Hledám díly: %d/%d" % (index, len(numbers))
             choice = "tv:%s:%s:%s" % (tmdb_id, season, number)
@@ -1275,7 +1278,11 @@ def discover_download_season(params):
                 continue
             api.download_add({"vid": vid, "web_result": good[0]["result"]})
             added += 1
+            size = api._size_bytes(good[0]["result"].get("size"))
+            known, unknown = known + size, unknown + (0 if size else 1)
         note = " %d dílů jsem na Přehraj.to nenašel." % missing if missing else ""
+        estimate = api.app_extras.size_note(known, unknown)
+        note += " Potřeba %s." % estimate if estimate and added else ""
         return {"message": "Zařazeno ke stažení: %d dílů.%s" % (added, note), "start": bool(added)}
 
     return api._exclusive(work)
@@ -1452,6 +1459,11 @@ def play_next(params):
     """
     track = str(params.get("track") or "")
     choice = str(params.get("choice") or "")
+    if track.startswith(api.IVYS):
+        try:
+            return {"next": api.ivys_next(track[len(api.IVYS):])}   # další díl téhož pořadu z iVysílání
+        except api.ApiError:
+            return {"next": None}
     try:
         with api._library() as lib:
             state = api._state(lib)

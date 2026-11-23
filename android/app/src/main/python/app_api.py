@@ -78,6 +78,7 @@ def configure(directory, proxy="", no_proxy=""):
     """
     os.makedirs(directory, exist_ok=True)
     _STATE["dir"] = directory
+    _STATE["quick_sync"] = 0   # nová složka s daty (nebo nový start aplikace): účet se zkontroluje znovu
     if proxy:
         os.environ["https_proxy"] = os.environ["http_proxy"] = str(proxy)
         if no_proxy:
@@ -475,9 +476,12 @@ def _ivys_favorite_card(item, film):
         target = _target("play", "ivys_play", {"show": item["show_id"]})
     else:
         target = _target("list", "ivys_show", {"id": item["show_id"]}, item["title"])
-    menu = [{"title": "Přehrát" if film else "Otevřít", "target": target},
-            {"title": "Odebrat z oblíbených",
-             "target": _target("command", "ivys_favorite", {"id": item["show_id"], "remove": True})}]
+    menu = [{"title": "Přehrát" if film else "Otevřít", "target": target}]
+    if not film:
+        menu.append({"title": "Pokračovat dalším dílem",
+                     "target": _target("play", "ivys_play", {"show": item["show_id"], "following": True})})
+    menu += [{"title": "Odebrat z oblíbených",
+              "target": _target("command", "ivys_favorite", {"id": item["show_id"], "remove": True})}]
     return _card(item["title"], target, "iVysílání", item["poster"] or item["image"], wide=not item["poster"],
                  icon="favorites", menu=menu)
 
@@ -836,10 +840,12 @@ def show(params):
                            video.get("thumb") or meta.get("poster"), _percent(point),
                            wide=True, watched=video["id"] in state["watched"],
                            menu=_video_menu(state, {"vid": video["id"]}, point), icon="series"))
+    sizes = app_extras.season_sizes(best.values())
     for season, count in sorted(app_extras.season_counts(best.values()).items()):
-        cards.append(_card("Stáhnout %d. řadu" % season, _target("download", "download_season",
-                                                                {"key": key, "season": season}),
-                           "%d dílů na disk" % count, icon="download"))
+        target = _target("download", "download_season", {"key": key, "season": season})
+        # před zařazením celé řady se aplikace zeptá a ukáže, kolik místa je potřeba a kolik je volno
+        target["confirm"] = app_extras.space_question("Stáhnout %d. řadu?" % season, count, *sizes[season])
+        cards.append(_card("Stáhnout %d. řadu" % season, target, "%d dílů na disk" % count, icon="download"))
     return {"title": title, "items": cards, "next": None}
 
 
@@ -1264,6 +1270,47 @@ def sync(params):
     return _exclusive(work)
 
 
+QUICK_SYNC_EVERY = 15 * 60   # s – častěji se účet po otevření aplikace nekontroluje
+
+
+def quick_sync(params):
+    """Rychlá kontrola účtu po otevření aplikace: přidá nová videa a doplní k nim metadata.
+
+    Výpis účtu se čte jen po první stránku, na které není nic nového, takže se podle něj nic
+    neodebírá – to dělá jen úplná synchronizace. Běží potichu: bez přihlašovacích údajů, s prázdným
+    katalogem (první načtení je úplné), při výpadku nebo když běží jiná operace jen vrátí
+    ``{"new": 0, "skipped": důvod}``.
+    """
+    settings, now = _settings(), time.time()
+    if not (settings.get("username") and settings.get("password")):
+        return {"new": 0, "skipped": "account"}
+    latest = max(float(_STATE.get("quick_sync") or 0), float(settings.get("last_sync") or 0))
+    if 0 <= now - latest < QUICK_SYNC_EVERY and not params.get("force"):
+        return {"new": 0, "skipped": "recent"}
+    if not _LOCK.acquire(False):
+        return {"new": 0, "skipped": "busy"}
+    _STATE["busy"] = True
+    _STATE["quick_sync"] = now          # i po chybě: špatné heslo se nemá zkoušet při každém otevření
+    try:
+        with _library() as lib:
+            known = lib.account_video_keys()
+            if not known:
+                return {"new": 0, "skipped": "empty"}
+            _STATE["progress"] = "Kontroluji nová videa na účtu"
+            stats = catalog.sync_account(_client(), lib, remove_missing=False, known=known)
+        new = 0 if stats.get("superseded") else int(stats.get("new") or 0)
+        if new:
+            _enrich()
+        return {"new": new, "toast": "Nová videa z účtu: %d" % new if new else ""}
+    except (provider.ProviderError, ApiError) as error:
+        _remember_error("quick_sync", error)   # jen do Diagnostiky; uživatele po otevření neruší
+        return {"new": 0, "skipped": "error"}
+    finally:
+        _STATE["busy"] = False
+        _STATE["progress"] = ""
+        _LOCK.release()
+
+
 def _enrich(statuses=("new",)):
     tmdb = _tmdb()
     with _library() as lib:
@@ -1413,6 +1460,8 @@ def ivys_show(params):
         lib.ivys_favorite_seen(show_id, programme["episode_count"])
         _ivys_remember_kind(lib, show_id, programme.get("type"))
         state = _ivys_state(lib)
+        # zkratka na začátku výpisu: rozkoukaný díl, nebo první nezhlédnutý po naposledy dokoukaném
+        resume = [] if _offset(params) else [card for card in [_ivys_continue_card(lib, programme, state)] if card]
     favorite = show_id in state["favorites"]
     toggle = _card("Odebrat z oblíbených" if favorite else "Přidat do oblíbených",
                    _target("command", "ivys_favorite", {"id": show_id, "remove": favorite}), icon="favorites")
@@ -1424,7 +1473,7 @@ def ivys_show(params):
         cards.append(_card("Všechny díly", _target("list", "ivys_show", {"id": show_id, "season": "all"},
                                                    programme["title"]), "%d dílů" % programme["episode_count"], wide=True,
                            icon="all"))
-        return {"title": programme["title"], "items": cards + [toggle], "next": None}
+        return {"title": programme["title"], "items": resume + cards + [toggle], "next": None}
     offset = _offset(params)
     season_id = season if season not in ("", "all") else None
     key = "ivys:episodes:%s:%s:%d" % (programme["programme_id"], season_id or "", offset)
@@ -1437,7 +1486,115 @@ def ivys_show(params):
     following = _next("ivys_show", {"id": show_id, "season": season or "all"}, offset, len(page["items"]), page["total"])
     if not offset:
         cards.append(toggle)
-    return {"title": programme["title"], "items": cards, "next": following}
+    return {"title": programme["title"], "items": resume + cards, "next": following}
+
+
+IVYS_NEXT_PAGES = 5   # tolik stránek výpisu dílů se v každém směru nejvýš projde při hledání dalšího dílu
+
+
+def _ivys_episodes(programme, offset=0, order=None, season_id=None):
+    """Stránka dílů pořadu (``{"total", "items"}``) z mezipaměti; ``order`` jinak podle pořadu."""
+    default = programme["default_sort"]
+    order = order or default
+    key = "ivys:episodes:%s:%s:%d" % (programme["programme_id"], season_id or "", offset)
+    if order != default:
+        key += ":" + order
+    return _cached(key, TTL["episodes"], lambda: dict(zip(("total", "items"), _ivys().episodes(
+        programme["programme_id"], season_id, offset, order))))
+
+
+def _ivys_following(programme, idec):
+    """Díl, který v pořadu následuje po ``idec`` (časově další), nebo None.
+
+    Výpis dílů jde od nejnovějšího, nebo od nejstaršího: následující díl je v prvním případě ten
+    před hledaným, v druhém ten za ním. Nejdřív se hledá v pořadí, jaké má pořad sám (to už bývá
+    v mezipaměti z výpisu), pak v opačném; v každém nejvýš ``IVYS_NEXT_PAGES`` stránek. U hodně
+    dlouhých pořadů se tak díl uprostřed nemusí najít a nenabídne se nic.
+    """
+    default = programme["default_sort"]
+    for order in (default, "oldest" if default == "newest" else "newest"):
+        previous, offset = None, 0
+        for _page in range(IVYS_NEXT_PAGES):
+            page = _ivys_episodes(programme, offset, order)
+            items = page["items"]
+            for index, item in enumerate(items):
+                if item["idec"] != idec:
+                    previous = item
+                    continue
+                if order == "newest":
+                    return previous                      # nejnovější díl už žádný další nemá
+                if index + 1 < len(items):
+                    return items[index + 1]
+                later = _ivys_episodes(programme, offset + len(items), order)["items"] \
+                    if offset + len(items) < page["total"] else []
+                return later[0] if later else None
+            offset += len(items)
+            if not items or offset >= page["total"]:
+                return None                              # prošel se celý výpis: díl v něm není
+    return None
+
+
+def _ivys_programme(show_id):
+    return _cached("ivys:show:" + show_id, TTL["show"], lambda: _ivys().show(show_id))
+
+
+def ivys_next(idec):
+    """Návrh pro přehrávač po dokoukání dílu z iVysílání: další díl téhož pořadu, nebo None.
+
+    Sám se nespouští – přehrávač nabídne tlačítko. Když se pořad nebo jeho díly nepodaří zjistit,
+    nenabídne se nic (návrh je jen pohodlí)."""
+    with _library() as lib:
+        entry = lib.ivys_entry(str(idec)) or {}
+    show_id = str(entry.get("show_id") or "")
+    if not show_id:
+        return None
+    try:
+        programme = _ivys_programme(show_id)
+        if programme.get("type") == "movie" or programme["episode_count"] < 2:
+            return None
+        following = _ivys_following(programme, str(idec))
+    except ivysilani.IvysilaniError:
+        return None
+    if not following:
+        return None
+    parts = [programme["title"]] + ([following["title"]] if following["title"] != programme["title"] else [])
+    label = " · ".join(part for part in parts if part)
+    return {"title": "Další díl", "subtitle": label, "auto": False,
+            "target": _target("play", "ivys_play", {"idec": following["idec"]})}
+
+
+def _ivys_continue(lib, programme, state):
+    """Kterým dílem pořadu pokračovat: ``(díl, poznámka)``, nebo None, když se z něj nic nepřehrávalo.
+
+    Rozkoukaný díl má přednost; jinak první nezhlédnutý díl po tom naposledy dokoukaném."""
+    for row in lib.ivys_show_history(programme["id"]):
+        if row["idec"] in state["resume"]:
+            return {"idec": row["idec"], "title": row.get("title") or programme["title"],
+                    "image": row.get("image") or ""}, "Rozkoukaný díl"
+        if row["idec"] in state["watched"]:
+            following = _ivys_following(programme, row["idec"])
+            for _step in range(5):                       # díly zhlédnuté mimo pořadí se přeskočí
+                if not following or following["idec"] not in state["watched"]:
+                    break
+                following = _ivys_following(programme, following["idec"])
+            if following and following["idec"] not in state["watched"]:
+                return following, "První nezhlédnutý díl"
+            return None
+    return None
+
+
+def _ivys_continue_card(lib, programme, state):
+    """Karta „Pokračovat“ na začátku výpisu pořadu; když není čím pokračovat nebo to nejde zjistit, None."""
+    try:
+        found = _ivys_continue(lib, programme, state)
+    except (ivysilani.IvysilaniError, ApiError):
+        return None
+    if not found:
+        return None
+    item, note = found
+    title = item.get("title") or programme["title"]
+    return _card("Pokračovat: %s" % title, _target("play", "ivys_play", {"idec": item["idec"]}), note,
+                 item.get("image") or programme["image"], _percent(state["resume"].get(item["idec"])), wide=True)
 
 
 def ivys_favorites(params):
@@ -1478,10 +1635,19 @@ def ivys_play(params):
         stream = _ivys_call(lambda: client.live(str(params["channel"]), timeshift=bool(params.get("timeshift"))))
         return {"url": stream["url"], "headers": {}, "subtitles": [], "position": 0, "title": stream["title"],
                 "track": "", "live": True, "hls": True}
-    idec = str(params.get("idec") or "") or _ivys_call(lambda: client.show(str(params.get("show") or "")))["idec"]
+    idec = str(params.get("idec") or "")
+    if not idec and params.get("following"):
+        # zkratka z oblíbeného pořadu: rozkoukaný díl, nebo první nezhlédnutý po naposledy dokoukaném
+        programme = _ivys_call(lambda: _ivys_programme(str(params.get("show") or "")))
+        with _library() as lib:
+            found = _ivys_call(lambda: _ivys_continue(lib, programme, _ivys_state(lib)))
+        if not found:
+            raise ApiError("Z tohoto pořadu jste zatím nic nedokoukali – otevřete ho a vyberte díl.")
+        idec = found[0]["idec"]
+    idec = idec or _ivys_call(lambda: client.show(str(params.get("show") or "")))["idec"]
     stream = _ivys_stream(client, idec, inspect=bool(params.get("inspect")))
     with _library() as lib:
-        if params.get("show") and not params.get("idec"):
+        if params.get("show") and not params.get("idec") and not params.get("following"):
             _ivys_remember_kind(lib, stream["show_id"], "movie")   # přehrání celého pořadu jedním videem: film
         lib.ivys_touch(idec, stream["show_id"], stream["episode_title"] or stream["title"], stream["show_title"],
                        stream["image"])
@@ -1917,7 +2083,7 @@ ACTIONS.update({
     "prehrajto_search": prehrajto_search, "search_history": search_history, "play_failed": play_failed,
     "play": play, "progress_save": progress_save, "link_failed": link_failed,
     "settings_get": settings_get, "settings_set": settings_set, "account_status": account_status,
-    "progress": progress, "sync": sync, "enrich": enrich,
+    "progress": progress, "sync": sync, "quick_sync": quick_sync, "enrich": enrich,
     "ivys_live": ivys_live, "ivys_category": ivys_category, "ivys_listing": ivys_listing, "ivys_show": ivys_show,
     "ivys_favorites": ivys_favorites, "ivys_favorite": ivys_favorite, "ivys_play": ivys_play,
 })
