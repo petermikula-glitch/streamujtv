@@ -23,6 +23,7 @@ import app_api as api
 FAVORITES = "favorites.json"
 CZECHOSLOVAK = "CZ|SK|XC"        # Česko, Slovensko a někdejší Československo (v TMDB kód XC)
 AVAILABLE_PREFIX = "avail:"      # kolik verzí titulu se na Přehraj.to naposledy našlo a zda je v iVysílání
+AVAILABLE_RULES = 2              # pravidla, podle kterých se počítá „je k mání“ (2 = štítek HD není „pod Full HD“)
 AVAILABLE_TTL = 7 * 24 * 3600
 MISSING_TTL = 2 * 24 * 3600      # nenalezený titul se ověří znovu dřív: nové soubory přibývají
 CHECK_WORKERS = 4                # kolik titulů se ověřuje souběžně
@@ -293,7 +294,11 @@ def _known(lib, kind, ids):
         if television is not None and \
                 now - (entry.get("its") or entry.get("ts") or 0) >= (AVAILABLE_TTL if television else MISSING_TTL):
             television = None
-        if now - (entry.get("ts") or 0) < (AVAILABLE_TTL if count or television else MISSING_TTL):
+        if not count and entry.get("r") != AVAILABLE_RULES:
+            count_known = False   # „není tam“ podle dřívějších pravidel kvality: ověří se znovu
+        else:
+            count_known = True
+        if count_known and now - (entry.get("ts") or 0) < (AVAILABLE_TTL if count or television else MISSING_TTL):
             known[key] = {"n": count, "iv": television}
     return known
 
@@ -315,7 +320,7 @@ def _remember_availability(kind, tmdb_id, count, television=None):
     if not tmdb_id:
         return
     key = AVAILABLE_PREFIX + "%s:%s" % (kind, tmdb_id)
-    entry = {"n": count, "ts": int(time.time())}
+    entry = {"n": count, "ts": int(time.time()), "r": AVAILABLE_RULES}
     with api._library() as lib:
         if television is None:
             try:
@@ -1092,7 +1097,7 @@ def title_csfd(params):
 
 
 NOT_FOUND = "Na Přehraj.to jsem tento film nenašel. Zkuste hledat ručně pod jiným názvem."
-LOW_QUALITY = ("Na Přehraj.to je tento film jen v nižší kvalitě než Full HD (nalezeno: %d). Nižší kvalitu "
+LOW_QUALITY = ("Na Přehraj.to je tento film jen v nižší kvalitě než %s (nalezeno: %d). Nižší kvalitu "
                "povolíte tlačítkem Jazyk a kvalita → Nejnižší kvalita.")
 
 
@@ -1201,7 +1206,8 @@ def _title_page(params, kind):
                      "items": [_version_card(version, state, choice) for version in good]})
     elif state.get("below_minimum"):
         # film na Přehraj.to je, ale jen v nižší kvalitě, než si uživatel přeje vidět
-        detail["plot"] = (LOW_QUALITY % state["below_minimum"] + "\n\n" + detail["plot"]).strip()
+        wanted = api.MINIMUM_LABEL.get(state["prefs"]["minimum"], "")
+        detail["plot"] = (LOW_QUALITY % (wanted, state["below_minimum"]) + "\n\n" + detail["plot"]).strip()
     else:
         detail["plot"] = (NOT_FOUND + "\n\n" + detail["plot"]).strip()
     rest = [version for version in versions if version["short"]]

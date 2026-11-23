@@ -237,9 +237,16 @@ LANGUAGE_CHOICES = (("dub", "Český dabing"), ("subs", "Originál s titulky"), 
 QUALITY_CHOICES = (("best", "Nejvyšší dostupná"), ("1080", "1080p"), ("720", "720p"),
                    ("small", "Úsporná (nejmenší soubor)"))
 # Nejnižší kvalita, která se z Přehraj.to ještě nabízí: na velké televizi nižší rozlišení nevypadá dobře.
-MINIMUM_CHOICES = (("1080", "Jen Full HD a vyšší (1080p, 2K, 4K)"), ("", "Bez omezení"))
-MIN_QUALITY_DEFAULT = "1080"
-FULL_HD_BITRATE = 2000000   # b/s: soubor bez uvedené kvality se za Full HD bere až od tohoto datového toku
+MINIMUM_CHOICES = (("", "Bez omezení"), ("720", "HD a vyšší (720p, 1080p, 4K)"),
+                   ("1080", "Jen Full HD a vyšší (1080p, 2K, 4K)"), ("2160", "Jen 4K"))
+MIN_QUALITY_DEFAULT = "720"
+MINIMUM_LABEL = {"720": "HD", "1080": "Full HD", "2160": "4K"}
+# Přehraj.to ve výpisu rozlišení neuvádí (jen štítek „HD“). Kde chybí i v názvu souboru, odhaduje se
+# z datového toku (velikost / délka): od kolika b/s se soubor bere jako HD a Full HD.
+# 4K se neodhaduje: velký soubor bývá stejně často Full HD ve vysokém toku.
+ESTIMATE_BITRATE = {720: 1500000, 1080: 2000000}
+LIKELY_FULL_HD = 6000000    # b/s: soubor označený jen „HD“ se od tohoto toku řadí mezi Full HD
+TOKEN_LINES = {"UHD": 2160, "FHD": 1080, "HD": 720, "SD": 480}
 # kopie natočená v kině: obraz i zvuk jsou výrazně horší, nabízí se až jako poslední
 CAM_RE = re.compile(r"(?<![a-z0-9])(?:cam|camrip|hdcam|ts|hdts|telesync|tc|telecine|kinorip)(?![a-z0-9])", re.I)
 BAD_VIDEOS = "bad_videos"       # verze, které se nepodařilo přehrát
@@ -253,6 +260,10 @@ def _prefs(settings=None):
     settings = _settings() if settings is None else settings
     language, quality = settings.get("prefer_language"), settings.get("prefer_quality")
     minimum = settings.get("min_quality")
+    if minimum == "1080" and not settings.get("min_quality_chosen"):
+        # Verze 0.14.0 měla „jen Full HD“ jako výchozí a hodně filmů kvůli tomu nenabízela. Hodnota
+        # uložená tehdy se bere jako nezvolená; kdo si Full HD vybere teď, tomu zůstane.
+        minimum = None
     return {"language": language if language in dict(LANGUAGE_CHOICES) else "dub",
             "quality": quality if quality in dict(QUALITY_CHOICES) else "best",
             "minimum": minimum if minimum in dict(MINIMUM_CHOICES) else MIN_QUALITY_DEFAULT,
@@ -313,21 +324,32 @@ def real_fetch(client, vid):
     return _real_from_streams(vid, streams)
 
 
-def _known_lines(video, prefs=None):
-    """Skutečné rozlišení toho, co si uživatel může pustit (počet řádků), nebo 0, když se neví.
+def _measured_lines(video, prefs=None):
+    """Rozlišení toho, co si uživatel pustí, pokud je známé jistě (počet řádků), jinak 0.
 
-    Původní soubor (hraje se s účtem): změřené rozlišení, jinak nejvyšší překódovaná verze – nebo víc,
-    když to říká název souboru (Přehraj.to překódovává nejvýš do 1080p, 4K je jen původní soubor)."""
+    Bez účtu se hraje překódovaná verze a ty stránka videa vyjmenuje. S účtem se hraje původní soubor
+    a jeho rozlišení stránka neuvádí: jisté je až po prvním přehrání, kdy ho změří přehrávač."""
     real = video.get("real") or {}
+    if (prefs or {}).get("account"):
+        return real.get("played") or 0
     heights = real.get("heights") or []
-    if not (prefs or {}).get("account"):
-        return max(heights) if heights else 0
-    if real.get("played"):
-        return real["played"]
-    if not heights:
-        return 0
-    named = {"UHD": 2160, "FHD": 1080}.get(_exact_token(video.get("quality")), 0)
-    return max(max(heights), named)
+    return max(heights) if heights else 0
+
+
+def _least_lines(video, prefs=None):
+    """Rozlišení, které soubor má přinejmenším: nejvyšší překódovaná verze na stránce videa (původní
+    soubor nemůže být horší) a přesný údaj v názvu souboru („1080p“, „4K“)."""
+    measured = _measured_lines(video, prefs)
+    if measured:
+        return measured
+    heights = (video.get("real") or {}).get("heights") or []
+    return max(heights + [TOKEN_LINES.get(_exact_token(video.get("quality")), 0)])
+
+
+def _bitrate(video):
+    """Datový tok souboru v b/s podle velikosti a délky; 0, když jedno z toho chybí."""
+    size, duration = _size_bytes(video.get("size")), video.get("duration") or 0
+    return size * 8.0 / duration if size and duration else 0
 
 
 def _playing_quality(video, prefs, saved=False):
@@ -344,8 +366,11 @@ def _playing_quality(video, prefs, saved=False):
     chosen = _pick_stream(streams, prefs)
     if chosen["quality"] != "ORIG":
         return "%dp" % chosen["lines"]
-    lines = _known_lines(video, prefs)
-    return "originál %s" % _lines_label(lines) if lines else "originál"
+    lines = _least_lines(video, prefs)
+    if lines >= 1080 or _measured_lines(video, prefs):
+        return "originál %s" % _lines_label(lines)
+    # Nabízí-li stránka jen 720p, o původním souboru to říká jen „HD nebo lepší“.
+    return "originál HD" if lines >= 720 or provider.quality_token(video.get("quality") or "") == "HD" else "originál"
 
 
 def _shown_quality(video, prefs, saved=False):
@@ -353,23 +378,33 @@ def _shown_quality(video, prefs, saved=False):
     return _playing_quality(video, prefs, saved) or video.get("quality") or ""
 
 
-def _meets_minimum(video, prefs):
-    """Vyhovuje soubor nejnižší kvalitě, kterou si uživatel přeje vidět (Full HD a vyšší)?
+def _need_lines(prefs):
+    minimum = str((prefs or {}).get("minimum") or "")
+    return int(minimum) if minimum.isdigit() else 0
 
-    Rozhoduje skutečné rozlišení, když je známé (stránka videa, přehrávání); jinak kvalita z výpisu
-    nebo z názvu souboru (1080p, 2K, 4K projdou; 720p a nižší ne). Když ji soubor neuvádí přesně
-    (nic, nebo jen „HD“), odhadne se z velikosti a délky; soubor, o kterém se neví nic, neprojde."""
-    if (prefs or {}).get("minimum") != "1080":
+
+def _meets_minimum(video, prefs):
+    """Vyhovuje soubor nejnižší kvalitě, kterou si uživatel přeje vidět (HD / Full HD / 4K a vyšší)?
+
+    Rozhoduje, co je jisté: změřené rozlišení, překódované verze na stránce videa a přesný údaj v názvu
+    souboru („1080p“, „4K“). Štítek „HD“ z výpisu Přehraj.to znamená jen „720p nebo víc“ – nese ho
+    i Full HD a 4K –, a tak se u něj (stejně jako u souboru bez údaje) vyšší kvalita odhaduje
+    z velikosti a délky. Soubor, o kterém se neví nic, neprojde."""
+    need = _need_lines(prefs)
+    if not need:
         return True
-    lines = _known_lines(video, prefs)
-    if lines:
-        return lines >= 1080   # ověřeno na stránce videa nebo při přehrávání
-    order = provider.QUALITY_ORDER
-    token = _exact_token(video.get("quality"))
-    if token:
-        return order.index(token) <= order.index("FHD")
-    size, duration = _size_bytes(video.get("size")), video.get("duration") or 0
-    return bool(size and duration) and size * 8.0 / duration >= FULL_HD_BITRATE
+    measured = _measured_lines(video, prefs)
+    if measured:
+        return measured >= need
+    if _least_lines(video, prefs) >= need:
+        return True
+    exact = _exact_token(video.get("quality"))
+    if exact:
+        return TOKEN_LINES.get(exact, 0) >= need
+    if need <= 720 and provider.quality_token(video.get("quality") or "") == "HD":
+        return True
+    estimate = ESTIMATE_BITRATE.get(need)
+    return bool(estimate) and _bitrate(video) >= estimate
 
 
 def _size_bytes(text):
@@ -424,18 +459,28 @@ def _version_rank(video, prefs=None, bad=()):
     """Pořadí verzí filmu nebo dílu podle předvoleb; kino kopie a nefunkční verze až na konec."""
     prefs = prefs or _prefs()
     name = video.get("raw_title") or ""
-    lines = _known_lines(video, prefs)
-    quality = "%dp" % lines if lines else video.get("quality")
+    lines, rate = _least_lines(video, prefs), _bitrate(video)
+    quality = video.get("quality")
+    if lines >= 1080 or _measured_lines(video, prefs):
+        quality = "%dp" % lines
+    elif not _exact_token(quality) and rate >= LIKELY_FULL_HD:
+        quality = "1080p"   # jen „HD“ nebo nic, ale velký soubor: řadí se mezi Full HD
+    # Při stejné kvalitě má u „nejvyšší dostupné“ přednost soubor s vyšším datovým tokem (větší na
+    # minutu = lepší obraz); dřív rozhodovala abeceda.
     return (bool(CAM_RE.search(name)), video.get("id") in bad, _language_rank(video.get("lang"), prefs["language"]),
-            _quality_rank(quality, video.get("size"), prefs["quality"]), name)
+            _quality_rank(quality, video.get("size"), prefs["quality"]),
+            -int(rate) if prefs["quality"] == "best" else 0, name)
 
 
 def _pick_stream(streams, prefs):
     """Varianta souboru k přehrání (originál, 2160p, 1080p…) podle předvolené kvality."""
     order = provider.QUALITY_ORDER
     quality = prefs["quality"]
-    if prefs.get("minimum") == "1080" and quality in ("720", "small"):
-        quality = "1080"   # nejnižší povolená kvalita má přednost před úspornou předvolbou
+    need = _need_lines(prefs)   # nejnižší povolená kvalita má přednost před úspornou předvolbou
+    if need >= 1080 and quality in ("720", "small"):
+        quality = "1080"
+    elif need >= 720 and quality == "small":
+        quality = "720"
 
     def rank(stream):
         token = stream.get("quality")
@@ -1439,6 +1484,8 @@ def settings_set(params):
                     "min_quality"):
             if key in params and params[key] is not None:
                 settings[key] = str(params[key]).strip()
+        if params.get("min_quality") is not None:
+            settings["min_quality_chosen"] = True
         for key in ("delete_watched", "onboarded"):   # přepínače
             if key in params and params[key] is not None:
                 settings[key] = bool(params[key])

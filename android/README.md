@@ -206,10 +206,11 @@ přehraje. Stránka filmu se proto u verze, kterou pustí tlačítko Přehrát, 
 dotaz, výsledek se pamatuje) a na tlačítko napíše jazyk a kvalitu, ve které se film opravdu pustí:
 „1080p“ = překódovaná verze, „originál 1080p“ / „originál 4K“ = původní soubor (hraje se s účtem). Rozlišení
 původního souboru stránka videa neuvádí: bere se nejvyšší překódovaná verze, nebo víc, když to říká název
-souboru – a po prvním přehrání ho nahradí rozměry obrazu, které nahlásí přehrávač (`onVideoSizeChanged`).
+souboru; nabízí-li stránka jen 720p, napíše se „originál HD“ (původní soubor může být lepší). Po prvním
+přehrání to nahradí rozměry obrazu, které nahlásí přehrávač (`onVideoSizeChanged`).
 Ostatní verze mají skutečnou kvalitu, jakmile se jednou pustí; do té doby nesou údaj z výpisu. Verze,
-která se po ověření ukáže jako horší než nejnižší povolená kvalita, vypadne a ověří se další (nejvýš
-`VERIFY_VERSIONS`).
+o které se jistě ví, že je horší než nejnižší povolená kvalita (bez účtu podle překódovaných verzí, s účtem
+až podle změřeného obrazu), vypadne a ověří se další (nejvýš `VERIFY_VERSIONS`).
 
 **Předvolby přehrávání** (dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích, tlačítko na stránce
 titulu a Nastavení; cíl typu `choices`, akce `prefs_choices`): jazyk (český dabing / originál s titulky / jedno) a kvalita
@@ -231,14 +232,17 @@ Díl se nikdy nepřeskočí potichu: chybí-li v katalogu bezprostředně násle
 na Přehraj.to, a teprve když tam není, nabídne se pozdější díl z katalogu – s poznámkou, který chybí,
 a bez samočinného spuštění. Zapamatovaná adresa souboru platí jen pro předvolbu kvality, se kterou
 vznikla; po změně předvolby se varianta vybere znovu.
-**Nejnižší kvalita** (`min_quality`, výchozí „Jen Full HD a vyšší“; `_meets_minimum` v `app_api.py`): z Přehraj.to
-se nabízejí jen verze v rozlišení 1080p a vyšším (Full HD, 2K, 4K) – na stránce titulu, v hledání souborů,
-u dalšího dílu i při stahování řady – a titul, který je jen v nižší kvalitě, se v Objevuj nepočítá mezi dostupné.
-Rozhoduje skutečné rozlišení, když je známé (viz Skutečná kvalita), jinak kvalita z výpisu nebo z názvu
-souboru; když ji soubor neuvádí přesně (nic, nebo jen „HD“), odhadne se z velikosti a délky
-(od 2 Mb/s), a soubor, o kterém se neví nic, se nenabídne. Vlastní soubory v katalogu a stažené soubory se
-neskrývají. Vypíná se v předvolbách „Jazyk a kvalita“ → Nejnižší kvalita → Bez omezení; stránka titulu, který
-je jen v nižší kvalitě, to sama napíše.
+**Nejnižší kvalita** (`min_quality`: bez omezení / HD a vyšší – výchozí / jen Full HD a vyšší / jen 4K;
+`_meets_minimum` v `app_api.py`): z Přehraj.to se nabízejí jen verze v aspoň takové kvalitě – na stránce
+titulu, v hledání souborů, u dalšího dílu i při stahování řady – a titul, který je jen v nižší kvalitě, se
+v Objevuj nepočítá mezi dostupné. Přehraj.to ve výpisu rozlišení neuvádí, jen štítek „HD“, který nese 720p
+stejně jako Full HD a 4K. Rozhoduje proto, co je jisté – změřené rozlišení, překódované verze na stránce
+videa (viz Skutečná kvalita) a přesný údaj v názvu souboru („1080p“, „4K“) – a teprve potom odhad z velikosti
+a délky (HD od 1,5 Mb/s, Full HD od 2 Mb/s; 4K se neodhaduje). Soubor, o kterém se neví nic, se nenabídne.
+Vlastní soubory v katalogu a stažené soubory se neskrývají. Mění se v předvolbách „Jazyk a kvalita“ →
+Nejnižší kvalita; stránka titulu, který je jen v nižší kvalitě, to sama napíše.
+Při předvolbě „nejvyšší dostupná“ má mezi verzemi stejné kvality přednost soubor s vyšším datovým tokem
+(větší na minutu) a soubor označený jen „HD“ se od 6 Mb/s řadí mezi Full HD (`_version_rank`).
 Změna předvolby jazyka nebo kvality platí hned: obrazovka se načte znovu a verze, které si uživatel
 dřív u titulů vybral ručně, přestanou mít přednost (`settings_set` je zapomene).
 Řada **Další díly** na hlavní obrazovce: po dokoukaném dílu z katalogu ten následující a seriály
