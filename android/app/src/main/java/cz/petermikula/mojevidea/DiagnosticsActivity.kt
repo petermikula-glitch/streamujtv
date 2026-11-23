@@ -76,6 +76,11 @@ class DiagnosticsActivity : FragmentActivity() {
                 val item = lines!!.optJSONObject(index) ?: continue
                 line(item.optString("label"), item.optString("value"), if (item.isNull("ok")) null else item.optBoolean("ok"))
             }
+            // co z předání chráněných pořadů přijímá oficiální aplikace ČT v tomto zařízení
+            data.optJSONObject("external")?.let { external ->
+                val (state, usable) = OfficialApp.describe(this, external)
+                line("Aplikace ${external.optString("name")}", state, usable)
+            }
             val errors = data.optJSONArray("errors")
             out.append(if ((errors?.length() ?: 0) == 0) "\nŽádné zaznamenané chyby.\n" else "\nPoslední chyby (nejnovější nahoře):\n")
             for (index in 0 until (errors?.length() ?: 0)) {

@@ -198,6 +198,9 @@ class PlayerActivity : FragmentActivity() {
         when (OfficialApp.open(this, external)) {
             OfficialApp.Result.OPENED_TITLE ->
                 Toast.makeText(this, "Chráněný pořad – otevírám v aplikaci $name.", Toast.LENGTH_LONG).show()
+            OfficialApp.Result.OPENED_SEARCH ->
+                Toast.makeText(this, "Chráněný pořad – hledám ho v aplikaci $name: ${external.optString("query")}",
+                    Toast.LENGTH_LONG).show()
             OfficialApp.Result.OPENED_APP ->
                 Toast.makeText(this, "Chráněný pořad – v aplikaci $name vyhledejte: ${external.optString("title")}",
                     Toast.LENGTH_LONG).show()

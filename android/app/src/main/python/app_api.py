@@ -272,6 +272,13 @@ def _language_rank(lang, prefer):
     return 0
 
 
+def _known_quality(listed, named):
+    """Kvalita souboru: údaj z výpisu Přehraj.to, a když mu aplikace nerozumí, kvalita z názvu souboru."""
+    if provider.quality_token(listed or ""):
+        return listed
+    return named if provider.quality_token(named or "") else (listed or named or "")
+
+
 def _quality_rank(quality, size, prefer):
     order = provider.QUALITY_ORDER
     token = provider.quality_token(quality)
@@ -1008,7 +1015,7 @@ def prehrajto_search(params):
                 title = result["title"]
                 video = dict(nameparser.parse(title), id=result["id"], raw_title=title,
                              thumb=result.get("thumb", ""), size=result.get("size", ""))
-                video["quality"] = result.get("quality") or video["quality"]
+                video["quality"] = _known_quality(result.get("quality"), video["quality"])
             if not _search_filter_passes(video, chosen):
                 continue
             key = "|".join(str(part) for part in (search_results.normalize(video.get("title") or ""),
@@ -1894,18 +1901,25 @@ def ivys_play(params):
     if stream.get("dash") and not (stream.get("drm") or {}).get("license"):
         # Chráněný pořad bez adresy licence aplikace přehrát neumí: předá ho oficiální aplikaci ČT,
         # je-li v zařízení (rozhodne přehrávač; jinak zkusí přehrát sám a ukáže, proč to nejde).
-        result["external"] = _ivys_official(stream["show_id"], idec, title)
+        result["external"] = _ivys_official(stream["show_id"], idec, title, stream["show_title"] or stream["title"])
     return result
 
 
-def _ivys_official(show_id, idec, title):
-    """Předání pořadu oficiální aplikaci iVysílání: její balíčky a veřejná adresa pořadu na webu ČT.
+def _ivys_official(show_id, idec, title, query=""):
+    """Předání pořadu oficiální aplikaci iVysílání: její balíčky, veřejné adresy pořadu na webu ČT
+    a název pořadu pro hledání.
 
-    Adresa je běžná stránka pořadu (``/porady/<pořad>/<díl>/``, web ČT si ji sám doplní o název);
-    aplikace ČT ji otevře, pokud se k takovým odkazům hlásí, jinak se aspoň spustí."""
-    path = "/".join(part for part in (str(show_id or ""), str(idec or "")) if part.isdigit())
-    return {"name": "iVysílání ČT", "packages": list(IVYS_APPS), "title": title,
-            "url": IVYS_WEB % path if show_id and str(show_id).isdigit() else ""}
+    Adresy jsou běžné stránky (``/porady/<pořad>/<díl>/`` a ``/porady/<pořad>/``; web ČT si je sám
+    doplní o název). Aplikace ČT je otevře, pokud se k takovým odkazům hlásí; jinak ji přehrávač
+    požádá, ať pořad podle názvu najde (``query``), a když ani to neumí, aspoň ji spustí."""
+    show = str(show_id or "") if str(show_id or "").isdigit() else ""
+    urls = []
+    if show:
+        if str(idec or "").isdigit():
+            urls.append(IVYS_WEB % ("%s/%s" % (show, idec)))
+        urls.append(IVYS_WEB % show)
+    return {"name": "iVysílání ČT", "packages": list(IVYS_APPS), "title": title, "query": query or title,
+            "url": urls[0] if urls else "", "urls": urls}
 
 
 def _ivys_stream(client, idec, inspect=False):
@@ -2409,7 +2423,9 @@ def diagnostics(params):
     add("Předvolby", "%s, %s" % (dict(LANGUAGE_CHOICES)[prefs["language"]], dict(QUALITY_CHOICES)[prefs["quality"]]))
     errors = ["%s  %s: %s" % (time.strftime("%d.%m. %H:%M", time.localtime(entry.get("time") or 0)),
                               entry.get("action") or "", entry.get("text") or "") for entry in _errors()]
-    return {"lines": lines, "errors": errors}
+    # zkušební předání oficiální aplikaci ČT: obrazovka podle něj zjistí, co aplikace v zařízení přijímá
+    return {"lines": lines, "errors": errors,
+            "external": _ivys_official("10195164142", "208522161400008", "Vyprávěj", "Vyprávěj")}
 
 
 def _failure(text, error):

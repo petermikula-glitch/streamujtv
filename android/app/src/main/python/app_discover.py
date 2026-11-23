@@ -886,7 +886,7 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
     for result, parsed in found.values():
         video = dict(parsed, id=result["id"], raw_title=result["title"], thumb=result.get("thumb", ""),
                      size=result.get("size", ""), duration=result.get("duration") or 0)
-        video["quality"] = result.get("quality") or video.get("quality") or ""
+        video["quality"] = api._known_quality(result.get("quality"), video.get("quality"))
         same = (video["duration"], video["size"], video["quality"], video.get("lang"))
         if video["duration"] and video["size"] and same in seen:
             continue  # tentýž soubor nahraný vícekrát

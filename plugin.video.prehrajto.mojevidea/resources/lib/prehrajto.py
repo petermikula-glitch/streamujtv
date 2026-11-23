@@ -183,8 +183,16 @@ def _quality_from_res(res):
     return "SD"
 
 
+# Jak se kvalita píše slovy; pořadí je důležité („Full HD“ dřív než „HD“).
+_QUALITY_WORDS = (("UHD", r"2160p?|4k|uhd|ultra\s?hd"), ("FHD", r"1080[pi]?|fhd|full\s?hd"),
+                  ("HD", r"720p?|hd(?:\s?ready)?"), ("SD", r"576p?|480p?|360p?|sd"), ("ORIG", r"orig(?:in[aá]l)?"))
+
+
 def quality_token(value):
-    """Normalizuje kvalitu z názvu souboru, z katalogu nebo ze streamu."""
+    """Normalizuje kvalitu z názvu souboru, z katalogu nebo ze streamu.
+
+    Rozumí i slovním označením („4K“, „4K UHD“, „Full HD“): dřív se nepoznala, takový soubor se bral
+    jako soubor neznámé kvality a při volbě nejvyšší kvality skončil až za ostatními."""
     text = (value or "").strip()
     if text.upper() in QUALITY_ORDER:
         return text.upper()
@@ -192,7 +200,13 @@ def quality_token(value):
         if text.casefold() == label.casefold():
             return key
     match = re.fullmatch(r"(\d{3,4})p?", text, re.I)
-    return _quality_from_res(match[1]) if match else ""
+    if match:
+        return _quality_from_res(match[1])
+    lowered = text.casefold()
+    for key, pattern in _QUALITY_WORDS:
+        if re.search(r"(?<![a-z0-9])(?:%s)(?![a-z0-9])" % pattern, lowered):
+            return key
+    return ""
 
 
 def strip_comments(page):

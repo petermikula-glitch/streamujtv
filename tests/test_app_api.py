@@ -1212,14 +1212,17 @@ def test_protected_programme_without_licence_is_handed_to_the_official_app(api, 
     result = api("ivys_play", idec="208522161400002")
     # ČT licenci neposlala: přehrávač dostane, komu pořad předat – balíčky oficiální aplikace a stránku dílu
     assert result["external"] == {
-        "name": "iVysílání ČT", "title": "Zahraniční seriál · Díl 2",
+        "name": "iVysílání ČT", "title": "Zahraniční seriál · Díl 2", "query": "Zahraniční seriál",
         "packages": ["cz.ceskatelevize.ivysilani.tvapp", "cz.motion.ivysilani"],
-        "url": "https://www.ceskatelevize.cz/porady/10195164142/208522161400002/"}
+        "url": "https://www.ceskatelevize.cz/porady/10195164142/208522161400002/",
+        "urls": ["https://www.ceskatelevize.cz/porady/10195164142/208522161400002/",
+                 "https://www.ceskatelevize.cz/porady/10195164142/"]}
     assert result["dash"] and result["url"]          # bez oficiální aplikace se přehrání zkusí jako dosud
 
     # pořad bez známého čísla pořadu: aplikace se jen spustí, žádná vymyšlená adresa
     monkeypatch.setattr(app_api, "_ivys", lambda timeout=None: Client(dict(stream, show_id="")))
-    assert api("ivys_play", idec="208522161400002")["external"]["url"] == ""
+    bare = api("ivys_play", idec="208522161400002")["external"]
+    assert (bare["url"], bare["urls"], bare["query"]) == ("", [], "Zahraniční seriál")   # zbývá hledání podle názvu
 
     # s adresou licence od ČT se hraje v aplikaci, stejně jako nechráněný pořad
     licensed = dict(stream, drm={"license": "https://licence.example/wv"})
@@ -1666,6 +1669,28 @@ def test_wrong_assignment_can_be_repaired_by_hand(api, monkeypatch):
         lib.upsert_video("40:ulice:%016x" % 40, "Ulice 4521", "account", None)
     assert api("repair_video", vid="40:ulice:%016x" % 40, field="episode_of", text="4521")["toast"] == "Opraveno: Ulice 1×4521"
     assert "není" in api("repair", vid="9:x:00000000000000ff")["error"]
+
+
+def test_best_quality_prefers_4k_however_the_site_labels_it(api, monkeypatch):
+    api("settings_set", prefer_language="any")
+    full = _web(81, "Duna 2021 CZ", 9000, "9 GB", quality="1080p")
+    worded = _web(82, "Duna 2021 CZ", 9000, "24 GB", quality="4K")            # slovní označení z výpisu
+    named = _web(83, "Duna 2021 CZ 2160p", 9000, "22 GB", quality="")         # kvalita jen v názvu souboru
+    odd = _web(84, "Duna 2021 CZ UHD", 9000, "20 GB", quality="Blu-ray")      # výpisu aplikace nerozumí: platí název
+    _catalogue_search(monkeypatch, {"Duna 2021": [full, worded, named, odd]})
+    with app_api._library() as lib:
+        state = app_api._state(lib)
+    versions = app_api.app_discover._find_versions(["Duna"], 2021, None, state)
+    order = [version["video"]["id"] for version in versions]
+    assert order[-1] == full["id"] and set(order[:3]) == {worded["id"], named["id"], odd["id"]}   # 4K před 1080p
+    assert app_api.provider.quality_token("4K") == app_api.provider.quality_token("4k UHD") == "UHD"
+    assert app_api.provider.quality_token("Full HD") == "FHD" and app_api.provider.quality_token("HD") == "HD"
+    assert app_api.provider.quality_token("xvid") == ""
+
+    api("settings_set", prefer_quality="1080")                                # s předvolbou 1080p je první 1080p
+    with app_api._library() as lib:
+        state = app_api._state(lib)
+    assert app_api.app_discover._find_versions(["Duna"], 2021, None, state)[0]["video"]["id"] == full["id"]
 
 
 def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):

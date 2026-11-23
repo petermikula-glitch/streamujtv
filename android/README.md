@@ -246,6 +246,9 @@ zamkne proti přepsání; „Vrátit automatické rozpoznání“ zámek zruší
 **Hledání verzí** (`_find_versions`): když pod prvním názvem není verze podle předvoleb (jazyk, kvalita,
 žádná kino kopie), hledá se dál pod dalšími názvy – původní název často najde lepší soubor než český.
 Výpis „Filtrovat videa“ z hledání má filtr jazyka a kvality (`search_filters`).
+Kvalita se čte z výpisu Přehraj.to i z názvu souboru a rozumí se i slovním označením („4K“, „4K UHD“,
+„Full HD“); při volbě „Nejvyšší dostupná“ má 4K přednost před 1080p. Přednost jazyka je ale silnější:
+dabovaná verze 1080p se nabídne před 4K v originále.
 
 **Další díl v iVysílání** (`ivys_next`, `_ivys_following` v `app_api.py`): po dokoukání dílu z iVysílání
 přehrávač nabídne další díl téhož pořadu – podle pořadí ve výpisu ČT, ať je řazený od nejnovějšího,
@@ -341,15 +344,18 @@ a přístupový údaj opsané z oficiálního přehrávače, což pravidla proje
 manifest o ochraně říká a která pole odpověď má (jen názvy, žádné hodnoty).
 
 **Předání oficiální aplikaci ČT.** Chráněný pořad, ke kterému ČT neposlala adresu licence, se proto
-nepřehrává zde, ale otevře se rovnou v oficiální aplikaci iVysílání, je-li v zařízení
+nepřehrává zde, ale otevře se v oficiální aplikaci iVysílání, je-li v zařízení
 (`cz.ceskatelevize.ivysilani.tvapp` pro Android TV, případně `cz.motion.ivysilani`). Logika k odpovědi
-`ivys_play` přidá `external` – balíčky aplikace a veřejnou adresu dílu na webu ČT
-(`https://www.ceskatelevize.cz/porady/<pořad>/<díl>/`); `OfficialApp.kt` adresu předá aktivitě
-oficiální aplikace, která se k takovým odkazům sama hlásí, a když žádná není, aplikaci aspoň spustí
+`ivys_play` přidá `external` – balíčky aplikace, veřejné adresy dílu a pořadu na webu ČT
+(`https://www.ceskatelevize.cz/porady/<pořad>/<díl>/`) a název pořadu. `OfficialApp.kt` zkouší postupně
+jen to, k čemu se oficiální aplikace sama hlásí: adresu dílu a pořadu, „přehraj z hledání“ a hledání
+podle názvu (`MEDIA_PLAY_FROM_SEARCH`, `ACTION_SEARCH`); když nic z toho neumí, aplikaci aspoň spustí
 a napíše, co v ní vyhledat. Bez oficiální aplikace se přehrání zkusí jako dřív a chybová zpráva poradí
 ji nainstalovat. Balíčky musí být zapsané i v `AndroidManifest.xml` (`<queries>`).
-Ověřeno jen se zástupnou aplikací v emulátoru: jestli oficiální aplikace odkaz na díl sama otevře
-a spustí, ukáže až zkouška na zařízení.
+Co oficiální aplikace v daném zařízení přijímá, ukazuje **Diagnostika** (řádek „Aplikace iVysílání ČT“:
+které způsoby předání přijímá a k jakým akcím a adresám se hlásí ve svém manifestu).
+Ověřeno jen se zástupnou aplikací v emulátoru: jestli oficiální aplikace odkaz nebo hledání opravdu
+dovede až k pořadu, ukáže zkouška na zařízení.
 
 ## Stahování na disk
 
