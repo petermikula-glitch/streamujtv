@@ -181,7 +181,7 @@ def _cached(key, ttl, load):
 # ---------------------------------------------------------------------------
 
 POSTER_LISTS = ("discover", "favorites", "movies", "shows", "profiles", "profile_avatars", "discover_person",
-                "downloads", "discover_fresh")
+                "downloads", "discover_fresh", "discover_index")
 
 
 def _target(kind, call=None, params=None, title=None):

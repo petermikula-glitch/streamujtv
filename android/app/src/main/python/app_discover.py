@@ -26,6 +26,8 @@ CZECHOSLOVAK = "CZ|SK|XC"        # Česko, Slovensko a někdejší Českoslovens
 AVAILABLE_PREFIX = "avail:"      # kolik verzí titulu se na Přehraj.to naposledy našlo a zda je v iVysílání
 AVAILABLE_RULES = 2              # pravidla, podle kterých se počítá „je k mání“ (2 = štítek HD není „pod Full HD“)
 AVAILABLE_TTL = 14 * 24 * 3600   # nalezený titul: soubory mizí zřídka (a stránka titulu údaj opraví sama)
+MISS_TTL = 6 * 3600              # nalezený titul, který se při novém ověření nenašel: zkusit znovu po této době
+MISSES_TO_DROP = 2               # po tolika nepovedených ověřeních za sebou se titul přestane nabízet
 TV_MISSING_TTL = 7 * 24 * 3600   # „v iVysílání není“ platí déle: seznam titulů se prochází celý a ČT přidává pomalu
 MISSING_TTL = 2 * 24 * 3600      # nenalezený titul se ověří znovu dřív: nové soubory přibývají
 # … a tím dřív, čím je titul novější (rok uvedení → za jak dlouho znovu): novinky přibývají ze dne na den
@@ -45,6 +47,7 @@ CHECK_PAUSE = 120                # služba, která neodpovídá, se tolik sekund
 CHECK_WAIT = 20                  # déle výpis nečeká, až doběhne jiné ověřování
 BACKGROUND = True                # výpis na ověřování nečeká: tituly ukáže hned a ověřuje je na pozadí
 VERIFY_QUEUE = 120               # víc titulů na ověření nečeká (starší požadavky propadnou)
+RECHECK_REFRESH = 8              # totéž, když se jen potichu přeověřují starší údaje
 VERIFY_REFRESH = 2               # po kolika sekundách si má obrazovka říct o čerstvý stav
 # Ověřování na pozadí: fronta titulů (naposledy otevřený výpis první), právě ověřované a ty, které se
 # ověřit nepodařilo (chvíli se nezkoušejí, aby se výpis neobnovoval donekonečna).
@@ -294,8 +297,13 @@ def _title_card(kind, tmdb_id, title, year, poster, orig, state, rating=0, favor
 
 def _known(lib, kind, ids):
     """Co aplikace ví o dostupnosti titulů: ``{"movie:11": {"n": verzí na Přehraj.to, "iv": pořad
-    v iVysílání | "" | None}}``; ``None`` = iVysílání se u titulu ještě neověřovalo. Nalezený titul
-    platí týden, nenalezený dva dny."""
+    v iVysílání | "" | None}}``; ``None`` = iVysílání se u titulu ještě neověřovalo.
+
+    Co se jednou zjistilo, zůstává: záznam, kterému vypršela platnost, se vrací dál, jen s ``stale`` –
+    titul nalezený na Přehraj.to se tedy ukazuje, dokud nové ověření neřekne, že tam už není, a jen
+    se na pozadí ověří znovu. Dřív se takový titul bral jako neznámý: zmizel z výpisu a čekalo se na
+    nové ověření. Platnost: nalezený ``AVAILABLE_TTL`` (po jednom nepovedeném ověření ``MISS_TTL``),
+    nenalezený podle stáří titulu (``ttl`` v záznamu)."""
     known, now = {}, time.time()
     for tmdb_id in ids:
         key = "%s:%s" % (kind, tmdb_id)
@@ -312,17 +320,23 @@ def _known(lib, kind, ids):
                 now - (entry.get("its") or entry.get("ts") or 0) >= (AVAILABLE_TTL if television else TV_MISSING_TTL):
             television = None
         if not count and entry.get("r") != AVAILABLE_RULES:
-            count_known = False   # „není tam“ podle dřívějších pravidel kvality: ověří se znovu
-        elif count and "d" not in entry:
-            count_known = False   # záznam ze starší verze bez souhrnu verzí (dabing, kvalita): doplní se
+            continue              # „není tam“ podle dřívějších pravidel kvality: jako by se neověřovalo
+        if count:
+            valid = MISS_TTL if entry.get("miss") else AVAILABLE_TTL
         else:
-            count_known = True
-        missing_ttl = entry.get("ttl") or MISSING_TTL
-        if count_known and now - (entry.get("ts") or 0) < (AVAILABLE_TTL if count or television else missing_ttl):
-            known[key] = {"n": count, "iv": television}
-            if "d" in entry:   # souhrn verzí (od verze se seznamem dostupných titulů)
-                known[key].update(d=entry.get("d") or "", q=int(entry.get("q") or 0))
+            valid = AVAILABLE_TTL if television else entry.get("ttl") or MISSING_TTL
+        known[key] = {"n": count, "iv": television}
+        if "d" in entry:   # souhrn verzí (od verze se seznamem dostupných titulů)
+            known[key].update(d=entry.get("d") or "", q=int(entry.get("q") or 0), s=int(entry.get("s") or 0))
+        if now - (entry.get("ts") or 0) >= valid or (count and "d" not in entry):
+            known[key]["stale"] = True   # ověřit znovu (nebo doplnit souhrn verzí), ale dál platí
     return known
+
+
+def _fresh(known, key):
+    """Je údaj o titulu čerstvý a úplný (není ho třeba ověřovat)?"""
+    entry = known.get(key)
+    return bool(entry) and not entry.get("stale") and entry["iv"] is not None
 
 
 def _availability(lib, kind, ids):
@@ -336,6 +350,7 @@ def _mark_known(state, known):
     state.setdefault("television", {}).update({key: entry["iv"] for key, entry in known.items() if entry["iv"]})
     state.setdefault("summary", {}).update({key: (entry["d"], entry["q"]) for key, entry in known.items()
                                             if "d" in entry and entry["n"]})
+    state.setdefault("subtitled", set()).update(key for key, entry in known.items() if entry.get("s") and entry["n"])
 
 
 def _missing_ttl(year):
@@ -348,10 +363,10 @@ FRESH_RELEASE = 150 * 24 * 3600   # titul uvedený před kratší dobou je při 
 
 
 def _summary(versions):
-    """Souhrn verzí titulu pro štítky a filtr: ``{"d": "cz,sk" (jaký dabing je k mání), "q": nejlepší
-    známé rozlišení v řádcích}``. Rozlišení jen tam, kde ho soubor říká přesně („1080p“, „4K“) – štítek
+    """Souhrn verzí titulu pro štítky, filtr a řazení: ``{"d": "cz,sk" (jaký dabing je k mání), "q":
+    nejlepší známé rozlišení v řádcích, "s": 1 když je verze s českými nebo slovenskými titulky}``. Rozlišení jen tam, kde ho soubor říká přesně („1080p“, „4K“) – štítek
     „HD“ z výpisu znamená jen „720p nebo víc“."""
-    dubs, best = set(), 0
+    dubs, best, subtitled = set(), 0, False
     for version in versions:
         if version.get("short"):
             continue
@@ -361,7 +376,8 @@ def _summary(versions):
         token = api._exact_token(video.get("quality"))
         best = max(best, api.TOKEN_LINES.get(token, 0),
                    720 if provider.quality_token(video.get("quality") or "") == "HD" else 0)
-    return {"d": ",".join(sorted(dubs)), "q": best}
+        subtitled = subtitled or any("titulky" in part for part in parts)
+    return {"d": ",".join(sorted(dubs)), "q": best, "s": int(subtitled)}
 
 
 def _card_fields(item):
@@ -396,8 +412,15 @@ def _remember_availability(kind, tmdb_id, count, television=None, year=0, extra=
             old = None
         old = old if isinstance(old, dict) else {}
         # údaje pro kartu a souhrn zůstávají, dokud je nepřepíše čerstvější
-        entry.update({name: old[name] for name in ("t", "o", "y", "rd", "p", "v", "d", "q", "f") if name in old})
+        entry.update({name: old[name] for name in ("t", "o", "y", "rd", "p", "v", "d", "q", "s", "f") if name in old})
         entry.update(extra or {})
+        if not count and old.get("n") and old.get("r") == AVAILABLE_RULES \
+                and int(old.get("miss") or 0) + 1 < MISSES_TO_DROP:
+            # Byl tam a teď se nenašel: jedno hledání se může splést (web zrovna nic nevrátil). Titul
+            # zůstává, jen se brzy ověří znovu; přestane se nabízet až po dalším neúspěchu.
+            count = entry["n"] = int(old["n"])
+            entry["miss"] = int(old.get("miss") or 0) + 1
+            entry.update({name: old[name] for name in ("d", "q", "s") if name in old})
         if not count:
             entry.pop("f", None)
         elif old.get("n"):
@@ -486,8 +509,7 @@ def _check_available(kind, items, state):
     try:
         with api._library() as lib:
             known = _known(lib, kind, ids)
-        todo = [item for item in items
-                if "%s:%s" % (kind, item["id"]) not in known or known["%s:%s" % (kind, item["id"])]["iv"] is None]
+        todo = [item for item in items if not _fresh(known, "%s:%s" % (kind, item["id"]))]
         if not todo:
             return known
         client = _search_client(timeout=5)   # jeden klient pro všechna hledání (jedno přihlášení)
@@ -500,7 +522,8 @@ def _check_available(kind, items, state):
             names, year = _item_names(item)
             television = None
             entry = known.get("%s:%s" % (kind, item["id"]))
-            count = entry["n"] if entry else None   # Přehraj.to už ověřené je; chybí jen iVysílání
+            # Přehraj.to už ověřené je a údaj platí: chybí jen iVysílání
+            count = entry["n"] if entry and not entry.get("stale") else None
             extra = _card_fields(item)
             if count is None and not paused("prehrajto"):
                 try:
@@ -518,7 +541,8 @@ def _check_available(kind, items, state):
             results = list(pool.map(check, todo))
         for tmdb_id, count, television, year, extra in results:
             # co se zjistilo, to se uloží; chybějící polovina (služba neodpovídala) se doplní příště
-            if count is not None and (television is not None or "%s:%s" % (kind, tmdb_id) not in known):
+            before = known.get("%s:%s" % (kind, tmdb_id))
+            if count is not None and (television is not None or before is None or before.get("stale")):
                 _remember_availability(kind, tmdb_id, count, television, year, extra)
         with api._library() as lib:
             return _known(lib, kind, ids)
@@ -622,13 +646,14 @@ def _collect(params, state, enough=ONLY_ENOUGH, pages_max=ONLY_PAGES):
             with api._library() as lib:
                 known = _known(lib, kind, [item["id"] for item in items])
             if not everything:
-                # neznámé tituly a ty, u kterých chybí jen iVysílání, se ověří na pozadí
-                todo = [item for item in items
-                        if (known.get("%s:%s" % (kind, item["id"])) or {"iv": None})["iv"] is None]
+                # Na pozadí se ověří tituly, o kterých se neví nic, i ty, jejichž údaj zestárl nebo je
+                # neúplný. Na výpis ale čekají jen ty první: co se už jednou zjistilo, platí dál.
+                todo = [item for item in items if not _fresh(known, "%s:%s" % (kind, item["id"]))]
                 pending = {"%s:%s" % key for key in _verify_later(kind, todo, state)}
                 fresh = {key for key in pending if key not in known}
                 checking.update(fresh)
                 waiting = bool(fresh)
+                state["rechecking"] = state.get("rechecking", 0) + len(pending - fresh)
                 state["unverified"] += len([item for item in todo if "%s:%s" % (kind, item["id"]) not in known
                                             and "%s:%s" % (kind, item["id"]) not in pending])
         else:
@@ -640,7 +665,27 @@ def _collect(params, state, enough=ONLY_ENOUGH, pages_max=ONLY_PAGES):
         if current >= pages or not items or len(found) >= enough or waiting \
                 or time.time() - started > ONLY_SECONDS:
             break
+    if not everything:
+        found = _preferred_first(found, kind, state)
     return found, current, pages
+
+
+def _preferred_first(items, kind, state):
+    """Tituly v jazyce, kterému dává uživatel přednost, napřed: při předvolbě dabingu nejdřív ty
+    s českým nebo slovenským dabingem (a co je v iVysílání), pak originály s titulky, pak ostatní;
+    při předvolbě titulků naopak. Jinak zůstává pořadí TMDB (podle oblíbenosti)."""
+    prefer = (state.get("prefs") or {}).get("language")
+    if prefer not in ("dub", "subs"):
+        return items
+
+    def tier(item):
+        key = "%s:%s" % (kind, item["id"])
+        dubbed = bool((state.get("summary", {}).get(key) or ("", 0))[0]) or bool(state.get("television", {}).get(key))
+        subtitled = key in state.get("subtitled", ())
+        first, second = (dubbed, subtitled) if prefer == "dub" else (subtitled, dubbed)
+        return 0 if first else 1 if second else 2
+
+    return sorted(items, key=tier)   # stabilní: uvnitř skupiny pořadí TMDB
 
 
 def _checking_note(state):
@@ -652,6 +697,9 @@ def _checking_note(state):
     if state.get("unverified"):
         # nic se neověřuje a přesto něco chybí: služba neodpovídá; neověřené tituly se neukazují
         return {"status": "Část titulů se teď nepodařilo ověřit (Přehraj.to neodpovídá) – zkuste to za chvíli."}
+    if state.get("rechecking"):
+        # starší údaje se potichu ověřují znovu: výpis se za chvíli obnoví, kdyby se něco změnilo
+        return {"refresh": RECHECK_REFRESH}
     return {}
 
 
@@ -911,7 +959,15 @@ def home_tiles(kind):
     """Dlaždice řady „Objevuj filmy / seriály“ na hlavní obrazovce."""
     name = _plural(kind)
     icon = "series" if kind == "tv" else "movies"
+    # tři řady po třech: co je na Přehraj.to, výběry a třídění
     return [
+        api.app_index.catalogue_tile(kind),
+        api._card("Nově na Přehraj.to", api._target("list", "discover_fresh", {"kind": kind},
+                                                    "%s nově na Přehraj.to" % name), "Co přibylo v posledních týdnech",
+                  icon="discover_new:" + icon),
+        api._card("S dabingem", api._target("list", "discover", {"kind": kind, "category": "popular", "dub": "1"},
+                                            "%s s dabingem" % name), "Česky nebo slovensky",
+                  icon="discover_popular:" + icon),
         api._card("Novinky", api._target("list", "discover", {"kind": kind, "category": "recent"},
                                          "%s – novinky" % name), "Právě vysílané" if kind == "tv" else "Poslední 3 měsíce",
                   icon="discover_new:" + icon),
@@ -2217,9 +2273,10 @@ def discover_person(params):
             with api._library() as lib:
                 found = _known(lib, kind, [item["id"] for item in items])
             if not everything:
-                todo = [item for item in items if (found.get("%s:%s" % (kind, item["id"])) or {"iv": None})["iv"] is None]
+                todo = [item for item in items if not _fresh(found, "%s:%s" % (kind, item["id"]))]
                 pending = {"%s:%s" % key for key in _verify_later(kind, todo, state)}
                 checking.update(key for key in pending if key not in found)
+                state["rechecking"] = state.get("rechecking", 0) + len([key for key in pending if key in found])
                 state["unverified"] += len([item for item in todo if "%s:%s" % (kind, item["id"]) not in found
                                             and "%s:%s" % (kind, item["id"]) not in pending])
         else:

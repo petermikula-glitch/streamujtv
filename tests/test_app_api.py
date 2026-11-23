@@ -89,14 +89,21 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
     assert list(films) == ["Objevuj filmy", "Moje filmy"]
     assert list(series) == ["Objevuj seriály", "Moje seriály"]
     grid = [row for row in api("discover_home", kind="movie")["rows"] if row.get("tiles")]   # velké dlaždice po třech
-    assert [(row["title"], len(row["items"])) for row in grid] == [("Objevuj filmy", 3), ("", 3), ("Moje filmy", 3)]
+    assert [(row["title"], len(row["items"])) for row in grid] == [
+        ("Objevuj filmy", 3), ("", 3), ("", 3), ("Moje filmy", 3)]
+    assert _titles(films["Objevuj filmy"])[:3] == ["Vše na Přehraj.to", "Nově na Přehraj.to", "S dabingem"]
+    assert films["Objevuj filmy"][0]["target"] == {"type": "list", "call": "discover_index", "params": {"kind": "movie"},
+                                                   "title": "Filmy na Přehraj.to", "poster": True}
+    assert films["Objevuj filmy"][0]["subtitle"] == "Seznam se plní sám na pozadí"
+    assert films["Objevuj filmy"][2]["target"]["params"] == {"kind": "movie", "category": "popular", "dub": "1"}
     assert _titles(films["Moje filmy"]) == ["Stažené filmy", "Filmy z mého účtu", "Hledat"]
     assert films["Moje filmy"][0]["target"] == {"type": "list", "call": "downloads", "params": {"kind": "movie"},
                                                 "title": "Stažené filmy", "poster": True}
     assert _titles(series["Moje seriály"]) == ["Stažené díly", "Seriály z mého účtu", "Hledat"]
-    assert _titles(films["Objevuj filmy"]) == ["Novinky", "Populární", "Nejlépe hodnocené", "Podle roku",
-                                                "Podle žánru", "Československé"]
-    assert series["Objevuj seriály"][3]["target"] == {"type": "list", "call": "discover_years",
+    assert _titles(films["Objevuj filmy"]) == ["Vše na Přehraj.to", "Nově na Přehraj.to", "S dabingem", "Novinky",
+                                                "Populární", "Nejlépe hodnocené", "Podle roku", "Podle žánru",
+                                                "Československé"]
+    assert series["Objevuj seriály"][6]["target"] == {"type": "list", "call": "discover_years",
                                                       "params": {"kind": "tv"}, "title": "Seriály podle roku"}
     assert _titles(_section(api, "favorites")["Oblíbené"]) == ["Zatím nic"]          # prázdné sekce napoví, co s nimi
     assert _titles(_section(api, "progress")["Rozkoukané"]) == ["Nic rozkoukaného"]
@@ -1923,7 +1930,8 @@ def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):
     assert api("home")["welcome"] is False
     tiles = _section(api, "movies")
     assert tiles["Objevuj filmy"][0]["target"]["poster"] is True              # výpis plakátů
-    assert "poster" not in tiles["Objevuj filmy"][3]["target"]               # Podle roku: dlaždice
+    grid = [card for row in api("discover_home", kind="movie")["rows"] if row.get("tiles") for card in row["items"]]
+    assert next(card for card in grid if card["title"] == "Podle roku")["target"].get("poster") is None   # dlaždice
     assert "poster" not in _section(api, "tools")["Nástroje"][4]["target"]
 
 
@@ -2870,7 +2878,9 @@ def test_missing_titles_are_rechecked_sooner_when_they_are_new(api, monkeypatch)
     monkeypatch.setattr(discover.time, "time", lambda: now + 24 * 3600)      # o den později
     with app_api._library() as lib:
         known = discover._known(lib, "movie", [21, 22])
-    assert "movie:21" not in known and known["movie:22"] == {"n": 0, "iv": ""}   # novinka se ověří znovu, starý film ne
+    # novinka se ověří znovu, starý film ne; údaj o novince ale mezitím platí dál (jen je označený jako starý)
+    assert known == {"movie:21": {"n": 0, "iv": "", "stale": True}, "movie:22": {"n": 0, "iv": ""}}
+    assert not discover._fresh(known, "movie:21") and discover._fresh(known, "movie:22")
 
 
 def test_title_is_found_under_its_slovak_name_too(api, monkeypatch):
@@ -2921,6 +2931,8 @@ def test_list_of_available_titles_fills_in_the_background(api, monkeypatch):
     monkeypatch.setattr(index, "GAP", 0)
     monkeypatch.setattr(index, "LISTS", (({"category": "popular"}, 1),))
     monkeypatch.setattr(index, "GENRE_PAGES", 0)
+    monkeypatch.setattr(index, "YEARS_BACK", {"movie": 0, "tv": 0})
+    monkeypatch.setattr(index, "CZECHOSLOVAK_YEARS", 0)
     monkeypatch.setattr(discover, "_ivys_match", lambda kind, names, year: "")
     today = __import__("time").strftime("%Y-%m-%d")
     films = [{"id": 11, "title": "Pelíšky", "original_title": "Pelisky", "release_date": "1999-04-08", "poster_path": "/p.jpg",
@@ -3004,7 +3016,7 @@ def test_titles_the_site_itself_offers_join_the_list(api, monkeypatch):
     assert {params.get("query") for path, params in calls if path == "/search/movie"} == {"Duna", "Jiny film"}
     with app_api._library() as lib:
         known = discover._known(lib, "movie", [500, 501])
-    assert known == {"movie:500": {"n": 2, "iv": "", "d": "cz", "q": 2160}}
+    assert known == {"movie:500": {"n": 2, "iv": "", "d": "cz", "q": 2160, "s": 0}}
     fresh = api("discover_fresh")["items"]                                   # nabídka webu = nově na Přehraj.to
     assert sorted(_titles(fresh)) == ["Archa", "Duna"] and len(asked) >= 2
     duna = next(card for card in fresh if card["title"] == "Duna")
@@ -3106,3 +3118,118 @@ def test_title_page_offers_the_trailer_and_the_whole_description(api, monkeypatc
 
     _fake_tmdb(monkeypatch, {"/movie/12": dict(FILM_DETAIL, id=12)})         # bez upoutávky tlačítko není
     assert "Upoutávka" not in _titles(api("discover_title", **dict(FILM, id=12))["actions"])
+
+
+def test_what_was_verified_once_stays_in_the_list(api, monkeypatch):
+    # Jednou nalezený titul se ukazuje dál, i když údaj zestárne; jen se potichu ověří znovu. A jedno
+    # nepovedené ověření ho ze seznamu nevyhodí – až druhé za sebou.
+    discover = app_api.app_discover
+    monkeypatch.setattr(discover, "BACKGROUND", True)
+    api("settings_set", tmdb_key="k" * 32)
+    monkeypatch.setattr(discover, "_ivys_match", lambda kind, names, year: "")
+    films = [{"id": 11, "title": "Pelíšky", "release_date": "1999-04-08"},
+             {"id": 12, "title": "Kolja", "release_date": "1996-05-15"}]
+    more = [{"id": 13, "title": "Samotáři", "release_date": "2000-04-20"}]
+
+    def fetch(self, path, timeout, params):
+        if path != "/movie/popular":
+            raise app_api.TmdbError("TMDB: HTTP 404")
+        return {"results": films if params.get("page") in (None, 1) else more, "total_pages": 2}
+
+    monkeypatch.setattr(app_api.Tmdb, "_fetch", fetch)
+    found = {"Pelíšky 1999": [_web(32, "Pelisky.1999.CZ.1080p", 7000)], "Samotáři 2000": [_web(33, "Samotari 2000 EN titulky", 7000)]}
+    asked = _catalogue_search(monkeypatch, found)
+
+    def settle():
+        thread = discover._VERIFY["thread"]
+        if thread:
+            thread.join(10)
+
+    def listing():
+        return api("discover", kind="movie", category="popular")
+
+    listing(), settle(), listing(), settle()
+    assert _titles(listing()["items"]) == ["Filtr", "Pelíšky", "Samotáři"]
+
+    now = __import__("time").time()
+    monkeypatch.setattr(discover.time, "time", lambda: now + 30 * 86400)     # o měsíc později: všechny údaje zestárly
+    count = len(asked)
+    later = listing()                                                        # výpis je hned celý, nic nezmizelo
+    assert _titles(later["items"]) == ["Filtr", "Pelíšky", "Samotáři"] and "status" not in later
+    assert later["refresh"] == discover.RECHECK_REFRESH and later["next"] is None   # jen se potichu přeověřuje
+    settle(), listing(), settle()
+    assert len(asked) > count                                                # … a opravdu se ověřilo znovu
+    fresh = listing()
+    assert _titles(fresh["items"]) == ["Filtr", "Pelíšky", "Samotáři"] and "refresh" not in fresh
+
+    del found["Pelíšky 1999"]                                                # hledání ho jednou nenašlo (web nic nevrátil)
+    monkeypatch.setattr(discover.time, "time", lambda: now + 60 * 86400)
+    listing(), settle(), listing(), settle()
+    once = listing()
+    assert "Pelíšky" in _titles(once["items"])                               # zůstává, brzy se ověří znovu
+    with app_api._library() as lib:
+        assert discover._known(lib, "movie", [11])["movie:11"]["n"] == 1
+    monkeypatch.setattr(discover.time, "time", lambda: now + 61 * 86400)     # i druhé ověření neuspělo: už tam není
+    listing(), settle(), listing(), settle()
+    assert "Pelíšky" not in _titles(listing()["items"])
+    found["Pelíšky 1999"] = [_web(32, "Pelisky.1999.CZ.1080p", 7000)]        # a když se zase objeví, vrátí se
+    monkeypatch.setattr(discover.time, "time", lambda: now + 80 * 86400)
+    listing(), settle(), listing(), settle()
+    assert "Pelíšky" in _titles(listing()["items"])
+
+
+def test_dubbed_titles_come_first_and_everything_found_can_be_browsed(api, monkeypatch):
+    index, discover = app_api.app_index, app_api.app_discover
+    api("settings_set", tmdb_key="k" * 32)
+    monkeypatch.setattr(discover, "_ivys_match", lambda kind, names, year: "")
+    films = [{"id": 1, "title": "Anglicky", "release_date": "2020-01-01", "vote_average": 9.0},
+             {"id": 2, "title": "Titulky", "release_date": "2020-01-01", "vote_average": 8.0},
+             {"id": 3, "title": "Dabing", "release_date": "2020-01-01", "vote_average": 6.0},
+             {"id": 4, "title": "Hvězda", "release_date": "2020-01-01", "vote_average": 5.0},
+             {"id": 5, "title": "Nikde", "release_date": "2020-01-01"}]
+    _fake_tmdb(monkeypatch, {"/movie/popular": {"results": films, "total_pages": 1},
+                             "/tv/popular": {"results": [{"id": 9, "name": "Seriál", "first_air_date": "2019-01-01"}],
+                                             "total_pages": 1}})
+    _catalogue_search(monkeypatch, {
+        "Anglicky 2020": [_web(1, "Anglicky 2020 EN 1080p", 7000)], "Titulky 2020": [_web(2, "Titulky 2020 CZ titulky", 7000)],
+        "Dabing 2020": [_web(3, "Dabing 2020 CZ dabing 720p", 7000)],
+        "Hvězda 2020": [_web(4, "Hvezda 2020 SK dabing 2160p", 7000)], "Seriál": [_web(9, "Serial S01E01 CZ", 2700)]})
+    listing = api("discover", kind="movie", category="popular")["items"]
+    # předvolba dabingu: dabované napřed, pak originály s titulky, pak ostatní; uvnitř pořadí TMDB
+    assert _titles(listing) == ["Filtr", "Dabing", "Hvězda", "Titulky", "Anglicky"]
+    api("discover", kind="tv", category="popular")
+
+    everything = api("discover_index", kind="movie")                         # vše, co se našlo: i od nejlepší kvality
+    assert _titles(everything["items"]) == ["Hvězda", "Dabing", "Titulky", "Anglicky"] and everything["next"] is None
+    assert everything["items"][0]["badges"] == ["Přehraj.to", "SK", "4K"]
+    assert _titles(api("discover_index", kind="tv")["items"]) == ["Seriál"]
+    assert len(api("discover_index")["items"]) == 5                          # filmy i seriály dohromady
+    tile = index.catalogue_tile("movie")
+    assert tile["subtitle"] == "Ověřeno 4 – seznam se plní sám" and tile["target"]["call"] == "discover_index"
+    monkeypatch.setattr(index, "INDEX_PAGE", 3)
+    first = api("discover_index", kind="movie")
+    assert len(first["items"]) == 3 and first["next"]["params"] == {"kind": "movie", "offset": 3}
+    assert _titles(api("discover_index", **first["next"]["params"])["items"]) == ["Anglicky"]
+
+    api("settings_set", prefer_language="subs")                              # předvolba titulků: ty napřed
+    assert _titles(api("discover", kind="movie", category="popular")["items"])[1] == "Titulky"
+    assert _titles(api("discover_index", kind="movie")["items"])[0] == "Titulky"
+    api("settings_set", prefer_language="any")                               # je to jedno: pořadí TMDB
+    assert _titles(api("discover", kind="movie", category="popular")["items"]) == [
+        "Filtr", "Anglicky", "Titulky", "Dabing", "Hvězda"]
+
+
+def test_background_plan_walks_year_by_year(api, monkeypatch):
+    index = app_api.app_index
+    api("settings_set", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {"/genre/movie/list": {"genres": [{"id": 35, "name": "Komedie"}]},
+                             "/genre/tv/list": {"genres": []}})
+    plan = index._plan()
+    year = __import__("time").localtime().tm_year
+    assert plan[0] == ("movie", {"category": "popular", "kind": "movie"}, 1)          # nejdřív co je na očích
+    assert ("movie", {"kind": "movie", "origin": "CZ|SK|XC", "year": str(year)}, 1) in plan   # česká tvorba po letech
+    assert ("movie", {"kind": "movie", "genre": "35"}, 3) in plan
+    years = [step for step in plan if set(step[1]) == {"kind", "year"}]
+    assert years[0] == ("movie", {"kind": "movie", "year": str(year)}, 1) and years[1][0] == "tv"   # od nejnovějších
+    assert ("movie", {"kind": "movie", "year": str(year - 39)}, 3) in years
+    assert ("tv", {"kind": "tv", "year": str(year - 30)}, 1) not in years and len(plan) == len(set(map(str, plan)))

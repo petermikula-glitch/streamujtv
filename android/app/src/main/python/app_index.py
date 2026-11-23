@@ -31,7 +31,7 @@ HARVEST_EVERY = 6 * 3600         # nabídka Přehraj.to se čte nejvýš jednou 
 HARVEST_TITLES = 40              # tolik titulů z ní se nejvýš zkusí přiřadit a ověřit
 STATE_KEY = "index:state"        # kde se v plánu skončilo a kolik se dnes ověřilo
 CYCLE_EVERY = 20 * 3600          # celý plán se prochází znovu nejdřív po této době
-DAILY_LIMIT = 1500               # tolik titulů nejvýš se za den ověří na pozadí
+DAILY_LIMIT = 3000               # tolik titulů nejvýš se za den ověří na pozadí
 CHUNK = 2                        # tolik titulů najednou…
 GAP = 2.0                        # …a pak tolik sekund pauza: asi titul za sekundu
 START_DELAY = 20                 # s po otevření aplikace, než se začne procházet
@@ -39,9 +39,15 @@ FAILURES_MAX = 3                 # po tolika nepovedených dávkách za sebou se
 FRESH_DAYS = 30                  # jak dlouho je titul „nově na Přehraj.to“
 FRESH_LIMIT = 60                 # tolik titulů nejvýš ve výpisu novinek
 # (parametry výpisu, kolik stránek) – nejdřív to, co je vidět na hlavní obrazovce a v novinkách
-LISTS = (({"category": "popular"}, 2), ({"category": "recent"}, 2), ({"category": "popular"}, 8),
-         ({"category": "recent"}, 4), ({"category": "top_rated"}, 5), ({"origin": discover.CZECHOSLOVAK}, 4))
-GENRE_PAGES = 2
+LISTS = (({"category": "popular"}, 2), ({"category": "recent"}, 2), ({"category": "popular"}, 15),
+         ({"category": "recent"}, 6), ({"origin": discover.CZECHOSLOVAK}, 10), ({"category": "top_rated"}, 10))
+GENRE_PAGES = 3
+# Přehraj.to nejde projít celé (nemá výpis všeho, jen hledání), a tak se prochází z druhé strany:
+# po letech. Tolik let zpátky a tolik stránek nejoblíbenějších titulů každého roku se ověřuje.
+YEARS_BACK = {"movie": 40, "tv": 25}
+YEAR_PAGES = {"movie": 3, "tv": 2}
+CZECHOSLOVAK_YEARS = 8           # česká a slovenská tvorba posledních let zvlášť (v žebříčcích zapadne)
+INDEX_PAGE = 60                  # tolik titulů na jedno načtení výpisu „Vše na Přehraj.to“
 
 _CRAWL = {"thread": None, "stop": False}
 _LOCK = threading.Lock()
@@ -56,6 +62,10 @@ def _plan():
                 step = (kind, dict(params, kind=kind), page)
                 if step not in steps:
                     steps.append(step)
+    year = time.localtime().tm_year
+    for kind in ("movie", "tv"):
+        for back in range(CZECHOSLOVAK_YEARS):
+            steps.append((kind, {"kind": kind, "origin": discover.CZECHOSLOVAK, "year": str(year - back)}, 1))
     for kind in ("movie", "tv"):
         try:
             genres = [genre["id"] for genre in discover._tmdb().genres(kind)
@@ -64,6 +74,12 @@ def _plan():
             genres = []
         for genre in genres:
             steps += [(kind, {"kind": kind, "genre": str(genre)}, page) for page in range(1, GENRE_PAGES + 1)]
+    # rok po roce od nejnovějších: nejdřív první stránky všech let, pak další
+    for page in range(1, max(YEAR_PAGES.values()) + 1):
+        for back in range(max(YEARS_BACK.values())):
+            for kind in ("movie", "tv"):
+                if page <= YEAR_PAGES[kind] and back < YEARS_BACK[kind]:
+                    steps.append((kind, {"kind": kind, "year": str(year - back)}, page))
     return steps
 
 
@@ -86,9 +102,8 @@ def _today():
 
 
 def _wanted(known, kind, item):
-    """Titul, o kterém seznam ještě neví (nebo už údaj zestárl), nebo o kterém neví z iVysílání."""
-    entry = known.get("%s:%s" % (kind, item["id"]))
-    return entry is None or entry["iv"] is None
+    """Titul, o kterém seznam ještě neví, jehož údaj zestárl, nebo o kterém neví z iVysílání."""
+    return not discover._fresh(known, "%s:%s" % (kind, item["id"]))
 
 
 def busy():
@@ -317,8 +332,13 @@ def stats():
 def summary_text():
     info = stats()
     when = time.strftime("%d.%m. %H:%M", time.localtime(info["finished"])) if info["finished"] else "ještě ne"
-    return "ověřeno %d titulů, k mání %d; dnes ověřeno %d; celý průchod dokončen: %s%s" % (
-        info["known"], info["available"], info["today"], when, " (právě běží)" if info["running"] else "")
+    try:
+        total = len(_plan())
+    except Exception:   # bez TMDB se plán nesestaví; stav jde ukázat i tak
+        total = 0
+    return "ověřeno %d titulů, k mání %d; dnes ověřeno %d; výpisů projito %d z %d; celý průchod dokončen: %s%s" % (
+        info["known"], info["available"], info["today"], min(info["step"], total), total, when,
+        " (právě běží)" if info["running"] else "")
 
 
 def _fresh(kind=None):
@@ -335,7 +355,8 @@ def _fresh_cards(kind=None, limit=None):
         state = api._state(lib)
     rows = _fresh(kind)[:limit]
     known = {"%s:%s" % (item_kind, tmdb_id): {"n": entry.get("n") or 0, "iv": entry.get("iv") or None,
-                                               "d": entry.get("d") or "", "q": int(entry.get("q") or 0)}
+                                               "d": entry.get("d") or "", "q": int(entry.get("q") or 0),
+                                               "s": int(entry.get("s") or 0)}
              for _when, item_kind, tmdb_id, entry in rows}
     discover._mark_known(state, known)
     cards = []
@@ -366,4 +387,62 @@ def discover_fresh_row(params):
     return {"items": cards}
 
 
-ACTIONS = {"discover_fresh": discover_fresh, "discover_fresh_row": discover_fresh_row}
+def _tier(entry, prefer):
+    """Pořadí podle jazyka: při předvolbě dabingu nejdřív dabované (a co je v iVysílání), pak
+    originály s titulky, pak ostatní; při předvolbě titulků naopak."""
+    dubbed, subtitled = bool(entry.get("d") or entry.get("iv")), bool(entry.get("s"))
+    first, second = (subtitled, dubbed) if prefer == "subs" else (dubbed, subtitled)
+    return 0 if first else 1 if second else 2
+
+
+def _catalogued(kind=None):
+    """Všechny tituly, o kterých se ví, že jsou k mání: ``[(druh, číslo, záznam)]``."""
+    return [(item_kind, tmdb_id, entry) for item_kind, tmdb_id, entry in _entries()
+            if (entry.get("n") or entry.get("iv")) and entry.get("t") and (not kind or item_kind == kind)]
+
+
+def discover_index(params):
+    """Výpis „Vše na Přehraj.to“: co aplikace na Přehraj.to (a v iVysílání) dosud našla.
+
+    Řazeno tak, jak si to uživatel přeje vidět: nejdřív v jazyce podle předvolby (dabované, pak
+    originály s titulky), v každé skupině od nejlepší známé kvality a od lépe hodnocených."""
+    kind = params.get("kind") if params.get("kind") in ("movie", "tv") else None
+    offset = api._offset(params)
+    with api._library() as lib:
+        state = api._state(lib)
+    prefer = (state.get("prefs") or {}).get("language")
+    rows = _catalogued(kind)
+    rows.sort(key=lambda row: (_tier(row[2], prefer), -int(row[2].get("q") or 0), -int(row[2].get("v") or 0),
+                               row[2].get("t") or "", row[1]))
+    window = rows[offset:offset + INDEX_PAGE]
+    discover._mark_known(state, {
+        "%s:%s" % (item_kind, tmdb_id): {"n": entry.get("n") or 0, "iv": entry.get("iv") or None,
+                                         "d": entry.get("d") or "", "q": int(entry.get("q") or 0),
+                                         "s": int(entry.get("s") or 0)}
+        for item_kind, tmdb_id, entry in window})
+    cards = []
+    for item_kind, tmdb_id, entry in window:
+        poster = entry.get("p") or ""
+        cards.append(discover._title_card(
+            item_kind, tmdb_id, entry["t"], int(entry.get("y") or 0),
+            discover.IMG + "w342" + poster if poster.startswith("/") else "", entry.get("o") or "", state,
+            rating=int(entry.get("v") or 0)))
+    following = {"call": "discover_index", "params": dict(params, offset=offset + INDEX_PAGE)} \
+        if offset + INDEX_PAGE < len(rows) else None
+    return {"items": cards, "next": following,
+            "empty": "Zatím tu nic není. Seznam se plní sám na pozadí, když je aplikace otevřená – "
+                     "první tituly se objeví během pár minut."}
+
+
+def catalogue_tile(kind):
+    """Dlaždice „Vše na Přehraj.to“ pro obrazovku Filmy / Seriály: kolik titulů už seznam zná."""
+    count = len(_catalogued(kind))
+    name = "Seriály" if kind == "tv" else "Filmy"
+    return api._card("Vše na Přehraj.to", api._target("list", "discover_index", {"kind": kind},
+                                                      "%s na Přehraj.to" % name),
+                     "Ověřeno %d – seznam se plní sám" % count if count else "Seznam se plní sám na pozadí",
+                     icon="all:" + ("series" if kind == "tv" else "movies"))
+
+
+ACTIONS = {"discover_fresh": discover_fresh, "discover_fresh_row": discover_fresh_row,
+           "discover_index": discover_index}

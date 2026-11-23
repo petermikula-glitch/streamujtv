@@ -264,6 +264,13 @@ ověřuje jako celek (`series=True`: vyhoví kterýkoli jeho díl), díl se hled
 Dotazy na pozadí drží rozestup (`_pace`, nejvýš asi čtyři za sekundu) a po odmítnutí zpomalí. Výsledek se
 pamatuje (`avail:<druh>:<číslo>`): nalezený 14 dní, nenalezený podle stáří titulu – letošní a loňský 12 hodin,
 starší pěti let 10 dní, jinak 2 dny (`_missing_ttl`).
+Co se jednou zjistilo, zůstává: záznam, kterému vypršela platnost, platí dál a jen se na pozadí ověří znovu
+(`stale` v `_known`, `_fresh`). Nalezený titul se tedy ukazuje, dokud nové ověření neřekne, že tam není –
+a ani pak hned: jedno hledání se může splést, a tak titul vypadne až po `MISSES_TO_DROP` nepovedených
+ověřeních za sebou (`miss` v záznamu, další pokus po `MISS_TTL`). Přeověřování výpis neblokuje ani neukazuje
+stav; výpis se jen po `RECHECK_REFRESH` sekundách potichu obnoví. Na výpis čekají jen tituly, o kterých se
+neví vůbec nic. Ve výpisu jdou napřed tituly v jazyce podle předvolby (`_preferred_first`): dabované, pak
+originály s titulky (`s` v souhrnu), pak ostatní; uvnitř skupiny pořadí TMDB.
 
 **Seznam dostupných titulů** (`app_index.py`): aby se neověřovalo až při otevření výpisu, prochází aplikace
 seznamy TMDB předem – populární, novinky, nejlépe hodnocené, československé a jednotlivé žánry, filmy
@@ -275,6 +282,11 @@ si pamatuje (`index:state`), celý plán opakuje nejdřív po `CYCLE_EVERY`. Vý
 a nejlepší známé rozlišení), údaje pro kartu a čas `f`, odkdy je titul na Přehraj.to: podle něj je řada
 a výpis „Nově na Přehraj.to“ (`discover_fresh`; titul, který tam dřív nebyl a přibyl, nebo čerstvá novinka).
 Karty mají štítky CZ/SK (dabing) a 4K, filtr výpisu umí „jen s dabingem“. Stav je v Diagnostice.
+Přehraj.to nejde projít celé – nemá výpis všeho, jen hledání –, a tak se prochází z druhé strany: vedle
+žebříčků a žánrů i rok po roce (`YEARS_BACK` let zpátky, `YEAR_PAGES` stránek nejoblíbenějších titulů roku)
+a česká a slovenská tvorba posledních let zvlášť; nejvýš `DAILY_LIMIT` titulů denně. Co se našlo, je vidět
+pohromadě ve výpisu „Vše na Přehraj.to“ (`discover_index`, první dlaždice obrazovek Filmy a Seriály): řazeno
+podle jazyka (předvolba: dabované, pak s titulky), pak od nejlepší známé kvality a od lépe hodnocených.
 Vedle seznamů TMDB se nejvýš jednou za `HARVEST_EVERY` čte i to, co nabízí samo Přehraj.to (`harvest`;
 `PrehrajtoClient.offered`): videa z úvodní stránky a z výpisů, na které odkazuje (odkazy se slovy jako
 nejnovější, nejsledovanější, top…). Názvy souborů se rozeberou, přiřadí k titulům TMDB jen při jisté shodě
