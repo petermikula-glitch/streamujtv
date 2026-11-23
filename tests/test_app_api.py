@@ -1779,6 +1779,43 @@ def test_changing_preferences_changes_the_offered_version_at_once(api, monkeypat
         assert lib.get_kv(app_api.CHOICE_PREFIX + "movie:11") == sharp["id"]
 
 
+def test_watch_next_uses_the_sharp_wide_picture_of_the_title(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    detail = {"id": 11, "title": "Pelíšky", "original_title": "Pelisky", "release_date": "1999-04-08",
+              "poster_path": "/p.jpg", "backdrop_path": "/b.jpg", "genres": []}
+    calls = _fake_tmdb(monkeypatch, {"/movie/11": detail, "/movie/12": dict(detail, id=12, backdrop_path=None)})
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/v.mp4", {}))
+    wide, tall, plain = (_web(n, "Pelisky 1999 CZ verze %d" % n)["id"] for n in (91, 92, 93))
+    for vid in (wide, tall, plain):
+        result = {"id": vid, "title": "Pelisky 1999 CZ", "thumb": "https://thumb.prehraj/maly.jpg"}
+        choice = {wide: "movie:11", tall: "movie:12", plain: ""}[vid]
+        played = api("play", vid=vid, web_result=result, **({"choice": choice} if choice else {}))
+        api("progress_save", track=played["track"], position=900, total=6000, started=True)
+    items = {item["id"]: item for item in api("watch_next")["items"]}
+    # video puštěné ze stránky titulu: obrázek titulu na šířku ve vysokém rozlišení, ne malý náhled souboru
+    assert (items[wide]["image"], items[wide]["portrait"]) == (app_api.app_discover.IMG + "w1280/b.jpg", False)
+    # titul bez obrázku na šířku: plakát, a ten se ukáže na výšku (neořezává se a nezvětšuje)
+    assert (items[tall]["image"], items[tall]["portrait"]) == (app_api.app_discover.IMG + "w500/p.jpg", True)
+    # video, o kterém se nic neví: zůstává náhled z Přehraj.to
+    assert (items[plain]["image"], items[plain]["portrait"]) == ("https://thumb.prehraj/maly.jpg", False)
+    assert {path for path, _params in calls} == {"/movie/11", "/movie/12"}
+
+    # úvodní panel Rozkoukané bere stejný obrázek na šířku
+    later = int(app_api.time.time()) + 60
+    with app_api._library() as lib:
+        lib.record_play(wide, 950, 6000, now=later)
+    hero = {section["id"]: section for section in api("home")["sections"]}["progress"]["hero"]
+    assert hero["image"] == app_api.app_discover.IMG + "w1280/b.jpg"
+    with app_api._library() as lib:
+        lib.record_play(plain, 950, 6000, now=later + 60)       # malý náhled se na velký panel nehodí
+    assert {section["id"]: section for section in api("home")["sections"]}["progress"]["hero"]["image"] == ""
+
+    # video puštěné ve starší verzi (bez zapamatovaného titulu) se dohledá podle zvolené verze
+    with app_api._library() as lib:
+        lib.set_kv(app_api.ART_PREFIX + wide, "")
+    assert {item["id"]: item for item in api("watch_next")["items"]}[wide]["image"].endswith("w1280/b.jpg")
+
+
 def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):
     assert api("home")["welcome"] is True
     api("settings_set", onboarded=True)

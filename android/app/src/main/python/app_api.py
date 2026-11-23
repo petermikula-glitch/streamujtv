@@ -240,6 +240,7 @@ QUALITY_CHOICES = (("best", "Nejvyšší dostupná"), ("1080", "1080p"), ("720",
 CAM_RE = re.compile(r"(?<![a-z0-9])(?:cam|camrip|hdcam|ts|hdts|telesync|tc|telecine|kinorip)(?![a-z0-9])", re.I)
 BAD_VIDEOS = "bad_videos"       # verze, které se nepodařilo přehrát
 CHOICE_PREFIX = "choice:"       # verze, kterou si uživatel u titulu sám vybral
+ART_PREFIX = "art:"             # titul z Objevuj, ze kterého se video pustilo (kvůli obrázku na šířku)
 
 
 def _prefs(settings=None):
@@ -1103,6 +1104,7 @@ def play(params):
         if choice:
             # verze spuštěná ze stránky titulu: příště bude první a u dílu seriálu nese stav zhlédnutí
             lib.set_kv(CHOICE_PREFIX + choice, vid)
+            lib.set_kv(ART_PREFIX + vid, choice)   # podle titulu se pak najde obrázek pro Pokračovat ve sledování
             app_discover.remember_series(lib, choice)
         if video["kind"] == "episode" and video.get("meta_key"):
             lib.set_progress_hidden(video["meta_key"], False)   # seriál se zase sleduje: další díly se nabízejí

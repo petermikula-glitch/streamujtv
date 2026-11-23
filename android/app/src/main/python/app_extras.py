@@ -270,6 +270,43 @@ def _remaining(point):
     return "zbývá %d min" % max(1, minutes)
 
 
+def _title_art(lib, video):
+    """Obrázky titulu z TMDB k videu spuštěnému ze stránky titulu: ``(na šířku, plakát)``.
+
+    Soubor z hledání má jen malý náhled z Přehraj.to; ostrý obrázek (1280 px na šířku) má titul, ze
+    kterého se pustil. Podrobnosti titulu jsou po návštěvě jeho stránky v mezipaměti; když je teď
+    zjistit nejde, vrátí se prázdné."""
+    choice = lib.get_kv(api.ART_PREFIX + video["id"]) or ""
+    if not choice:
+        # video puštěné ve starší verzi: titul se dohledá podle zapamatované volby verze
+        row = lib.conn.execute("SELECT k FROM settings_kv WHERE k LIKE ? AND v = ? LIMIT 1",
+                               (api.CHOICE_PREFIX + "%", video["id"])).fetchone()
+        choice = row[0][len(api.CHOICE_PREFIX):] if row else ""
+    kind, tmdb_id = (choice.split(":") + [""])[:2]
+    if kind not in ("movie", "tv") or not tmdb_id.isdigit():
+        return "", ""
+    try:
+        found = app_discover._tmdb().details(int(tmdb_id), want_series=kind == "tv")
+    except (app_discover.TmdbError, api.ApiError, ValueError):
+        return "", ""
+    return found.get("fanart") or "", found.get("poster") or ""
+
+
+def _art(lib, video, meta):
+    """Nejlepší obrázek k rozkoukanému videu: ``(adresa, druh)``, druh ``wide`` / ``poster`` / ``thumb``.
+
+    Přednost má obrázek na šířku ve vysokém rozlišení (z katalogu, jinak z titulu v Objevuj), pak
+    plakát – ten se ukazuje na výšku, aby se neořezával a nezvětšoval –, až nakonec malý náhled z Přehraj.to."""
+    if meta.get("fanart"):
+        return meta["fanart"], "wide"
+    wide, poster = _title_art(lib, video)
+    if wide:
+        return wide, "wide"
+    if meta.get("poster") or poster:
+        return meta.get("poster") or poster, "poster"
+    return video.get("thumb") or "", "thumb"
+
+
 def hero(lib, state, section):
     """Velký panel v čele sekce: naposledy rozkoukané video, nebo nic."""
     rows = lib.ivys_progress(1)
@@ -288,7 +325,9 @@ def hero(lib, state, section):
     meta = lib.get_meta(video["meta_key"]) or {}
     point = state["resume"].get(video["id"])
     details = " · ".join(part for part in (video.get("lang"), video.get("quality"), _remaining(point)) if part)
-    return {"title": api._video_title(video, meta), "subtitle": details, "image": meta.get("fanart") or "",
+    image, shape = _art(lib, video, meta)
+    # velký panel snese jen ostrý obrázek na šířku; jinak zůstane výchozí malba
+    return {"title": api._video_title(video, meta), "subtitle": details, "image": image if shape == "wide" else "",
             "progress": api._percent(point), "label": "Pokračovat",
             # „Pokračovat“ naváže rovnou, přehrávač se na to už neptá
             "target": api._target("play", "play", {"vid": video["id"], "resume": True})}
@@ -297,8 +336,8 @@ def hero(lib, state, section):
 def watch_next(params):
     """Rozkoukaná videa pro řadu „Pokračovat ve sledování“ na domovské obrazovce Android TV.
 
-    ``{"items": [{"id", "title", "image", "position", "duration", "episode", "call", "params"}]}``,
-    naposledy přehrané první; časy v sekundách.
+    ``{"items": [{"id", "title", "image", "portrait", "position", "duration", "episode", "call", "params"}]}``,
+    naposledy přehrané první; časy v sekundách. ``portrait`` = obrázek je plakát na výšku.
     """
     items = []
     with api._library() as lib:
@@ -310,13 +349,15 @@ def watch_next(params):
             if not point:
                 continue
             meta = metas.get(video["meta_key"]) or {}
+            image, shape = _art(lib, video, meta)
             items.append({"id": video["id"], "title": api._video_title(video, meta),
-                          "image": meta.get("fanart") or meta.get("poster") or video.get("thumb") or "",
+                          "image": image, "portrait": shape == "poster",
                           "position": int(point[0]), "duration": int(point[1]),
                           "episode": video["kind"] == "episode", "played": int(video.get("last_played") or 0),
                           "call": "play", "params": {"vid": video["id"]}})
         for row in lib.ivys_progress(4):
             items.append({"id": api.IVYS + row["idec"], "title": api._ivys_label(row), "image": row["image"] or "",
+                          "portrait": False,
                           "position": int(row["position"]), "duration": int(row["total"]), "episode": True,
                           "played": int(row["last_played"] or 0),
                           "call": "ivys_play", "params": {"idec": row["idec"]}})

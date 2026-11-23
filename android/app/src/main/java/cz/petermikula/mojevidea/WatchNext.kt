@@ -60,7 +60,11 @@ object WatchNext {
                     .setIntent(Intent(Intent.ACTION_VIEW, link).setPackage(context.packageName))
                 item.optString("image").takeIf { it.startsWith("http") }?.let {
                     program.setPosterArtUri(Uri.parse(it))
-                    program.setPosterArtAspectRatio(TvContractCompat.PreviewProgramColumns.ASPECT_RATIO_16_9)
+                    // plakát se ukáže na výšku v plné ostrosti; na šířku oříznutý a zvětšený by byl rozmazaný
+                    program.setPosterArtAspectRatio(
+                        if (item.optBoolean("portrait")) TvContractCompat.PreviewProgramColumns.ASPECT_RATIO_MOVIE_POSTER
+                        else TvContractCompat.PreviewProgramColumns.ASPECT_RATIO_16_9
+                    )
                 }
                 if (resolver.insert(TvContractCompat.WatchNextPrograms.CONTENT_URI, program.build().toContentValues()) != null) {
                     written += 1

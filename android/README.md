@@ -281,6 +281,10 @@ klávesnici televize (cíl typu `input`, `Navigator.askText`).
 **Pokračovat na domovské obrazovce televize** (`WatchNext.kt`, akce `watch_next`): rozkoukaná videa
 aktivního profilu se zapisují do řady „Pokračovat ve sledování“ Android TV. Odkaz otevírá
 `LinkActivity`, která přijme jen přehrání (`play`, `ivys_play`), nic jiného.
+Obrázek karty je co nejostřejší (`_art` v `app_extras.py`): obrázek titulu na šířku v šířce 1280 px
+z katalogu, u videa puštěného ze stránky titulu z TMDB (titul si aplikace k videu pamatuje, `art:<video>`);
+když titul obrázek na šířku nemá, ukáže se jeho plakát na výšku (neořezává se a nezvětšuje). Malý náhled
+z Přehraj.to zůstává až jako poslední možnost. Stejný obrázek na šířku má i úvodní panel Rozkoukané.
 
 **Přehrávač**: horní lišta s názvem, časem konce a rychlou volbou zvuku a titulků; volba se pamatuje
 pro celý seriál (`track_prefs`, klíč `tracks:<seriál>`) a ukládá se jen to, co uživatel opravdu změnil.
