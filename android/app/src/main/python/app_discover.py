@@ -23,7 +23,7 @@ CZECHOSLOVAK = "CZ|SK|XC"        # Česko, Slovensko a někdejší Českoslovens
 AVAILABLE_PREFIX = "avail:"      # kolik verzí titulu se na Přehraj.to naposledy našlo
 AVAILABLE_TTL = 7 * 24 * 3600
 CHECK_BATCH = 20                 # kolik titulů ověří jedno „Ověřit dostupnost“
-FAVORITES_EVERY = 12 * 3600      # hlídání oblíbených nejvýš jednou za tuto dobu
+FAVORITES_EVERY = 3 * 3600       # hlídání oblíbených nejvýš jednou za tuto dobu
 FAVORITES_BATCH = 6              # a nejvýš tolika titulů najednou
 SEASON_DOWNLOAD_MAX = 40         # nejvýš tolik dílů při stažení celé řady
 # seriálové žánry TMDB bez vlastní ilustrace: nejbližší filmová, nebo dlaždice z iVysílání
@@ -92,23 +92,54 @@ def favorite_toggle(params):
     return {"message": message}
 
 
-def _note_favorite(fid, count):
-    """U oblíbeného titulu si pamatuje, kolik verzí bylo naposledy na Přehraj.to; otevřením mizí štítek „Nově“."""
+def meets_preferences(video, prefs):
+    """Je verze v jazyce a kvalitě, které má uživatel v předvolbách?"""
+    if api.CAM_RE.search(video.get("raw_title") or ""):
+        return False
+    if prefs["language"] != "any" and api._language_rank(video.get("lang"), prefs["language"]) != 0:
+        return False
+    token = provider.quality_token(video.get("quality"))
+    wanted = {"best": ("ORIG", "UHD", "FHD", "HD"), "1080": ("ORIG", "UHD", "FHD"),
+              "720": ("ORIG", "UHD", "FHD", "HD")}.get(prefs["quality"])
+    return wanted is None or token in wanted
+
+
+def _preferred(versions, prefs):
+    """První verze, která odpovídá předvolbám (bez ukázek a nefunkčních), nebo None."""
+    return next((version for version in versions if not version["short"] and not version["bad"]
+                 and meets_preferences(version["video"], prefs)), None)
+
+
+def _prefs_mark(prefs):
+    return "%s|%s" % (prefs["language"], prefs["quality"])
+
+
+def _note_favorite(fid, versions, prefs):
+    """U oblíbeného titulu si pamatuje, co bylo naposledy na Přehraj.to; otevřením mizí štítek „Nově“.
+
+    ``avail`` je počet verzí, ``match`` říká, jestli mezi nimi byla verze podle předvoleb
+    (``match_prefs`` – pro které předvolby to platí).
+    """
+    good = [version for version in versions if not version["short"]]
     with _LOCK:
         items = load_favorites()
         entry = items.get(fid)
         if entry is None:
             return
-        entry.update(avail=count, checked=int(time.time()))
+        entry.update(avail=len(good), match=int(bool(_preferred(good, prefs))), match_prefs=_prefs_mark(prefs),
+                     checked=int(time.time()))
         entry.pop("fresh", None)
+        entry.pop("fresh_note", None)
         _save_favorites(items)
 
 
 def favorites_check(params):
-    """Hlídání oblíbených: objevil se na Přehraj.to film, který tam minule nebyl? ``{"found": [názvy]}``.
+    """Hlídání oblíbených filmů: objevila se na Přehraj.to verze v preferovaném jazyce a kvalitě?
 
-    Spouští aplikace po startu; ptá se nejvýš jednou za FAVORITES_EVERY a jen na pár titulů (jedno
-    hledání na film). Nalezený titul dostane na kartě štítek „Nově“, dokud ho uživatel neotevře.
+    ``{"found": [{"title", "detail", "target"}]}`` – tituly, u kterých taková verze minule nebyla a teď je.
+    Aplikace se ptá po startu a pak průběžně; logika hledá nejvýš jednou za FAVORITES_EVERY a jen pár
+    titulů najednou (jedno hledání na film). Titul, který se ještě neověřoval, se jen zapamatuje –
+    upozornění patří až změně. Nalezený titul má na kartě štítek „Nově“, dokud ho uživatel neotevře.
     """
     settings = api._settings()
     now = int(time.time())
@@ -116,13 +147,14 @@ def favorites_check(params):
         return {"found": []}
     settings["favorites_checked"] = now
     api._save_settings(settings)
-    waiting = sorted((entry for entry in load_favorites().values()
-                      if not entry.get("key") and entry.get("kind") == "movie" and entry.get("tmdb_id")
-                      and not entry.get("avail")), key=lambda entry: entry.get("checked") or 0)[:FAVORITES_BATCH]
-    if not waiting:
-        return {"found": []}
     with api._library() as lib:
         state = api._state(lib)
+    prefs, mark = state["prefs"], _prefs_mark(state["prefs"])
+    # čekají tituly bez verze podle (současných) předvoleb; nejdéle neověřené první
+    waiting = sorted((entry for entry in load_favorites().values()
+                      if not entry.get("key") and entry.get("kind") == "movie" and entry.get("tmdb_id")
+                      and not (entry.get("match") == 1 and entry.get("match_prefs") == mark)),
+                     key=lambda entry: entry.get("checked") or 0)[:FAVORITES_BATCH]
     found = []
     for entry in waiting:
         try:
@@ -130,20 +162,25 @@ def favorites_check(params):
                                       int(entry.get("year") or 0), None, state, pages=1)
         except api.ApiError:
             break  # hledání teď nejde; zkusí se příště
-        good = len([version for version in versions if not version["short"]])
+        good = [version for version in versions if not version["short"]]
+        best = _preferred(good, prefs)
         with _LOCK:
             items = load_favorites()
             current = items.get(entry["id"])
             if current is None:
                 continue
-            # „nově“ jen u titulu, o kterém se už vědělo, že na Přehraj.to není
-            appeared = bool(good) and current.get("avail") == 0
-            current.update(avail=good, checked=now)
+            # upozornit jen na změnu: minule (při stejných předvolbách) taková verze nebyla
+            appeared = bool(best) and current.get("match") == 0 and current.get("match_prefs") == mark
+            current.update(avail=len(good), match=int(bool(best)), match_prefs=mark, checked=now)
             if appeared:
-                current["fresh"] = True
-                found.append(current.get("title") or "")
+                detail = " · ".join(part for part in (best["video"].get("lang"), best["video"].get("quality")) if part)
+                current.update(fresh=True, fresh_note=detail)
+                card = _title_card("movie", current.get("tmdb_id") or 0, current.get("title") or "",
+                                   current.get("year") or 0, current.get("poster") or "", current.get("orig") or "",
+                                   state, favorite=current)
+                found.append({"title": current.get("title") or "", "detail": detail, "target": card["target"]})
             _save_favorites(items)
-        _remember_availability("movie", entry["tmdb_id"], good)
+        _remember_availability("movie", entry["tmdb_id"], len(good))
     return {"found": found}
 
 
@@ -206,6 +243,10 @@ def _title_card(kind, tmdb_id, title, year, poster, orig, state, rating=0, favor
     badges = ["Přehraj.to"] if known else ["Nenalezeno"] if known == 0 else None
     if favorite and favorite.get("fresh"):
         badges = ["Nově na Přehraj.to"]
+        subtitle = " · ".join(part for part in (favorite.get("fresh_note") or "", subtitle) if part)
+    if kind == "movie" and tmdb_id:
+        # film jde pustit i bez otevření stránky: nejlepší verze podle předvoleb
+        menu.insert(1, {"title": "Přehrát hned", "target": api._target("play", "discover_movie_play", params)})
     return api._card(title, target, subtitle, poster, wide=not poster, menu=menu,
                      icon="series" if kind == "tv" else "movies", badges=badges)
 
@@ -520,11 +561,21 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice=""):
                 break
         if found:
             break
-    if not found and queries and failed == len(queries):
-        raise api.ApiError("Hledání na Přehraj.to se nezdařilo. Zkuste to znovu.")
     prefs, bad = state.get("prefs") or api._prefs(), state.get("bad", ())
     with api._library() as lib:
         chosen = lib.get_kv(api.CHOICE_PREFIX + choice) if choice else ""
+        # Verze stažené na disku patří k titulu, i když už je hledání nevrací (nebo zrovna nejde).
+        for vid in state.get("downloads", {}):
+            if vid in found or not api._saved(state, vid):
+                continue
+            video = lib.find_video(vid)
+            if video and search_results.filename_matches(nameparser.parse(video["raw_title"]), wanted,
+                                                         0 if position else year, position, kind):
+                found[vid] = ({"id": vid, "title": video["raw_title"], "thumb": video.get("thumb") or "",
+                               "size": video.get("size") or "", "duration": video.get("duration") or 0,
+                               "quality": video.get("quality") or ""}, nameparser.parse(video["raw_title"]))
+    if not found and queries and failed == len(queries):
+        raise api.ApiError("Hledání na Přehraj.to se nezdařilo. Zkuste to znovu.")
     versions, seen = [], set()
     for result, parsed in found.values():
         video = dict(parsed, id=result["id"], raw_title=result["title"], thumb=result.get("thumb", ""),
@@ -539,8 +590,9 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice=""):
                          "short": bool(runtime and video["duration"] and video["duration"] < runtime * 60 * 0.6)
                          or search_results.is_preview(video["raw_title"], names),
                          "cam": bool(api.CAM_RE.search(video["raw_title"])), "bad": video["id"] in bad,
-                         "chosen": bool(chosen) and video["id"] == chosen})
-    versions.sort(key=lambda version: (version["short"], not version["chosen"]) +
+                         "chosen": bool(chosen) and video["id"] == chosen, "saved": api._saved(state, video["id"])})
+    # stažená verze má přednost (hraje z disku, bez čekání a bez internetu), pak naposledy zvolená
+    versions.sort(key=lambda version: (version["short"], not version["saved"], not version["chosen"]) +
                   api._version_rank(version["video"], prefs, bad))
     return versions
 
@@ -561,7 +613,8 @@ def _version_card(version, state, choice=""):
         else (video.get("lang") or "").split(" ")[0]
     return api._card(title, api._target("play", "play", params), api._mark(state, video["id"], subtitle),
                      video.get("thumb"), api._percent(point), wide=True, watched=video["id"] in state["watched"],
-                     menu=api._video_menu(state, params, point), icon="movies", badges=[language, quality])
+                     menu=api._video_menu(state, params, point), icon="movies",
+                     badges=["Na disku" if version.get("saved") else "", language, quality])
 
 
 def _names(params):
@@ -697,7 +750,7 @@ def discover_title(params):
         detail["plot"] = (failed + "\n\n" + detail["plot"]).strip()
     else:
         _remember_availability("movie", params.get("id"), len(good))
-        _note_favorite(entry["id"], len(good))
+        _note_favorite(entry["id"], versions, state["prefs"])
     if failed:
         pass
     elif good:
@@ -807,6 +860,29 @@ def discover_episode_play(params):
             request[key] = params[key]
     stream = api.play(request)
     stream["choice"] = choice   # přehrávač podle něj po dokoukání nabídne další díl
+    return stream
+
+
+def discover_movie_play(params):
+    """Přehraje film z Objevuj rovnou, bez otevření jeho stránky: nejlepší verzi podle předvoleb."""
+    tmdb_id = params.get("id") or 0
+    with api._library() as lib:
+        state = api._state(lib)
+    choice = "movie:%s" % tmdb_id if tmdb_id else ""
+    versions = [version for version in _find_versions(_names(params), int(params.get("year") or 0), None, state,
+                                                      choice=choice) if not version["short"]]
+    if not versions:
+        raise api.ApiError("Na Přehraj.to jsem tento film nenašel.\n\nOtevřete jeho stránku a zkuste „Hledat ručně“.")
+    versions.sort(key=lambda version: version["bad"])
+    best = versions[0]
+    request = {"vid": best["video"]["id"], "web_result": best["result"]}
+    if choice:
+        request["choice"] = choice
+    for key in ("restart", "fresh", "online"):
+        if params.get(key):
+            request[key] = params[key]
+    stream = api.play(request)
+    stream["choice"] = choice
     return stream
 
 
@@ -1141,4 +1217,5 @@ ACTIONS = {
     "play_next": play_next, "title_csfd": title_csfd, "favorites_check": favorites_check,
     "discover_download_season": discover_download_season, "discover_filters": discover_filters,
     "discover_person": discover_person, "discover_episode_play": discover_episode_play,
+    "discover_movie_play": discover_movie_play,
 }

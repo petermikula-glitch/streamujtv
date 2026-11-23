@@ -553,7 +553,8 @@ def test_discover_lists_come_from_tmdb(api, monkeypatch):
     assert card["image"] == "https://image.tmdb.org/t/p/w342/p.jpg"
     assert card["target"] == {"type": "title", "call": "discover_title", "title": "Pelíšky", "params": {
         "kind": "movie", "id": 11, "title": "Pelíšky", "year": 1999, "poster": card["image"], "orig": "Pelisky"}}
-    assert _titles(card["menu"]) == ["Otevřít", "Přidat do oblíbených"]
+    assert _titles(card["menu"]) == ["Otevřít", "Přehrát hned", "Přidat do oblíbených"]
+    assert card["menu"][1]["target"]["call"] == "discover_movie_play" and card["menu"][1]["target"]["type"] == "play"
     assert listing["next"] == {"call": "discover", "params": {"kind": "movie", "category": "popular", "page": 2}}
     api("discover", kind="movie", category="popular")                    # podruhé z mezipaměti
     assert [path for path, _ in calls] == ["/movie/popular"]
@@ -725,7 +726,7 @@ def test_title_page_offers_the_series_similar_titles_cast_and_csfd(api, monkeypa
     assert api("title_csfd", kind="movie", title="", year=2000) == {"text": ""}
 
 
-def test_favourite_that_appears_on_prehrajto_is_announced(api, monkeypatch):
+def test_favourite_is_announced_when_a_version_matching_preferences_appears(api, monkeypatch):
     api("settings_set", tmdb_key="k" * 32)
     _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
     found = {}
@@ -733,18 +734,74 @@ def test_favourite_that_appears_on_prehrajto_is_announced(api, monkeypatch):
     page = api("discover_title", **FILM)                                     # film na Přehraj.to zatím není
     favourite = next(action for action in page["actions"] if action["title"] == "Přidat do oblíbených")
     api(favourite["target"]["call"], **favourite["target"]["params"])
-    api("discover_title", **FILM)                                            # stránka si u oblíbeného zapamatuje „není“
+    api("discover_title", **FILM)                                            # stránka si u oblíbeného zapamatuje stav
     before = len(asked)
     assert api("favorites_check") == {"found": []} and len(asked) > before   # pořád nic
     before = len(asked)
     assert api("favorites_check") == {"found": []} and len(asked) == before  # podruhé se hned neptá
-    found["Pelíšky 1999"] = [_web(61, "Pelisky 1999 CZ 1080p", 7000, "4 GB")]
-    assert api("favorites_check", force=True) == {"found": ["Pelíšky"]}
+
+    found["Pelíšky 1999"] = [_web(60, "Pelisky 1999 EN 1080p", 7000, "4 GB"),     # jiný jazyk, než chci
+                             _web(62, "Pelisky 1999 CZ HDCAM", 7000, "1 GB"),       # kino kopie
+                             _web(63, "Pelisky 1999 CZ", 7000, "700 MB", "SD")]     # nízká kvalita
+    assert api("favorites_check", force=True) == {"found": []}               # verze jsou, ale ne podle předvoleb
+    assert "badges" not in _section(api, "favorites")["Filmy"][0]
+    found["Pelíšky 1999"].append(_web(61, "Pelisky 1999 CZ 1080p", 7000, "4 GB"))
+    announced = api("favorites_check", force=True)["found"]                  # český dabing v dobré kvalitě: upozornit
+    assert [(item["title"], item["detail"]) for item in announced] == [("Pelíšky", "CZ dabing · 1080p")]
+    assert announced[0]["target"]["type"] == "title" and announced[0]["target"]["params"]["id"] == 11
     card = _section(api, "favorites")["Filmy"][0]
-    assert card["badges"] == ["Nově na Přehraj.to"]
-    assert api("favorites_check", force=True) == {"found": []}               # známý titul se znovu neohlašuje
+    assert card["badges"] == ["Nově na Přehraj.to"] and card["subtitle"].startswith("CZ dabing · 1080p")
+    before = len(asked)
+    assert api("favorites_check", force=True) == {"found": []} and len(asked) == before   # vyřízený titul se už nehledá
     api("discover_title", **FILM)                                            # otevřením štítek zmizí
     assert "badges" not in _section(api, "favorites")["Filmy"][0]
+
+    api("settings_set", prefer_language="subs")                              # jiné předvolby: stav se zjišťuje znovu,
+    assert api("favorites_check", force=True) == {"found": []}               # první zjištění ale není „novinka“
+    found["Pelíšky 1999"].append(_web(64, "Pelisky 1999 CZ titulky 1080p", 7000, "4 GB"))
+    again = api("favorites_check", force=True)["found"]
+    assert [(item["title"], item["detail"]) for item in again] == [("Pelíšky", "CZ titulky · 1080p")]
+    prefs = {"language": "dub", "quality": "1080"}
+    assert app_api.app_discover.meets_preferences({"lang": "CZ dabing", "quality": "1080p", "raw_title": "x"}, prefs)
+    assert not app_api.app_discover.meets_preferences({"lang": "CZ dabing", "quality": "720p", "raw_title": "x"}, prefs)
+    assert app_api.app_discover.meets_preferences({"lang": "EN", "quality": "", "raw_title": "x"},
+                                                  {"language": "any", "quality": "small"})
+
+
+def test_downloaded_version_comes_first_and_film_plays_without_its_page(api, monkeypatch, tmp_path):
+    api("settings_set", tmdb_key="k" * 32, username="a@b.cz", password="heslo")
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    hour = 3600
+    found = {"Pelíšky 1999": [_web(71, "Pelisky 1999 CZ 1080p", 2 * hour, "4 GB"),
+                              _web(72, "Pelisky 1999 EN 720p", 2 * hour, "1 GB")]}
+    _catalogue_search(monkeypatch, found)
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/%s.mp4" % vid.split(":")[0], {}))
+    stream = api("discover_movie_play", **FILM)                              # „Přehrát hned“: nejlepší verze
+    assert stream["track"] == _web(71, "")["id"] and stream["choice"] == "movie:11"
+
+    english = _web(72, "")["id"]                                             # anglická verze je stažená na disku
+    api("download_add", vid=english, web_result=found["Pelíšky 1999"][1])
+    disk = tmp_path / "usb"
+    disk.mkdir()
+    job = api("download_next", dir=str(disk))
+    (disk / os.path.basename(job["path"])).write_bytes(b"x" * 10)
+    api("download_finish", vid=english, size=10, subtitles=[])
+    api("play", vid=english, web_result=found["Pelíšky 1999"][1], choice="movie:11")
+    page = api("discover_title", **FILM)
+    first = page["rows"][0]["items"][0]
+    assert first["target"]["params"]["vid"] == english and first["badges"][0] == "Na disku"   # stažená má přednost
+    assert first["subtitle"].startswith("Staženo") and page["actions"][0]["target"] == first["target"]
+    assert api("discover_movie_play", **FILM)["local"] is True               # a hraje z disku
+
+    del found["Pelíšky 1999"]                                                # z hledání zmizela, na disku zůstala
+
+    def broken(client, query, page, cursor):
+        raise app_api.provider.ProviderError("HTTP 500")
+
+    monkeypatch.setattr(app_api.provider, "search_catalog", broken)
+    offline = api("discover_title", **FILM)                                  # hledání nejde: stažená verze stačí
+    assert _titles(offline["actions"])[0] == "Přehrát" and len(offline["rows"][0]["items"]) == 1
+    assert offline["rows"][0]["items"][0]["target"]["params"]["vid"] == english
 
 
 def test_web_results_of_one_title_are_grouped(api, monkeypatch):
