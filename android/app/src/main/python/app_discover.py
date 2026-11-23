@@ -31,6 +31,13 @@ ONLY_PAGES = 3                   # …a víc stránek TMDB kvůli nim najednou n
 ONLY_SECONDS = 12                # ani když ověřování trvá déle než tolik sekund
 CHECK_PAUSE = 120                # služba, která neodpovídá, se tolik sekund nezkouší (výpis na ni nečeká)
 CHECK_WAIT = 20                  # déle výpis nečeká, až doběhne jiné ověřování
+BACKGROUND = True                # výpis na ověřování nečeká: tituly ukáže hned a ověřuje je na pozadí
+VERIFY_QUEUE = 120               # víc titulů na ověření nečeká (starší požadavky propadnou)
+VERIFY_REFRESH = 2               # po kolika sekundách si má obrazovka říct o čerstvý stav
+# Ověřování na pozadí: fronta titulů (naposledy otevřený výpis první), právě ověřované a ty, které se
+# ověřit nepodařilo (chvíli se nezkoušejí, aby se výpis neobnovoval donekonečna).
+_VERIFY = {"queue": [], "active": set(), "thread": None, "failed": {}}
+_VERIFY_LOCK = threading.Lock()
 _PAUSED = {}                     # {"prehrajto" | "ivysilani": do kdy se nezkouší}
 _CHECK_LOCK = threading.Lock()   # ověřování běží nejvýš jedno (řady hlavní obrazovky se nepředbíhají)
 CHECK_BATCH = 20                 # kolik titulů ověří jedno „Ověřit dostupnost“
@@ -254,6 +261,8 @@ def _title_card(kind, tmdb_id, title, year, poster, orig, state, rating=0, favor
     # štítek říká, kde titul je; „Nenalezeno“ jen u ověřeného, který není nikde
     badges = [name for name, there in (("Přehraj.to", known), ("iVysílání", television)) if there] \
         or (["Nenalezeno"] if known == 0 else None)
+    if "%s:%s" % (kind, tmdb_id) in state.get("checking", ()):
+        badges = ["Ověřuji…"]   # dostupnost se právě zjišťuje na pozadí
     if favorite and favorite.get("fresh"):
         badges = ["Nově na Přehraj.to"]
         subtitle = " · ".join(part for part in (favorite.get("fresh_note") or "", subtitle) if part)
@@ -404,6 +413,51 @@ def _check_available(kind, items, state):
         _CHECK_LOCK.release()
 
 
+def _verify_later(kind, items, state):
+    """Zařadí tituly k ověření na pozadí. Vrací klíče těch, které na ověření čekají (i z dřívějška)."""
+    now = time.time()
+    with _VERIFY_LOCK:
+        waiting = {key for key, _item in _VERIFY["queue"]} | _VERIFY["active"]
+        pending, fresh = set(), []
+        for item in items:
+            key = (kind, item["id"])
+            if key in waiting:
+                pending.add(key)
+            elif _VERIFY["failed"].get(key, 0) <= now:
+                fresh.append((key, item))
+                pending.add(key)
+        _VERIFY["queue"][:0] = fresh   # naposledy otevřený výpis má přednost
+        del _VERIFY["queue"][VERIFY_QUEUE:]
+        if _VERIFY["queue"] and _VERIFY["thread"] is None:
+            thread = threading.Thread(target=_verify_loop, args=(state,), name="overovani")
+            thread.daemon = True
+            _VERIFY["thread"] = thread
+            thread.start()
+    return pending
+
+
+def _verify_loop(state):
+    """Vlákno ověřování: bere z fronty po pár titulech stejného druhu, dokud není prázdná."""
+    while True:
+        with _VERIFY_LOCK:
+            if not _VERIFY["queue"]:
+                _VERIFY["thread"] = None
+                return
+            kind = _VERIFY["queue"][0][0][0]
+            batch = [entry for entry in _VERIFY["queue"] if entry[0][0] == kind][:CHECK_WORKERS]
+            _VERIFY["queue"] = [entry for entry in _VERIFY["queue"] if entry not in batch]
+            _VERIFY["active"] = {key for key, _item in batch}
+        try:
+            known = _check_available(kind, [item for _key, item in batch], state)
+        except Exception:   # vlákno na pozadí nesmí spadnout: neověřené tituly se jen chvíli nezkoušejí
+            known = {}
+        with _VERIFY_LOCK:
+            for key, _item in batch:
+                if "%s:%s" % key not in known:
+                    _VERIFY["failed"][key] = time.time() + CHECK_PAUSE
+            _VERIFY["active"] = set()
+
+
 def _missing(known, kind, item):
     """Titul se na Přehraj.to hledal a není tam, a aplikace o něm neví ani z iVysílání."""
     entry = known.get("%s:%s" % (kind, item["id"]))
@@ -416,17 +470,27 @@ def _collect(params, state, enough=ONLY_ENOUGH, pages_max=ONLY_PAGES):
     Běžně jen ty, které jsou k mání na Přehraj.to nebo v iVysílání; protože jich na stránce TMDB
     může být málo, projde se jich víc (nejvýš ``pages_max``), dokud není titulů ``enough``.
     S ``avail=all`` vrací celou stránku bez ověřování.
+
+    Na ověřování se nečeká (``BACKGROUND``): tituly, o kterých se zatím nic neví, ve výpisu zůstanou,
+    ověřují se na pozadí a jejich klíče jsou ve ``state["checking"]`` – obrazovka si pak řekne znovu.
     """
     kind = _kind(params)
     page = max(1, api._offset({"offset": params.get("page")}))
     everything = params.get("avail") == "all"
     found, started = [], time.time()
+    checking = state.setdefault("checking", set())
     for current in range(page, page + (1 if everything else pages_max)):
         items, pages = _list_items(dict(params, page=current))
         items = [item for item in items if isinstance(item, dict) and item.get("id")]
-        if everything:
+        if everything or BACKGROUND:
             with api._library() as lib:
                 known = _known(lib, kind, [item["id"] for item in items])
+            if not everything:
+                # neznámé tituly a ty, u kterých chybí jen iVysílání, se ověří na pozadí
+                todo = [item for item in items
+                        if (known.get("%s:%s" % (kind, item["id"])) or {"iv": None})["iv"] is None]
+                pending = _verify_later(kind, todo, state)
+                checking.update("%s:%s" % key for key in pending if "%s:%s" % key not in known)
         else:
             known = _check_available(kind, items, state)
         _mark_known(state, known)
@@ -434,6 +498,15 @@ def _collect(params, state, enough=ONLY_ENOUGH, pages_max=ONLY_PAGES):
         if current >= pages or not items or len(found) >= enough or time.time() - started > ONLY_SECONDS:
             break
     return found, current, pages
+
+
+def _checking_note(state):
+    """Co obrazovka ukáže a kdy se má zeptat znovu, dokud se část titulů ověřuje."""
+    count = len(state.get("checking") or ())
+    if not count:
+        return {}
+    return {"refresh": VERIFY_REFRESH,
+            "status": "Ověřuji, co je k mání na Přehraj.to a v iVysílání – zbývá %d" % count}
 
 
 def _item_card(item, kind, state):
@@ -471,9 +544,9 @@ def discover(params):
         base = {key: value for key, value in params.items() if key != "page"}
         cards.insert(0, api._card("Filtr", {"type": "filter", "call": "discover_filters", "params": base},
                                   _filter_summary(base) or "Žánr, období, hodnocení, dostupnost", icon="settings:search"))
-    return {"items": cards, "next": following,
-            "empty": "V tomto výběru TMDB nic nenabízí." if everything else
-            "Z tohoto výběru teď není nic na Přehraj.to ani v iVysílání. Ve Filtru jde zapnout Všechny tituly."}
+    return dict(_checking_note(state), items=cards, next=following,
+                empty="V tomto výběru TMDB nic nenabízí." if everything else
+                "Z tohoto výběru teď není nic na Přehraj.to ani v iVysílání. Ve Filtru jde zapnout Všechny tituly.")
 
 
 def discover_row(params):
@@ -486,11 +559,12 @@ def discover_row(params):
         state = api._state(lib)
     items = _collect(params, state, pages_max=2)[0][:api.HOME_ROW]   # jen tituly, které jsou k mání
     cards = [_item_card(item, kind, state) for item in items]
+    note = _checking_note(state)
     if cards:
         name = "%s – populární" % _plural(kind)
         cards.append(api._card("Zobrazit vše", api._target("list", "discover", dict(params), name),
                                "A filtr podle žánru, období a hodnocení", icon="all"))
-    return {"items": cards}
+    return dict(note, items=cards)
 
 
 RATINGS = (("", "Vše"), ("60", "60 % a víc"), ("70", "70 % a víc"), ("80", "80 % a víc"))
@@ -986,11 +1060,14 @@ def _title_page(params, kind):
                           + (detail.get("plot") or "")).strip()
         return {"detail": detail, "actions": actions, "rows": []}, False
     if kind == "tv" and params.get("id"):
-        rows, play = _series_rows(params, state)
+        rows, play, focus = _series_rows(params, state, last)
         if play:
             actions.insert(0, play)
-        return {"detail": detail, "actions": actions,
-                "rows": rows + _related_rows(kind, params, info, state)}, bool(play)
+        page = {"detail": detail, "actions": actions, "rows": rows + _related_rows(kind, params, info, state)}
+        if focus:
+            # díl, kterým se pokračuje: po návratu z přehrávače na něm aplikace nechá výběr
+            page["focus"] = {"row": focus[0], "item": focus[1]}
+        return page, bool(play)
     choice = "movie:%s" % params["id"] if params.get("id") else ""
     failed = ""
     try:
@@ -1047,14 +1124,25 @@ def _played_episodes(lib, tmdb_id, season, numbers):
     return {number: lib.get_kv(api.CHOICE_PREFIX + "tv:%s:%s:%s" % (tmdb_id, season, number)) for number in numbers}
 
 
-def _series_rows(params, state):
-    """Řady stránky seriálu (díly po řadách) a tlačítko, které pustí díl, na kterém se skončilo."""
+def _series_rows(params, state, last=None):
+    """Řady stránky seriálu (díly po řadách), tlačítko, které pustí díl, na kterém se skončilo, a kde
+    ten díl v řadách je (``(řada, pozice)``).
+
+    Rovnou s díly je jen ``SEASON_ROWS`` řad; u dlouhého seriálu je to okno kolem naposledy sledované
+    řady (``last``), aby „Pokračovat“ vidělo i díly ze sedmé a dalších řad.
+    """
     client = _tmdb()
     tmdb_id = int(params["id"])
     title = params.get("title") or ""
     seasons = client.seasons(tmdb_id)
+    numbers = [season["number"] for season in seasons]
+    start = 0
+    if str(last or "").isdigit() and int(last) in numbers:
+        # okno končí řadou po té naposledy sledované (další díl může být až v ní)
+        start = max(0, min(numbers.index(int(last)) + 2, len(seasons)) - SEASON_ROWS)
+    shown = seasons[start:start + SEASON_ROWS]
     rows, order = [], []
-    for season in seasons[:SEASON_ROWS]:
+    for season in shown:
         try:
             episodes = client.season_episodes(tmdb_id, season["number"])
         except TmdbError:
@@ -1067,28 +1155,30 @@ def _series_rows(params, state):
         cards = []
         for number in numbers:
             card = _episode_card(params, season["number"], number, episodes[number], state, played.get(number))
+            order.append((card, played.get(number), (len(rows), len(cards))))
             cards.append(card)
-            order.append((card, played.get(number)))
         rows.append({"title": "%s (%d dílů)" % (season["title"], len(cards)), "items": cards})
     rest = [api._card(season["title"], api._target(
         "list", "discover_season", dict(params, season=season["number"]), "%s – %s" % (title, season["title"])),
         "%d dílů" % season["episodes"] if season["episodes"] else "",
-        season["poster"] or params.get("poster") or "", icon="series") for season in seasons[SEASON_ROWS:]]
+        season["poster"] or params.get("poster") or "", icon="series")
+        for season in seasons[:start] + seasons[start + SEASON_ROWS:]]
     if rest:
         rows.append({"title": "Další řady", "items": rest})
     if not order:
-        return rows, None
+        return rows, None, None
     # rozkoukaný díl má přednost; jinak díl po posledním zhlédnutém; jinak první
-    unfinished = [index for index, (_card, vid) in enumerate(order) if vid and state["resume"].get(vid)]
-    watched = [index for index, (_card, vid) in enumerate(order) if vid and vid in state["watched"]]
+    unfinished = [index for index, entry in enumerate(order) if entry[1] and state["resume"].get(entry[1])]
+    watched = [index for index, entry in enumerate(order) if entry[1] and entry[1] in state["watched"]]
     if unfinished:
-        card, verb = order[unfinished[-1]][0], "Pokračovat"
+        chosen, verb = order[unfinished[-1]], "Pokračovat"
     elif watched and watched[-1] + 1 < len(order):
-        card, verb = order[watched[-1] + 1][0], "Přehrát další díl"
+        chosen, verb = order[watched[-1] + 1], "Přehrát další díl"
     else:
-        card, verb = order[0][0], "Přehrát"
+        chosen, verb = order[0], "Přehrát"
+    card = chosen[0]
     target = dict(card["target"], params=dict(card["target"]["params"], resume=True)) if unfinished else card["target"]
-    return rows, {"title": verb, "subtitle": card["title"], "target": target}
+    return rows, {"title": verb, "subtitle": card["title"], "target": target}, chosen[2]
 
 
 def discover_episode_play(params):
@@ -1381,17 +1471,20 @@ def play_next(params):
 def next_up_cards(lib, state, limit=10):
     """Karty „Další díly“: po dokoukaném dílu seriálu z katalogu ten následující, u seriálů z Objevuj stránka."""
     cards, seen = [], set()
+    hidden = {meta["key"] for meta in lib.hidden_progress()}   # seriály, u kterých si uživatel další díly nepřál
     for video in lib.history_videos(limit=40, include_search=True):
         if video["kind"] != "episode" or not video["episode"] or video["meta_key"] in seen:
             continue
         seen.add(video["meta_key"])      # rozhoduje naposledy přehraný díl seriálu
-        if video["id"] not in state["watched"]:
+        if video["id"] not in state["watched"] or video["meta_key"] in hidden:
             continue
         found = _catalogue_next_episode(lib, video, state)
         if found and found[0]["id"] not in state["watched"] and not state["resume"].get(found[0]["id"]):
             meta = lib.get_meta(video["meta_key"])
             card = api._video_card(found[0], meta, state)
             card["subtitle"] = " · ".join(part for part in ("Další díl", card["subtitle"]) if part)
+            card["menu"] = (card.get("menu") or []) + [{"title": "Nenabízet další díly", "target": api._target(
+                "command", "next_up_hide", {"key": video["meta_key"]})}]
             cards.append(card)
     for tmdb_id in _recent_series(lib):
         info = _title_info(lib, "tv", tmdb_id)
@@ -1399,8 +1492,23 @@ def next_up_cards(lib, state, limit=10):
             card = _title_card("tv", info.get("id") or tmdb_id, info["title"], int(info.get("year") or 0),
                                info.get("poster") or "", info.get("orig") or "", state)
             card["subtitle"] = "Pokračovat ve sledování"
+            card["menu"] = (card.get("menu") or []) + [{"title": "Nenabízet další díly", "target": api._target(
+                "command", "next_up_hide", {"tmdb": tmdb_id})}]
             cards.append(card)
     return cards[:limit]
+
+
+def next_up_hide(params):
+    """Seriál z řady „Další díly“ zmizí, dokud se z něj zase něco nepustí."""
+    with api._library() as lib:
+        if params.get("key"):
+            lib.set_progress_hidden(str(params["key"]), True)
+        elif params.get("tmdb"):
+            recent = [item for item in _recent_series(lib) if str(item) != str(params["tmdb"])]
+            lib.set_kv(RECENT_SERIES, json.dumps(recent))
+        else:
+            raise api.ApiError("Chybí seriál.")
+    return {"message": "", "toast": "Další díly tohoto seriálu se nabízet nebudou, dokud si z něj něco nepustíte."}
 
 
 def search_titles(query):
@@ -1504,5 +1612,5 @@ ACTIONS = {
     "play_next": play_next, "title_csfd": title_csfd, "favorites_check": favorites_check,
     "discover_download_season": discover_download_season, "discover_filters": discover_filters,
     "discover_person": discover_person, "discover_episode_play": discover_episode_play,
-    "discover_movie_play": discover_movie_play, "discover_row": discover_row,
+    "discover_movie_play": discover_movie_play, "discover_row": discover_row, "next_up_hide": next_up_hide,
 }

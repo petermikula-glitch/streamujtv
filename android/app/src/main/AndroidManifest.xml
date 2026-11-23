@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- zjištění, že se vrátilo připojení: stahování pak naváže samo -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- stahování na disk běží jako služba v popředí a nesmí ho přerušit uspání zařízení -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

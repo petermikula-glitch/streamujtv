@@ -64,12 +64,7 @@ class ListFragment : VerticalGridSupportFragment() {
     private var generation = 0
     private var reloadWanted = false  // obnovení, které přišlo během načítání další stránky
     private var emptyBatches = 0  // kolik dávek po sobě nepřineslo žádný titul (výpis „jen dostupné“)
-    // Výpis z Objevuj poprvé ověřuje, co je k mání (pár sekund): ať je vidět, že se něco děje.
-    private val patience = Runnable {
-        if (isResumed && loading && !loaded) {
-            Toast.makeText(requireContext(), "Ověřuji, co je na Přehraj.to a v iVysílání…", Toast.LENGTH_LONG).show()
-        }
-    }
+    private var status: TextView? = null  // řádek dole: co se právě děje na pozadí (ověřování dostupnosti)
     private var backdrop: Backdrop? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,6 +88,7 @@ class ListFragment : VerticalGridSupportFragment() {
             val index = cards.indexOf(item)
             if (index >= cards.size() - 10) loadNext()
             backdrop?.show((item as? Card)?.image.orEmpty())
+            (item as? Card)?.let { Hints.cardSelected(requireContext(), it) }
         })
     }
 
@@ -138,11 +134,9 @@ class ListFragment : VerticalGridSupportFragment() {
             // místo textu „Načítám…“ obrysy karet v budoucím tvaru
             showMessage("")
             cards.setItems(Card.skeletons(if (presenter.poster) 10 else 8), null)
-            if (call == "discover" && params.optString("avail") != "all") handler.postDelayed(patience, 2500)
         }
         Api.call(call, params) { result ->
             if (ticket != generation) return@call
-            handler.removeCallbacks(patience)
             if (!isAdded) {
                 loading = false
                 return@call
@@ -187,6 +181,10 @@ class ListFragment : VerticalGridSupportFragment() {
                 return@call
             }
             list.addAll(Card.list(data.optJSONArray("items")))
+            // další stránka se ještě ověřuje: obnovení a stav platí pro celý výpis
+            if (data.optInt("refresh") > 0 && first.optInt("refresh") == 0) {
+                first.put("refresh", data.optInt("refresh")).put("status", data.optString("status"))
+            }
             gather(first, list, data.optJSONObject("next"), wanted, ticket, pages + 1)
         }
     }
@@ -212,10 +210,35 @@ class ListFragment : VerticalGridSupportFragment() {
         if (seconds > 0) handler.postDelayed(refresh, seconds * 1000L)
         val same = cards.size() == list.size &&
             (0 until cards.size()).all { (cards.get(it) as? Card)?.key == list[it].key }
-        cards.setItems(list, if (same) Card.DIFF else null)
+        // Výpis z Objevuj se při ověřování dostupnosti obnovuje sám a karty z něj ubývají: mění se na
+        // místě, ať výběr neuskočí na začátek. Jinde se při jiném složení staví znovu.
+        val known = (0 until cards.size()).mapNotNull { (cards.get(it) as? Card)?.key }.toHashSet()
+        val similar = call == "discover" && list.isNotEmpty() && list.count { it.key in known } * 2 >= list.size
+        cards.setItems(list, if (same || similar) Card.DIFF else null)
         next = following
         emptyBatches = 0
+        showStatus(data.optString("status"))
         settle()
+    }
+
+    /** Řádek u spodního okraje; prázdný text ho skryje. */
+    private fun showStatus(text: String) {
+        val root = view as? ViewGroup ?: return
+        if (status == null) {
+            if (text.isEmpty()) return
+            val density = resources.displayMetrics.density
+            status = TextView(requireContext()).apply {
+                textSize = 14f
+                setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
+                setBackgroundColor(0xCC0B1220.toInt())
+                setPadding((16 * density).toInt(), (6 * density).toInt(), (16 * density).toInt(), (6 * density).toInt())
+            }
+            root.addView(status, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = (20 * density).toInt() })
+        }
+        status?.text = text
+        status?.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
     }
 
     /** Karty, které jsou obsahem (ne jen ovládáním výpisu, jako Filtr). */
@@ -285,13 +308,13 @@ class ListFragment : VerticalGridSupportFragment() {
 
     override fun onPause() {
         handler.removeCallbacks(refresh)
-        handler.removeCallbacks(patience)
         super.onPause()
     }
 
     override fun onDestroyView() {
         message = null
         again = null
+        status = null
         super.onDestroyView()
     }
 
@@ -361,6 +384,13 @@ class ListFragment : VerticalGridSupportFragment() {
             cards.addAll(cards.size(), items)
             next = data.optJSONObject("next")
             emptyBatches = if (items.isEmpty()) emptyBatches + 1 else 0
+            val seconds = data.optInt("refresh")
+            if (seconds > 0) {
+                // nově načtená stránka se ještě ověřuje: výpis se za chvíli obnoví celý
+                showStatus(data.optString("status"))
+                handler.removeCallbacks(refresh)
+                handler.postDelayed(refresh, seconds * 1000L)
+            }
             settle()
         }
     }

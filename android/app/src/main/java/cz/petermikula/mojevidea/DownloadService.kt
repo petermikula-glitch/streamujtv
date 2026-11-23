@@ -43,6 +43,9 @@ class DownloadService : Service() {
         private const val FAT_LIMIT = (4L shl 30) - 1   // největší soubor na FAT32
         @Volatile private var working = false
 
+        /** Služba právě stahuje (nebo čeká na připojení). */
+        val isWorking: Boolean get() = working
+
         fun start(context: Context) {
             try {
                 ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java))
@@ -103,9 +106,15 @@ class DownloadService : Service() {
             var attempt = 0
             var last = ""
             var waits = 0
+            var cleaned = false
             while (!stopping) {
                 val preferred = Api.callBlocking("settings_get").data?.optString("download_dir").orEmpty()
                 val volume = Storage.target(this, preferred)
+                if (!cleaned && volume != null) {
+                    // jednou za běh služby: rozpracované soubory, ke kterým už není záznam, jen zabírají místo
+                    cleaned = true
+                    Api.callBlocking("downloads_cleanup", JSONObject().put("dir", volume.dir.absolutePath))
+                }
                 val next = Api.callBlocking(
                     "download_next",
                     JSONObject().put("dir", volume?.dir?.absolutePath.orEmpty()).put("fresh", attempt > 0),

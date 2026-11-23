@@ -385,7 +385,7 @@ def _mark(state, vid, subtitle):
 
 
 def _video_menu(state, params, point=None):
-    """Nabídka po podržení OK na videu z Přehraj.to: přehrání a stahování na disk."""
+    """Nabídka po podržení OK na videu z Přehraj.to: přehrání, stahování na disk, zhlédnuto a Rozkoukané."""
     vid = params["vid"]
     items = [{"title": "Přehrát", "target": _target("play", "play", params)}]
     if point and point[0] > 0:
@@ -401,6 +401,12 @@ def _video_menu(state, params, point=None):
         items.append({"title": "Odebrat ze stahování", "target": remove})
     else:
         items.append({"title": "Zrušit stahování", "target": remove})
+    if not params.get("web_result"):   # jen video, které aplikace zná z katalogu nebo z dřívějšího přehrání
+        seen = vid in state.get("watched", ())
+        items.append({"title": "Označit jako nezhlédnuté" if seen else "Označit jako zhlédnuté",
+                      "target": _target("command", "watched_set", {"vid": vid, "watched": not seen})})
+    if point and point[0] > 0:
+        items.append({"title": "Odebrat z Rozkoukaných", "target": _target("command", "progress_remove", {"vid": vid})})
     return items
 
 
@@ -424,8 +430,11 @@ def _ivys_label(row):
 
 def _ivys_progress_card(row):
     point = (row["position"], row["total"])
-    return _card(_ivys_label(row), _target("play", "ivys_play", {"idec": row["idec"]}), "iVysílání", row["image"],
-                 _percent(point), wide=True)
+    target = _target("play", "ivys_play", {"idec": row["idec"]})
+    menu = [{"title": "Pokračovat", "target": target},
+            {"title": "Přehrát od začátku", "target": _target("play", "ivys_play", {"idec": row["idec"], "restart": True})},
+            {"title": "Odebrat z Rozkoukaných", "target": _target("command", "progress_remove", {"idec": row["idec"]})}]
+    return _card(_ivys_label(row), target, "iVysílání", row["image"], _percent(point), wide=True, menu=menu)
 
 
 def _ivys_in_progress(lib, limit=HOME_ROW):
@@ -1010,6 +1019,8 @@ def play(params):
             # verze spuštěná ze stránky titulu: příště bude první a u dílu seriálu nese stav zhlédnutí
             lib.set_kv(CHOICE_PREFIX + choice, vid)
             app_discover.remember_series(lib, choice)
+        if video["kind"] == "episode" and video.get("meta_key"):
+            lib.set_progress_hidden(video["meta_key"], False)   # seriál se zase sleduje: další díly se nabízejí
         # zvuk a titulky se pamatují pro celý seriál (u filmu pro film)
         tracks = app_extras.tracks(lib, ":".join(choice.split(":")[:2]) if choice.startswith("tv:")
                                    else video["meta_key"])
@@ -1090,6 +1101,29 @@ def progress_save(params):
         if entry and entry.get("state") == "done":
             download_remove({"vid": track})   # dokoukaný stažený soubor uvolní místo na disku
     return {"saved": True}
+
+
+def progress_remove(params):
+    """Odebere video z Rozkoukaných (zapomene, kde se skončilo); ``vid`` z Přehraj.to, ``idec`` z iVysílání."""
+    with _library() as lib:
+        if params.get("idec"):
+            lib.ivys_remove_history(str(params["idec"]))
+        elif params.get("vid"):
+            lib.remove_history(str(params["vid"]))
+        else:
+            raise ApiError("Chybí video.")
+    return {"message": "", "toast": "Odebráno z Rozkoukaných."}
+
+
+def watched_set(params):
+    """Ruční označení videa jako zhlédnutého (zmizí z Rozkoukaných, nabídne se další díl), nebo zpět."""
+    vid = str(params.get("vid") or "")
+    if not vid:
+        raise ApiError("Chybí video.")
+    watched = bool(params.get("watched"))
+    with _library() as lib:
+        lib.set_watched([vid], watched)
+    return {"message": "", "toast": "Označeno jako zhlédnuté." if watched else "Označeno jako nezhlédnuté."}
 
 
 def play_failed(params):
@@ -1500,21 +1534,61 @@ def _ivys_stream(client, idec, inspect=False):
 # (download_next), hlásí průběh (download_progress) a výsledek (download_finish / download_fail).
 
 def _downloads():
+    """Evidence stahování. Když je soubor poškozený (výpadek proudu při zápisu), použije se záloha
+    z poslední změny stavu – jinak by stažené soubory na disku zůstaly bez záznamu."""
     with _DOWNLOADS_LOCK:
-        try:
-            with open(_path(DOWNLOADS), encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, ValueError):
-            return {}
-        return {vid: entry for vid, entry in data.items() if isinstance(entry, dict)} if isinstance(data, dict) else {}
+        for name in (DOWNLOADS, DOWNLOADS + ".bak"):
+            try:
+                with open(_path(name), encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict):
+                return {vid: entry for vid, entry in data.items() if isinstance(entry, dict)}
+        return {}
 
 
-def _save_downloads(items):
+def _save_downloads(items, durable=True):
+    """Uloží evidenci. ``durable`` (změna stavu, ne jen průběh): data se vynutí na disk a uloží se
+    i záloha, aby evidence přežila výpadek proudu."""
     with _DOWNLOADS_LOCK:
         temporary = _path(DOWNLOADS + ".tmp")
         with open(temporary, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False)
+            if durable:
+                f.flush()
+                os.fsync(f.fileno())
         os.replace(temporary, _path(DOWNLOADS))
+        if durable:
+            backup = _path(DOWNLOADS + ".bak.tmp")
+            with open(backup, "w", encoding="utf-8") as f:
+                json.dump(items, f, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(backup, _path(DOWNLOADS + ".bak"))
+
+
+def downloads_pending(params):
+    """Čeká ve frontě něco ke stažení? (Aplikace se ptá, když se vrátí připojení nebo disk.)"""
+    return {"pending": any(entry.get("state") in ("queued", "downloading") for entry in _downloads().values())}
+
+
+def downloads_cleanup(params):
+    """Úklid složky stahování při startu služby: rozpracované soubory (``.part``), ke kterým už není
+    záznam (zrušené stahování, ztracená evidence), jen zabírají místo. Hotových souborů se nedotýká."""
+    directory = params.get("dir") or ""
+    removed = 0
+    if directory and os.path.isdir(directory):
+        wanted = {(entry.get("path") or "") + ".part" for entry in _downloads().values()}
+        for name in os.listdir(directory):
+            path = os.path.join(directory, name)
+            if name.endswith(".part") and path not in wanted and os.path.isfile(path):
+                try:
+                    os.remove(path)
+                    removed += 1
+                except OSError:
+                    pass
+    return {"removed": removed}
 
 
 def _size_text(size):
@@ -1701,7 +1775,7 @@ def download_progress(params):
             return {"cancel": True}
         entry["done"] = int(params.get("done") or 0)
         entry["total"] = int(params.get("total") or 0)
-        _save_downloads(items)
+        _save_downloads(items, durable=False)   # průběh se zapisuje každou chvíli: bez vynucení na disk
     return {"cancel": False}
 
 
@@ -1791,8 +1865,11 @@ def update_check(params):
     if best is None or _version(best[0]) <= _version(current):
         return {"available": False, "current": current}
     version, asset, release = best
+    # GitHub u přílohy uvádí její otisk; aplikace si podle něj stažený soubor před instalací ověří
+    digest = str(asset.get("digest") or "")
     return {"available": True, "current": current, "version": version, "url": asset["browser_download_url"],
-            "size": int(asset.get("size") or 0), "notes": str(release.get("body") or "").strip()[:800]}
+            "size": int(asset.get("size") or 0), "notes": str(release.get("body") or "").strip()[:800],
+            "sha256": digest[7:].lower() if digest.startswith("sha256:") and len(digest) == 71 else ""}
 
 
 # ---------------------------------------------------------------------------
@@ -1806,6 +1883,8 @@ ACTIONS.update({
     "downloads": downloads, "download_add": download_add, "download_next": download_next,
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,
     "download_remove": download_remove, "update_check": update_check,
+    "progress_remove": progress_remove, "watched_set": watched_set, "downloads_cleanup": downloads_cleanup,
+    "downloads_pending": downloads_pending,
     "home": home, "discover_home": discover_home, "movies": movies, "shows": shows, "show": show, "played": played,
     "search": search,
     "prehrajto_search": prehrajto_search, "search_history": search_history, "play_failed": play_failed,

@@ -47,6 +47,7 @@ class PlayerActivity : FragmentActivity() {
         const val NEXT_COUNTDOWN = 10  // sekund, než se další díl spustí sám
         const val ASK_RESUME_AFTER_MS = 60_000L  // kratší rozkoukání se naváže bez ptaní
         const val HEALTHY_AFTER_MS = 120_000L    // po takové době hraní se chyba bere jako nová, ne opakovaná
+        const val STILL_WATCHING_AFTER = 3       // tolik dílů se spustí samo bez jediného stisku ovladače
     }
 
     private var player: ExoPlayer? = null
@@ -68,6 +69,7 @@ class PlayerActivity : FragmentActivity() {
     private var lastStream: JSONObject? = null
     private var subtitleUrls = emptyList<String>()
     private var withoutSubtitles = false // titulky se nepodařilo načíst: video běží bez nich
+    private var unattended = 0           // kolik dílů po sobě se spustilo samo, aniž kdo sáhl na ovladač
 
     /** Přehrávání chvíli běží bez potíží: další výpadek má zase nárok na nový pokus. */
     private val healthy = Runnable { retried = false }
@@ -101,6 +103,7 @@ class PlayerActivity : FragmentActivity() {
     private val tick = object : Runnable {
         override fun run() {
             if (countdown <= 0) {
+                unattended++
                 startNext()
                 return
             }
@@ -373,6 +376,21 @@ class PlayerActivity : FragmentActivity() {
                     resolve()
                     return
                 }
+                if (live && error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                    // živé vysílání po dlouhé pauze: vrátit se na živý okraj a pokračovat
+                    exo.seekToDefaultPosition()
+                    exo.prepare()
+                    return
+                }
+                if (!retried && (live || track.startsWith("ivys:")) && error.errorCode !in 6000..6999) {
+                    // iVysílání a živé vysílání: adresa streamu po pauze vyprší a krátký výpadek sítě
+                    // přehrávání ukončí – jednou si říct o novou adresu a navázat
+                    retried = true
+                    if (!live && resumeAt > 0) saveProgress(ended = false)
+                    forcedPosition = if (live) -1 else resumeAt
+                    resolve()
+                    return
+                }
                 // Zapamatovaná adresa souboru mohla vypršet: jednou ji zahodit a načíst novou.
                 if (!retried && !live && track.isNotEmpty() && !track.startsWith("ivys:")) {
                     retried = true
@@ -511,6 +529,7 @@ class PlayerActivity : FragmentActivity() {
 
     /** Dokud je výběr v horní liště, ovládání nezmizí pod rukama. */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) unattended = 0  // někdo se dívá
         if (top.hasFocus() && event.action == KeyEvent.ACTION_DOWN) playerView.showController()
         return super.dispatchKeyEvent(event)
     }
@@ -538,14 +557,18 @@ class PlayerActivity : FragmentActivity() {
                 return@call
             }
             nextTarget = target
-            findViewById<TextView>(R.id.next_label).text = next.optString("title")
-            findViewById<TextView>(R.id.next_title).text = next.optString("subtitle")
             val plays = target.type == "play"
+            // Několik dílů se spustilo samo a nikdo nesáhl na ovladač: další se už sám nepustí, aby seriál
+            // nedohrál do konce při vypnuté televizi (a díly se neoznačily jako zhlédnuté).
+            val asks = plays && next.optBoolean("auto") && unattended >= STILL_WATCHING_AFTER
+            findViewById<TextView>(R.id.next_label).text =
+                if (asks) "Ještě se díváte? Další díl se sám nespustí." else next.optString("title")
+            findViewById<TextView>(R.id.next_title).text = next.optString("subtitle")
             nextPlay.text = if (plays) "Přehrát" else "Otevřít"
             top.visibility = View.GONE
             nextPanel.visibility = View.VISIBLE
             nextPlay.requestFocus()
-            countdown = if (plays && next.optBoolean("auto")) NEXT_COUNTDOWN else 0
+            countdown = if (plays && next.optBoolean("auto") && !asks) NEXT_COUNTDOWN else 0
             if (countdown > 0) handler.post(tick)
         }
     }

@@ -20,6 +20,9 @@ import app_api  # noqa: E402
 def api(tmp_path, monkeypatch):
     app_api.configure(str(tmp_path))
     app_api.app_discover._PAUSED.clear()   # žádná služba není z dřívějšího testu „mimo provoz“
+    # výpisy z Objevuj v testech na ověření dostupnosti čekají; ověřování na pozadí má vlastní test
+    monkeypatch.setattr(app_api.app_discover, "BACKGROUND", False)
+    app_api.app_discover._VERIFY.update(queue=[], active=set(), thread=None, failed={})
     service = FakeService()
     monkeypatch.setattr(ivysilani.urllib.request, "build_opener", lambda *handlers: service)
     monkeypatch.setattr(app_api.provider, "make_client",
@@ -119,8 +122,9 @@ def test_catalogue_rows_lists_and_search(api):
     assert film == {"title": "Pelíšky", "subtitle": "1999 · 91 % · CZ dabing, EN", "image": "https://img/pelisky.jpg",
                     "progress": 20, "wide": False, "watched": False, "icon": "movies", "menu": film["menu"],
                     "target": {"type": "play", "call": "play", "params": {"vid": REF}}}  # česká verze ve vyšší kvalitě
-    assert [item["title"] for item in film["menu"]] == ["Přehrát", "Přehrát od začátku", "Stáhnout na disk",
-                                                        "Přidat do oblíbených"]
+    assert [item["title"] for item in film["menu"]] == [
+        "Přehrát", "Přehrát od začátku", "Stáhnout na disk", "Označit jako zhlédnuté", "Odebrat z Rozkoukaných",
+        "Přidat do oblíbených"]
     assert rows["Moje filmy"][1]["title"] == "Filmy z mého účtu (1)" and rows["Moje filmy"][1]["target"]["call"] == "movies"
     assert rows["Moje filmy"][1]["icon"] == "movies"                  # dlaždice bez obrázku nese ikonu
     assert _section(api, "series")["Nově přidané z účtu"][0]["target"] == {"type": "list", "call": "show", "params": {"key": "show:archa"},
@@ -418,7 +422,7 @@ def test_download_queue_progress_local_playback_and_removal(api, tmp_path):
     assert api("download_progress", vid=REF, done=50, total=200) == {"cancel": False}
     card = api("downloads")["items"][0]
     assert (card["subtitle"], card["progress"]) == ("Stahuje se · 25 % z 0 MB", 25)
-    assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zrušit stahování"]
+    assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zrušit stahování", "Označit jako zhlédnuté"]
     rows = _section(api, "movies")                                           # dlaždice vede na stažené filmy
     assert rows["Moje filmy"][0]["title"] == "Stažené filmy (1)" and rows["Moje filmy"][0]["icon"] == "download"
     assert _section(api, "series")["Moje seriály"][0]["title"] == "Stažené díly"
@@ -475,7 +479,8 @@ def test_download_failures_and_cancel(api, tmp_path, monkeypatch):
     monkeypatch.setattr(app_api, "_stream_link", genuine)
     card = api("downloads")["items"][0]
     assert card["subtitle"].startswith("Chyba: Video už na Přehraj.to není")
-    assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zkusit stáhnout znovu", "Odebrat ze stahování"]
+    assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zkusit stáhnout znovu", "Odebrat ze stahování",
+                                                        "Označit jako zhlédnuté"]
     api("download_add", vid=REF)                                             # znovu do fronty
     _link(REF, "https://cdn.x/stream?id=5")
     job = api("download_next", dir=disk)
@@ -509,7 +514,8 @@ def test_update_check_finds_newer_release_and_throttles(api, monkeypatch):
         {"tag_name": "app-v0.4.0", "prerelease": True, "assets": [{"name": "a.apk", "browser_download_url": "u4"}]},
         {"tag_name": "app-v0.3.0", "body": "Stahování na disk", "assets": [
             {"name": "notes.txt", "browser_download_url": "n"},
-            {"name": "MojeVidea-0.3.0.apk", "browser_download_url": "https://gh/MojeVidea-0.3.0.apk", "size": 42}]},
+            {"name": "MojeVidea-0.3.0.apk", "browser_download_url": "https://gh/MojeVidea-0.3.0.apk", "size": 42,
+             "digest": "sha256:" + "AB" * 32}]},
         {"tag_name": "app-v0.10.0", "assets": []},                           # vydání bez APK se přeskočí
         {"tag_name": "app-v0.2.0", "assets": [{"name": "old.apk", "browser_download_url": "old"}]},
     ]
@@ -523,8 +529,8 @@ def test_update_check_finds_newer_release_and_throttles(api, monkeypatch):
 
     monkeypatch.setattr(app_api.urllib.request, "urlopen", urlopen)
     found = api("update_check", current="0.2.0")
-    assert found == {"available": True, "current": "0.2.0", "version": "0.3.0", "size": 42,
-                     "url": "https://gh/MojeVidea-0.3.0.apk", "notes": "Stahování na disk"}
+    assert found == {"available": True, "current": "0.2.0", "version": "0.3.0", "size": 42, "sha256": "ab" * 32,
+                     "url": "https://gh/MojeVidea-0.3.0.apk", "notes": "Stahování na disk"}   # i s otiskem souboru
     assert asked == [app_api.UPDATE_URL]
     assert api("update_check", current="0.2.0") == {"available": False, "current": "0.2.0"}   # hned znovu se neptá
     assert len(asked) == 1
@@ -1794,3 +1800,96 @@ def test_available_only_list_keeps_looking_and_missing_series_favourite_says_so(
     page = api("discover_title", kind="tv", id=0, title="Archa", year=1996, fid="show:archa")
     assert page["rows"] == [] and page["detail"]["plot"].startswith("Tento seriál už ve vašem katalogu není")
     assert "Hledat ručně" in _titles(page["actions"])
+
+
+def test_card_menu_marks_watched_and_clears_in_progress(api):
+    _fill(3)
+    first, second = ["%d:archa:%016x" % (10 + n, 10 + n) for n in (1, 2)]
+    api("progress_save", track=REF, position=1500, total=6000, started=True)
+    api("progress_save", track=first, position=600, total=1200, started=True)
+    film = _section(api, "progress")["Filmy"][0]
+    remove = next(item for item in film["menu"] if item["title"] == "Odebrat z Rozkoukaných")["target"]
+    assert api(remove["call"], **remove["params"]) == {"message": "", "toast": "Odebráno z Rozkoukaných."}
+    assert "Filmy" not in _section(api, "progress")                          # film už rozkoukaný není
+
+    episode = _section(api, "progress")["Seriály"][0]
+    mark = next(item for item in episode["menu"] if item["title"] == "Označit jako zhlédnuté")["target"]
+    assert api(mark["call"], **mark["params"])["toast"] == "Označeno jako zhlédnuté."
+    rows = _section(api, "progress")                                         # díl je zhlédnutý: nabízí se další
+    assert "Seriály" not in rows and rows["Další díly"][0]["target"]["params"] == {"vid": second}
+    card = next(item for item in api("show", key="show:archa")["items"] if item["target"].get("params") == {"vid": first})
+    back = next(item for item in card["menu"] if item["title"] == "Označit jako nezhlédnuté")["target"]
+    api(back["call"], **back["params"])
+    assert "Další díly" not in _section(api, "progress")
+    assert "Chybí" in api("watched_set")["error"] and "Chybí" in api("progress_remove")["error"]
+
+    with app_api._library() as lib:                                          # totéž u pořadu z iVysílání
+        lib.ivys_touch("777", "9", "Díl 3", "Vyprávěj", "")
+        lib.ivys_record_play("777", 300, 3000)
+    television = next(card for card in _section(api, "progress")["Seriály"] if card["subtitle"] == "iVysílání")
+    assert _titles(television["menu"]) == ["Pokračovat", "Přehrát od začátku", "Odebrat z Rozkoukaných"]
+    api(television["menu"][2]["target"]["call"], **television["menu"][2]["target"]["params"])
+    assert all(card["subtitle"] != "iVysílání" for card in _section(api, "progress").get("Seriály", []))
+
+
+def test_download_records_survive_a_damaged_file_and_stray_parts_are_removed(api, tmp_path):
+    _fill()
+    disk = tmp_path / "disk"
+    disk.mkdir()
+    api("download_add", vid=REF)
+    _link(REF, "https://cdn.x/pelisky.mkv")
+    job = api("download_next", dir=str(disk))
+    open(job["path"], "wb").write(b"x" * 10)
+    api("download_finish", vid=REF, size=10)
+    (tmp_path / "downloads.json").write_text("{poškozeno")                   # výpadek proudu uprostřed zápisu
+    assert "Staženo" in api("downloads")["items"][0]["subtitle"]              # záloha z poslední změny stavu
+    (disk / "Starý film.mkv.part").write_bytes(b"zbytek")                    # rozpracovaný soubor bez záznamu
+    (disk / "Jiný film.mkv").write_bytes(b"hotovo")
+    assert api("downloads_cleanup", dir=str(disk)) == {"removed": 1}
+    assert sorted(path.name for path in disk.iterdir()) == ["Jiný film.mkv", "Pelíšky.mkv"]
+    assert api("downloads_cleanup", dir=str(tmp_path / "neni")) == {"removed": 0}
+
+
+def test_availability_is_verified_in_the_background_while_the_list_is_shown(api, monkeypatch):
+    discover = app_api.app_discover
+    monkeypatch.setattr(discover, "BACKGROUND", True)
+    api("settings_set", tmdb_key="k" * 32)
+    films = [{"id": 11, "title": "Pelíšky", "original_title": "Pelisky", "release_date": "1999-04-08"},
+             {"id": 12, "title": "Kolja", "release_date": "1996-05-15"}]
+    _fake_tmdb(monkeypatch, {"/movie/popular": {"results": films, "total_pages": 1}})
+    release = __import__("threading").Event()
+    asked = []
+
+    def search_catalog(client, query, page, cursor):
+        release.wait(5)                                                      # hledání „trvá“, dokud ho test nepustí
+        asked.append(query)
+        return ([_web(32, "Pelisky.1999.CZ.1080p", 7000)] if query == "Pelíšky 1999" else []), ""
+
+    monkeypatch.setattr(app_api.provider, "search_catalog", search_catalog)
+    first = api("discover", kind="movie", category="popular")                # výpis je hned, nic nečeká
+    assert _titles(first["items"]) == ["Filtr", "Pelíšky", "Kolja"] and asked == []
+    assert [card["badges"] for card in first["items"][1:]] == [["Ověřuji…"], ["Ověřuji…"]]
+    assert first["refresh"] == 2 and first["status"].endswith("zbývá 2")
+    row = api("discover_row", kind="movie", category="popular")              # řada na hlavní obrazovce stejně
+    assert row["refresh"] == 2 and len(row["items"]) == 3
+    thread = discover._VERIFY["thread"]
+    release.set()
+    thread.join(10)
+    assert not thread.is_alive() and discover._VERIFY["thread"] is None
+    done = api("discover", kind="movie", category="popular")                 # po ověření: jen co je k mání
+    assert _titles(done["items"]) == ["Filtr", "Pelíšky"] and done["items"][1]["badges"] == ["Přehraj.to"]
+    assert "refresh" not in done and "status" not in done
+    assert "refresh" not in api("discover_row", kind="movie", category="popular")
+
+    def broken(client, query, page, cursor):
+        raise app_api.provider.ProviderError("výpadek")
+
+    monkeypatch.setattr(app_api.provider, "search_catalog", broken)          # služba neodpovídá: žádné točení dokola
+    _fake_tmdb(monkeypatch, {"/movie/top_rated": {"results": [
+        {"id": 13, "title": "Samotáři", "release_date": "2000-04-20"}], "total_pages": 1}})
+    waiting = api("discover", kind="movie", category="top_rated")
+    assert waiting["refresh"] == 2
+    (discover._VERIFY["thread"] or thread).join(10)                          # mohlo už doběhnout
+    settled = api("discover", kind="movie", category="top_rated")
+    assert _titles(settled["items"]) == ["Filtr", "Samotáři"] and "refresh" not in settled
+    assert "badges" not in settled["items"][1]

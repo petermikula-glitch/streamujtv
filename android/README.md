@@ -140,10 +140,13 @@ jeho verze; u seriálu přes řady a díly. Potřebuje klíč TMDB v Nastavení.
 populárních titulů na hlavní obrazovce ukazují jen to, co je k mání – na Přehraj.to, nebo v iVysílání.
 U každého titulu, o kterém to aplikace neví, se jednou hledá na Přehraj.to (u seriálu jeho první díl)
 a jednou v iVysílání (shoda názvu, druhu a u filmu roku), čtyři tituly souběžně. Výsledek se pamatuje
-(`avail:<druh>:<číslo>`): nalezený titul týden, nenalezený dva dny. Protože dostupných titulů bývá na
-stránce TMDB málo, projde výpis najednou až tři stránky, dokud jich nemá dvanáct, nejdéle ale asi
-dvanáct sekund; první otevření výpisu proto chvíli trvá, další jsou hned. Když dávka nepřinese nic,
-aplikace hledá na dalších stránkách sama (nejvýš pětkrát po sobě). Rozhoduje Přehraj.to: titul, který
+(`avail:<druh>:<číslo>`): nalezený titul týden, nenalezený dva dny. Výpis na ověřování nečeká
+(`BACKGROUND`, `_verify_later`): tituly, o kterých se zatím nic neví, ukáže hned se štítkem „Ověřuji…“,
+ověřuje je vlákno na pozadí (naposledy otevřený výpis má přednost) a odpověď nese `refresh` a `status`
+– obrazovka si po pár sekundách řekne znovu, ukazuje „zbývá N“ a nedostupné tituly z ní ubývají na
+místě. Protože dostupných titulů bývá na stránce TMDB málo, projde výpis najednou až tři stránky, dokud
+jich nemá dvanáct. Když dávka nepřinese nic, aplikace hledá na dalších stránkách sama (nejvýš pětkrát
+po sobě). Rozhoduje Přehraj.to: titul, který
 se tam hledal a není, se schová, pokud o něm aplikace neví z iVysílání. Titul, u kterého hledání
 selhalo (i jen zčásti), ve výpisu zůstane bez štítku a zkusí se příště; služba, která neodpovídá, se
 dvě minuty nezkouší. Hledá se i se špatně zadaným heslem (bez přihlášení). Novinky filmů jsou tituly
@@ -164,8 +167,9 @@ Když hledání na Přehraj.to selže, stránka zůstane použitelná a nabídne
 U filmu první tlačítko přehraje nejlepší verzi podle předvoleb a řady nabízejí ostatní verze. Stránka
 seriálu je stejná: první tlačítko pustí díl, na kterém se skončilo (rozkoukaný, jinak další po
 posledním zhlédnutém, jinak první), a řady jsou díly po řadách (prvních `SEASON_ROWS` řad, další za
-kartou řady). Výběr dílu rovnou hraje nejlepší verzi (`discover_episode_play`); ruční výběr verze je
-v nabídce karty dílu. Tlačítko „Jazyk a kvalita“ otevírá předvolby přehrávání.
+kartou řady; u dlouhého seriálu jsou to řady kolem té naposledy sledované). Výběr dílu rovnou hraje
+nejlepší verzi (`discover_episode_play`); ruční výběr verze je v nabídce karty dílu. Po návratu
+z přehrávače se výběr v řadách přesune na díl, kterým se pokračuje (`focus` v datech stránky). Tlačítko „Jazyk a kvalita“ otevírá předvolby přehrávání.
 
 **Předvolby přehrávání** (dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích, tlačítko na stránce
 titulu a Nastavení; cíl typu `choices`, akce `prefs_choices`): jazyk (český dabing / originál s titulky / jedno) a kvalita
@@ -184,7 +188,14 @@ zastaví přechod na Zavřít. U filmu je to další film stejné série podle T
 data uvedení): hraje z katalogu nebo z Přehraj.to, a když tam není, nabídne se stránka titulu. Film se
 sám nespouští. Když nic dalšího není nebo to nejde zjistit, přehrávač se zavře jako dřív.
 Řada **Další díly** na hlavní obrazovce: po dokoukaném dílu z katalogu ten následující a seriály
-z Objevuj, které se naposledy přehrávaly (vedou na stránku seriálu s tlačítkem Pokračovat).
+z Objevuj, které se naposledy přehrávaly (vedou na stránku seriálu s tlačítkem Pokračovat). Seriál jde
+z řady odebrat („Nenabízet další díly“ v nabídce karty); vrátí se, jakmile se z něj zase něco pustí.
+Po třech dílech spuštěných samočinně bez jediného stisku ovladače se přehrávač zeptá „Ještě se
+díváte?“ a další díl už sám nepustí.
+
+**Nabídka karty** (podržení OK): u videa z Přehraj.to navíc „Označit jako zhlédnuté / nezhlédnuté“
+(`watched_set`) a u rozkoukaného „Odebrat z Rozkoukaných“ (`progress_remove`, i pro iVysílání). Že
+nabídka existuje, připomene aplikace při prvních třech spuštěních jednorázovým tipem (`Hints.kt`).
 
 **Úvodní panel a lišta ikon** (`hero` v `app_extras.py`, `HeroPresenter`): sekce s rozkoukaným videem
 začíná velkým panelem s tlačítkem Pokračovat; obrázek je z metadat titulu, jinak výchozí ilustrace.
@@ -206,6 +217,8 @@ aktivního profilu se zapisují do řady „Pokračovat ve sledování“ Androi
 
 **Přehrávač**: horní lišta s názvem, časem konce a rychlou volbou zvuku a titulků; volba se pamatuje
 pro celý seriál (`track_prefs`, klíč `tracks:<seriál>`) a ukládá se jen to, co uživatel opravdu změnil.
+Po chybě uprostřed přehrávání si přehrávač jednou řekne o novou adresu a naváže, kde byl – u souborů
+z Přehraj.to i u pořadů a živého vysílání z iVysílání (po dlouhé pauze se živé vysílání vrátí na živo).
 U videa rozkoukaného déle než minutu se přehrávač zeptá, jestli navázat, nebo začít znovu (ne
 u tlačítka Pokračovat). Ikony ovládání přebíjejí výchozí ikony Media3 (`res/values/player_icons.xml`).
 
@@ -277,6 +290,9 @@ Chyba jednoho videa (už není dostupné) označí jen to video. Výpadek připo
 se žádného videa netýká: fronta zůstane, jak je, a služba až deset minut čeká na připojení
 (`download_next` vrací chybu, ne další položku). Pokus, který kus souboru stáhl, se nepočítá jako
 marný. Navazuje se jen na tentýž soubor – jiná celková délka na serveru znamená stahovat znovu.
+Stahování, které se zastavilo, naváže samo, jakmile se vrátí připojení nebo disk (dokud aplikace běží;
+jinak při jejím příštím spuštění). Evidence má zálohu z poslední změny stavu (`downloads.json.bak`)
+a při startu služby se uklidí rozpracované soubory, ke kterým už není záznam (`downloads_cleanup`).
 
 Aplikace zapisuje do vlastní složky na disku (`Android/data/cz.petermikula.mojevidea/files`), k čemuž
 nepotřebuje žádné oprávnění; Android tuto složku při odinstalaci aplikace smaže. Úložiště se volí
@@ -288,7 +304,10 @@ neuloží soubor větší než 4 GB (aplikace na to upozorní předem).
 Aplikace se při startu (nejvýš jednou za 6 hodin) zeptá na vydání na GitHubu
 (`releases` se značkou `app-v<verze>` a přílohou `.apk`), nabídne novější verzi, stáhne ji a předá
 systémovému instalátoru; ruční kontrola je v Nastavení. Poprvé je potřeba aplikaci povolit instalaci
-z neznámých zdrojů. Nová verze musí být podepsaná stejným klíčem jako ta nainstalovaná.
+z neznámých zdrojů. Nová verze musí být podepsaná stejným klíčem jako ta nainstalovaná. Stažený soubor
+se před instalací porovná s otiskem SHA-256, který GitHub u vydání uvádí. Vydávané sestavení není
+laditelné (data aplikace včetně hesla nejdou přečíst přes ADB); pro zkoušky v emulátoru se sestavuje
+s `-Pdebuggable`.
 
 Vydání vytváří `.github/workflows/android.yml` při změně na hlavní větvi: spustí testy, sestaví APK,
 podepíše ho klíčem ze `signing/` (tajná proměnná `SIGNING_KEYSTORE_BASE64` s úložištěm klíčů v base64

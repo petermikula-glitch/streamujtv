@@ -36,6 +36,8 @@ class TitleActivity : FragmentActivity() {
     private var expanded = false
     private var rowTitles = emptyList<String>()
     private var rowShapes = emptyList<Boolean>()
+    private var results: RowsSupportFragment? = null
+    private var played = false  // z této stránky se právě něco přehrávalo
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,9 +49,13 @@ class TitleActivity : FragmentActivity() {
         params = JSONObject(intent.getStringExtra(Navigator.EXTRA_PARAMS) ?: "{}")
         findViewById<TextView>(R.id.title_name).text = intent.getStringExtra(Navigator.EXTRA_TITLE).orEmpty()
         val results = RowsSupportFragment()
+        this.results = results
         results.adapter = rows
         results.onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
-            (item as? Card)?.let { Navigator.open(this, it) { load() } }
+            (item as? Card)?.let {
+                if (it.target.type == "play") played = true
+                Navigator.open(this, it) { load() }
+            }
         }
         supportFragmentManager.beginTransaction().replace(R.id.title_rows, results).commit()
         val area = findViewById<View>(R.id.title_rows)
@@ -92,6 +98,17 @@ class TitleActivity : FragmentActivity() {
             if (raw == shown) return@call  // beze změny: výběr zůstane na místě
             shown = raw
             bind(data)
+            if (loadedOnce && played && expanded) {
+                // po dokoukaném dílu: výběr v řadách se přesune na díl, kterým se pokračuje
+                data.optJSONObject("focus")?.let { focus ->
+                    val row = focus.optInt("row", -1)
+                    if (row in 0 until rows.size()) {
+                        results?.setSelectedPosition(row, true,
+                            ListRowPresenter.SelectItemViewHolderTask(focus.optInt("item")))
+                    }
+                }
+            }
+            played = false
             loadedOnce = true
         }
     }

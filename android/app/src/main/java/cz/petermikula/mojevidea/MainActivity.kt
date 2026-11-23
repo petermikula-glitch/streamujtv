@@ -404,6 +404,12 @@ class SectionFragment : RowsSupportFragment() {
     }
 
     private var forced = false  // po příkazu uživatele: donačítané řady načíst znovu, i když jsou čerstvé
+    private val later = android.os.Handler(android.os.Looper.getMainLooper())
+
+    override fun onDestroy() {
+        later.removeCallbacksAndMessages(null)
+        super.onDestroy()
+    }
 
     private val rows = ArrayObjectAdapter(ClassPresenterSelector().apply {
         // úvodní panel: bez zvětšení při výběru (je přes celou šířku) a bez nadpisu řady
@@ -442,6 +448,9 @@ class SectionFragment : RowsSupportFragment() {
                 remembered[key] = cards
             }
             waiting.remove(key)?.forEach { it() }
+            // řada, jejíž tituly se ještě ověřují na pozadí, si za chvíli řekne o čerstvý stav
+            val seconds = result.data?.optInt("refresh") ?: 0
+            if (seconds > 0) later.postDelayed({ if (isAdded) fetch(key, call, params) }, seconds * 1000L)
         }
     }
 
@@ -462,6 +471,7 @@ class SectionFragment : RowsSupportFragment() {
         onItemViewSelectedListener = OnItemViewSelectedListener { _, item, _, row ->
             host()?.showBackdrop((item as? Card)?.image.orEmpty())
             host()?.onRowSelected(rows.indexOf(row))
+            (item as? Card)?.let { card -> context?.let { Hints.cardSelected(it, card) } }
         }
         refresh()
     }
