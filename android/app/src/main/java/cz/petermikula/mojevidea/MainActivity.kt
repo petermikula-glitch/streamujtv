@@ -205,16 +205,40 @@ class MainFragment : BrowseSupportFragment() {
                             .putExtra(Navigator.EXTRA_POSTER, true)
                     )
                 }
-                // hlídání oblíbených: objevil se na Přehraj.to film, který tam minule nebyl?
-                Api.call("favorites_check") { check ->
-                    val found = check.data?.optJSONArray("found")
-                    if (!isAdded || found == null || found.length() == 0) return@call
-                    val names = (0 until found.length()).joinToString(", ") { found.optString(it) }
-                    android.widget.Toast.makeText(requireContext(), "Nově na Přehraj.to: $names", android.widget.Toast.LENGTH_LONG).show()
-                    load()
-                }
             }
             loadedOnce = true
+            watchFavorites()
+        }
+    }
+
+    private var favoritesAsked = 0L
+
+    /**
+     * Hlídání oblíbených filmů: objevila se na Přehraj.to verze v preferovaném jazyce a kvalitě?
+     * Ptá se po startu a pak průběžně při návratech na hlavní obrazovku (logika hledá nejvýš jednou
+     * za pár hodin); na pozadí, když aplikace neběží, se nehledá.
+     */
+    private fun watchFavorites() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (favoritesAsked != 0L && now - favoritesAsked < 10 * 60_000L) return
+        favoritesAsked = now
+        Api.call("favorites_check") { check ->
+            val found = check.data?.optJSONArray("found")
+            val activity = activity
+            if (!isAdded || activity == null || found == null || found.length() == 0) return@call
+            val items = (0 until found.length()).mapNotNull { found.optJSONObject(it) }
+            val text = items.joinToString("\n") { item ->
+                listOf(item.optString("title"), item.optString("detail")).filter { it.isNotEmpty() }.joinToString(" – ")
+            }
+            android.app.AlertDialog.Builder(activity)
+                .setTitle(if (items.size == 1) "Oblíbený film je nově na Přehraj.to" else "Oblíbené filmy jsou nově na Přehraj.to")
+                .setMessage(text)
+                .setPositiveButton("Otevřít") { _, _ ->
+                    Navigator.open(activity, Target.from(items[0].optJSONObject("target")), items[0].optString("title")) { load() }
+                }
+                .setNegativeButton("Později", null)
+                .show()
+            load()  // karta v Oblíbených dostane štítek „Nově“
         }
     }
 

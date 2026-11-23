@@ -110,10 +110,12 @@ class TitleActivity : FragmentActivity() {
         plot.text = detail.optString("plot")
         val glide = Glide.with(applicationContext)
         detail.optString("poster").takeIf { it.isNotEmpty() }?.let {
-            glide.load(it).timeout(15_000).centerCrop().into(findViewById<ImageView>(R.id.title_poster))
+            glide.load(it).timeout(15_000).centerCrop().transition(com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(160))
+                .into(findViewById<ImageView>(R.id.title_poster))
         }
         detail.optString("backdrop").takeIf { it.isNotEmpty() }?.let {
-            glide.load(it).timeout(15_000).centerCrop().into(findViewById<ImageView>(R.id.title_backdrop))
+            glide.load(it).timeout(15_000).centerCrop().transition(com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(300))
+                .into(findViewById<ImageView>(R.id.title_backdrop))
         }
 
         // tlačítka: zachovat, které bylo vybrané (po přidání do oblíbených se stránka obnovuje)

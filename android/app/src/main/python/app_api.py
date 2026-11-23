@@ -724,7 +724,7 @@ def played(params):
 
 
 def search(params):
-    """Hledání v katalogu, iVysílání a online v katalogu Přehraj.to."""
+    """Hledání: vlastní katalog, tituly a osoby z TMDB, soubory na Přehraj.to a iVysílání."""
     query = (params.get("q") or "").strip()
     rows = []
     if not query:
@@ -740,22 +740,28 @@ def search(params):
             rows.append({"title": "Seriály v katalogu", "items": [_show_card(meta, state) for meta in found_shows[:PAGE]]})
     response = {"rows": rows}
     _remember_search(query)
-    rows.extend(app_discover.search_rows(query, state))
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    # Všechny zdroje se ptají najednou: čeká se jen na ten nejpomalejší, ne na součet všech.
+    with ThreadPoolExecutor(max_workers=4) as pool:
         web = pool.submit(prehrajto_search, {"q": query, "group": True})
-        rows.extend(_ivys_search_rows(query))
+        titles = pool.submit(app_discover.search_titles, query)
+        people = pool.submit(app_discover.people_row, query)
+        television = pool.submit(_ivys_search_rows, query)
         try:
             results = web.result()
         except ApiError as error:
             response["notice"] = str(error)
-        else:
-            cards = results["items"]
-            if results["next"]:
-                cards.append(_card("Další výsledky na Přehraj.to",
-                                   _target("list", "prehrajto_search", results["next"]["params"],
-                                           "Videa na Přehraj.to"), icon="search"))
-            if cards:
-                rows.append({"title": "Videa na Přehraj.to", "items": cards})
+            results = {"items": [], "next": None}
+        # nejdřív tituly (s vyznačením, co na Přehraj.to opravdu je), pak osoby, soubory a iVysílání
+        rows.extend(app_discover.title_rows(titles.result(), state, results.get("results") or []))
+        rows.extend(people.result())
+        cards = results["items"]
+        if results["next"]:
+            cards.append(_card("Další výsledky na Přehraj.to",
+                               _target("list", "prehrajto_search", results["next"]["params"],
+                                       "Videa na Přehraj.to"), icon="search"))
+        if cards:
+            rows.append({"title": "Videa na Přehraj.to", "items": cards})
+        rows.extend(television.result())
     return response
 
 
@@ -840,7 +846,10 @@ def prehrajto_search(params):
         cards = [card for _index, card in sorted(grouped, key=lambda item: item[0])]
     following = {"call": "prehrajto_search", "params": {"q": query, "page": page + 1, "cursor": cursor}} \
         if cursor and not only else None
-    return {"items": cards, "next": following}
+    response = {"items": cards, "next": following}
+    if params.get("group"):
+        response["results"] = results   # hledání podle nich vyznačí, které tituly na Přehraj.to jsou
+    return response
 
 
 # ---------------------------------------------------------------------------

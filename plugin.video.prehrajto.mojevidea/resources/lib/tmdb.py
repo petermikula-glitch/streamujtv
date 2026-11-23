@@ -159,7 +159,7 @@ class Tmdb(object):
                 continue
             photo = person.get("profile_path") or ""
             people.append({"id": person["id"], "name": person["name"], "character": person.get("character") or "",
-                           "photo": IMG + "w185" + photo if isinstance(photo, str) and photo.startswith("/") else ""})
+                           "photo": IMG + "h632" + photo if isinstance(photo, str) and photo.startswith("/") else ""})
         return people
 
     def seasons(self, tmdb_id):

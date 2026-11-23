@@ -16,6 +16,8 @@ import com.bumptech.glide.Glide
  */
 class CardPresenter(var poster: Boolean = false, private val onMenu: ((Card) -> Unit)? = null) : Presenter() {
     companion object {
+        private val FADE = com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(160)
+
         /** Plakáty na výšku, jakmile je má aspoň jedna karta; jinak náhledy na šířku. */
         fun posterShape(cards: List<Card>): Boolean = cards.any { it.image.isNotEmpty() && !it.wide }
     }
@@ -86,7 +88,8 @@ class CardPresenter(var poster: Boolean = false, private val onMenu: ((Card) -> 
             view.titleText = card.title
             view.contentText = detail
             // výchozí limit Glide (2,5 s) je na pomalé síti krátký
-            glide.load(card.image).timeout(15_000).centerCrop().into(view.mainImageView)
+            // obrázek se do karty prolne, místo aby v ní naráz naskočil
+            glide.load(card.image).timeout(15_000).centerCrop().transition(FADE).into(view.mainImageView)
         } else {
             // dlaždice nese název sama; pod ní stačí doplňující řádek
             view.titleText = detail.ifEmpty { card.title }

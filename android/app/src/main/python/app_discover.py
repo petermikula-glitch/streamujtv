@@ -1148,8 +1148,8 @@ def next_up_cards(lib, state, limit=10):
     return cards[:limit]
 
 
-def search_rows(query, state):
-    """Řada titulů z TMDB pro hledaný výraz (plakáty místo názvů souborů); bez klíče TMDB nic."""
+def search_titles(query):
+    """Filmy a seriály z TMDB pro hledaný výraz; bez klíče TMDB nebo při chybě nic."""
     client = api._tmdb()
     if not client.enabled:
         return []
@@ -1157,13 +1157,47 @@ def search_rows(query, state):
         items, _pages = client.search_titles(query)
     except TmdbError:
         return []
-    cards = [_item_card(item, "tv" if item.get("media_type") == "tv" else "movie", state)
-             for item in items[:20] if isinstance(item, dict) and item.get("id")]
-    rows = [{"title": "Filmy a seriály", "items": cards}] if cards else []
+    return [item for item in items[:20] if isinstance(item, dict) and item.get("id")]
+
+
+def title_rows(items, state, results):
+    """Řady Filmy a Seriály z výsledků TMDB. ``results`` jsou soubory, které na stejný dotaz vrátilo
+    Přehraj.to: titul, který mezi nimi je, dostane štítek a jde dopředu – je vidět hned, co se dá pustit."""
+    parsed = [nameparser.parse(result["title"]) for result in results
+              if isinstance(result, dict) and result.get("title")]
+    rows = []
+    for kind, name in (("movie", "Filmy"), ("tv", "Seriály")):
+        listed = [item for item in items if (item.get("media_type") == "tv") == (kind == "tv")]
+        available = {}
+        for item in listed:
+            names = search_results.aliases(item.get("title") or item.get("name") or "",
+                                           item.get("original_title") or item.get("original_name") or "")
+            date = item.get("release_date") or item.get("first_air_date") or ""
+            year = int(date[:4]) if date[:4].isdigit() else 0
+            if kind == "movie":
+                count = len([entry for entry in parsed if search_results.filename_matches(entry, names, year, None, "movie")])
+            else:
+                count = len([entry for entry in parsed
+                             if entry["kind"] == "episode" and search_results.normalize(entry["title"]) in names])
+            if count:
+                available["%s:%s" % (kind, item["id"])] = count
+        listed.sort(key=lambda item: "%s:%s" % (kind, item["id"]) not in available)   # dostupné první, jinak pořadí TMDB
+        marked = dict(state, available=available)
+        cards = [_item_card(item, kind, marked) for item in listed]
+        if cards:
+            rows.append({"title": name, "items": cards})
+    return rows
+
+
+def people_row(query):
+    """Řada Herci a režiséři pro hledaný výraz."""
+    client = api._tmdb()
+    if not client.enabled:
+        return []
     try:
         people, _pages = client.search_people(query)
     except TmdbError:
-        people = []
+        return []
     persons = []
     for person in people[:12]:
         photo = person.get("profile_path") or ""
@@ -1171,11 +1205,9 @@ def search_rows(query, state):
             person["name"], api._target("list", "discover_person", {"id": person["id"], "name": person["name"]},
                                         person["name"]),
             DEPARTMENTS.get(person.get("known_for_department") or "", ""),
-            IMG + "w185" + photo if isinstance(photo, str) and photo.startswith("/") else "",
+            IMG + "h632" + photo if isinstance(photo, str) and photo.startswith("/") else "",
             wide=not photo, icon="movies"))
-    if persons:
-        rows.append({"title": "Herci a režiséři", "items": persons})
-    return rows
+    return [{"title": "Herci a režiséři", "items": persons}] if persons else []
 
 
 DEPARTMENTS = {"Acting": "herectví", "Directing": "režie", "Writing": "scénář", "Production": "produkce"}

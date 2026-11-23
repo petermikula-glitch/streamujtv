@@ -700,7 +700,7 @@ def test_title_page_offers_the_series_similar_titles_cast_and_csfd(api, monkeypa
     assert rows["Podobné tituly"][0]["title"] == "Pupendo" and rows["Podobné tituly"][0]["subtitle"] == "2003 · 79 % · film"
     actor, second = rows["Hrají"]
     assert (actor["title"], actor["subtitle"]) == ("Miroslav Donutil", "Šebek")
-    assert actor["image"] == "https://image.tmdb.org/t/p/w185/d.jpg" and second["image"] == "" and second["wide"]
+    assert actor["image"] == "https://image.tmdb.org/t/p/h632/d.jpg" and second["image"] == "" and second["wide"]
     assert actor["target"] == {"type": "list", "call": "discover", "params": {"kind": "movie", "cast": "5"},
                                "title": "Filmy – Miroslav Donutil", "poster": True}
     films = api("discover", **actor["target"]["params"])                     # filmy s hercem
@@ -1030,9 +1030,9 @@ def test_search_offers_titles_and_remembers_queries(api, monkeypatch):
         {"id": 5, "media_type": "person", "name": "Někdo"}], "total_pages": 1}})
     monkeypatch.setattr(app_api, "prehrajto_search", lambda params: {"items": [], "next": None})
     rows = {row["title"]: row["items"] for row in api("search", q="pelisky")["rows"]}
-    titles = rows["Filmy a seriály"]
-    assert _titles(titles) == ["Pelíšky", "Archa"]
-    assert titles[0]["target"]["type"] == "title" and titles[1]["target"]["params"]["kind"] == "tv"
+    assert _titles(rows["Filmy"]) == ["Pelíšky"] and _titles(rows["Seriály"]) == ["Archa"]   # filmy a seriály zvlášť
+    assert rows["Filmy"][0]["target"]["type"] == "title" and rows["Seriály"][0]["target"]["params"]["kind"] == "tv"
+    assert "badges" not in rows["Filmy"][0]
     api("search", q="archa")
     api("search", q="pelisky")                                              # opakovaný dotaz se jen posune dopředu
     history = api("search_history")["rows"][0]
@@ -1348,7 +1348,7 @@ def test_search_finds_people_and_lists_their_films(api, monkeypatch):
     rows = {row["title"]: row["items"] for row in api("search", q="Svěrák")["rows"]}
     director, actor = rows["Herci a režiséři"]
     assert (director["title"], director["subtitle"], director["image"]) == (
-        "Jan Svěrák", "režie", "https://image.tmdb.org/t/p/w185/s.jpg")
+        "Jan Svěrák", "režie", "https://image.tmdb.org/t/p/h632/s.jpg")
     assert (actor["subtitle"], actor["image"], actor["wide"]) == ("herectví", "", True)
     assert director["target"] == {"type": "list", "call": "discover_person", "params": {"id": 5, "name": "Jan Svěrák"},
                                   "title": "Jan Svěrák", "poster": True}
@@ -1425,4 +1425,26 @@ def test_playback_preferences_are_offered_as_choices(api):
     api(offered["apply"], **subtitles["params"])
     assert api("prefs_choices")["filters"][0]["value"] == "Originál s titulky"
     assert "Originál s titulky" in _section(api, "tools")["Nástroje"][5]["subtitle"]
+
+
+def test_search_marks_titles_that_are_on_prehrajto_and_puts_them_first(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {"/search/multi": {"results": [
+        {"id": 1, "media_type": "movie", "title": "Vesničko má středisková", "release_date": "1985-08-01"},
+        {"id": 2, "media_type": "movie", "title": "Pelíšky", "original_title": "Pelisky", "release_date": "1999-04-08"},
+        {"id": 3, "media_type": "movie", "title": "Pelíšky", "release_date": "2010-01-01"},      # jiný film stejného jména
+        {"id": 7, "media_type": "tv", "name": "Bez dílů", "first_air_date": "2000-01-01"},
+        {"id": 8, "media_type": "tv", "name": "Archa", "first_air_date": "1996-01-01"}], "total_pages": 1}})
+    _catalogue_search(monkeypatch, {"pelisky": [_web(91, "Pelisky.1999.CZ.1080p", 7000, "4 GB"),
+                                                _web(92, "Pelisky 1999 EN", 7000, "1 GB"),
+                                                _web(93, "Archa S01E02 CZ"), _web(94, "Neco jineho 2001")]})
+    result = api("search", q="pelisky")
+    rows = {row["title"]: row["items"] for row in result["rows"]}
+    assert [row["title"] for row in result["rows"]][:3] == ["Filmy", "Seriály", "Videa na Přehraj.to"]   # tituly první
+    films = rows["Filmy"]
+    assert [(card["title"], card["subtitle"][:4]) for card in films] == [
+        ("Pelíšky", "1999"), ("Vesničko má středisková", "1985"), ("Pelíšky", "2010")]   # dostupný první
+    assert films[0]["badges"] == ["Přehraj.to"] and "badges" not in films[1] and "badges" not in films[2]
+    assert _titles(rows["Seriály"]) == ["Archa", "Bez dílů"] and rows["Seriály"][0]["badges"] == ["Přehraj.to"]
+    assert "results" not in api("prehrajto_search", q="pelisky")            # jen pro hledání, ne pro výpis
 
