@@ -2673,5 +2673,6 @@ def test_title_page_search_retries_a_temporary_failure_and_says_why(api, monkeyp
     failed = api("discover_title", **FILM)
     assert failed["detail"]["plot"].startswith(
         "Hledání na Přehraj.to se teď nezdařilo: Přehraj.to dočasně omezuje počet dotazů. Neznamená to, že tam titul není")
-    assert failed["actions"][0]["title"] == "Zkusit znovu"
+    assert failed["actions"][0]["title"] == "Zkusit znovu" and failed["retry"] is True   # obrazovka to zkusí sama
+    assert len(calls) == 2 and "retry" not in page
     assert "HTTP 429" in str(api("diagnostics")["errors"][0])                   # technický důvod je v Diagnostice

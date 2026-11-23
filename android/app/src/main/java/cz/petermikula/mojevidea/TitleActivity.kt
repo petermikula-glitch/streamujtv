@@ -35,6 +35,7 @@ class TitleActivity : FragmentActivity() {
     private var csfd = ""
     private var expanded = false
     private var fitted = ""   // pro jaké rozměry už je popis zkrácený
+    private var autoRetries = 0   // kolikrát už stránka sama zopakovala nepovedené hledání
     private var rowTitles = emptyList<String>()
     private var rowShapes = emptyList<Boolean>()
     private var results: RowsSupportFragment? = null
@@ -102,6 +103,15 @@ class TitleActivity : FragmentActivity() {
             if (data == null) {
                 if (!loadedOnce) showFailure(result.error ?: "Stránku titulu se nepodařilo načíst.")
                 return@call
+            }
+            // Hledání na Přehraj.to se nezdařilo (krátký výpadek, omezení dotazů): stránka to za chvíli
+            // zkusí sama, nejvýš dvakrát; tlačítko Zkusit znovu funguje dál.
+            if (data.optBoolean("retry") && autoRetries < AUTO_RETRIES) {
+                autoRetries++
+                spinner.visibility = View.VISIBLE
+                window.decorView.postDelayed({
+                    if (!isFinishing && !isDestroyed) load()
+                }, RETRY_AFTER_MS * autoRetries)
             }
             val raw = data.toString()
             if (raw == shown) return@call  // beze změny: výběr zůstane na místě
@@ -249,6 +259,8 @@ class TitleActivity : FragmentActivity() {
     }
 
     private companion object {
+        const val AUTO_RETRIES = 2      // tolikrát nejvýš stránka sama zopakuje nepovedené hledání
+        const val RETRY_AFTER_MS = 5000L   // první opakování po této době, druhé po dvojnásobku
         const val PLOT_LINES = 4        // tolik řádků popisu nejvýš
         const val ROWS_HEIGHT = 250     // dp: řady karet pod údaji o titulu
         const val ROWS_EXPANDED = 390   // dp: řady, když je v nich výběr (plakát a popis ustoupí)

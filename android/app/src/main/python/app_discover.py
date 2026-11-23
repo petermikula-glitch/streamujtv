@@ -853,14 +853,17 @@ def _failure_reason(text):
     return ""
 
 
-def _search_page(client, query, page, cursor, retry=False):
+def _search_page(client, query, page, cursor, retries):
     """Stránka hledání. Dočasnou chybu (omezení dotazů, vypršení času) zkusí po chvíli ještě jednou,
-    když na výsledek čeká člověk – jinak by stránka titulu hlásila neúspěch kvůli jedinému zaváhání."""
+    když na výsledek čeká člověk – jinak by stránka titulu hlásila neúspěch kvůli jedinému zaváhání.
+    ``retries`` je počitadlo ``[kolik opakování zbývá]`` společné pro celé hledání titulu, aby se
+    při výpadku nečekalo u každého dotazu zvlášť."""
     try:
         return provider.search_catalog(client, query, page, cursor)
     except provider.TemporaryError:
-        if not retry:
+        if retries[0] <= 0:
             raise
+        retries[0] -= 1
         time.sleep(SEARCH_RETRY_WAIT)
         return provider.search_catalog(client, query, page, cursor)
 
@@ -892,6 +895,7 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
     queries = queries[:queries_max]
     prefs, bad = state.get("prefs") or api._prefs(), state.get("bad", ())
     found, failed, reason = {}, 0, ""
+    retries = [0 if strict else 1]
     if not strict:
         # Hledání, na které člověk čeká (stránka titulu, přehrání), má přednost před ověřováním na pozadí.
         _VERIFY["hold"] = time.time() + SEARCH_HOLD
@@ -899,7 +903,7 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
         cursor = ""
         for page in range(1, pages + 1):
             try:
-                results, cursor = _search_page(client, query, page, cursor, retry=not strict)
+                results, cursor = _search_page(client, query, page, cursor, retries)
             except provider.ProviderError as error:
                 failed += page == 1
                 reason = str(error)
@@ -1255,8 +1259,10 @@ def _title_page(params, kind):
     rest = [version for version in versions if version["short"]]
     if rest:
         rows.append({"title": "Ukázky a neúplné soubory", "items": [_version_card(v, state, choice) for v in rest]})
-    return {"detail": detail, "actions": actions,
-            "rows": rows + _related_rows(kind, params, info, state)}, bool(good) and not failed
+    page = {"detail": detail, "actions": actions, "rows": rows + _related_rows(kind, params, info, state)}
+    if failed:
+        page["retry"] = True   # obrazovka to za chvíli zkusí sama znovu (výpadek bývá krátký)
+    return page, bool(good) and not failed
 
 
 SEASON_ROWS = 6   # tolik řad ukáže stránka seriálu rovnou s díly; další jsou za kartou řady
