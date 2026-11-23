@@ -39,9 +39,11 @@ class CardOverlay(
         var left = area.left + 6 * density
         val top = area.top + 6 * density
         val height = 18 * density
+        // místo vpravo patří značce zhlédnutí – ale jen když tam je; jinak se na plakát vejde i třetí štítek
+        val reserve = (if (watched) 30 else 4) * density
         for (badge in badges) {
             val width = label.measureText(badge) + 10 * density
-            if (left + width > area.right - 30 * density) break  // místo vpravo patří značce zhlédnutí
+            if (left + width > area.right - reserve) break
             canvas.drawRoundRect(left, top, left + width, top + height, 2 * density, 2 * density, chip)
             canvas.drawText(badge, left + 5 * density, top + height - 5 * density, label)
             left += width + 4 * density

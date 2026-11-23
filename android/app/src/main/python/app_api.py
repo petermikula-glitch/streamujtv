@@ -176,7 +176,7 @@ def _cached(key, ttl, load):
 # ---------------------------------------------------------------------------
 
 POSTER_LISTS = ("discover", "favorites", "movies", "shows", "profiles", "profile_avatars", "discover_person",
-                "downloads")
+                "downloads", "discover_fresh")
 
 
 def _target(kind, call=None, params=None, title=None):
@@ -764,6 +764,9 @@ def _discover_rows(newcomer):
         _card("Hledat", _target("search"), "Film, seriál, herec nebo režisér", icon="search"),
     ])
     if _tmdb().enabled:
+        # co aplikace na Přehraj.to našla nově; dokud nic takového není, řada se neukazuje
+        rows.append({"title": "Nově na Přehraj.to", "items": [], "poster": True, "call": "discover_fresh_row",
+                     "params": {}, "optional": True})
         for kind, title in (("movie", "Právě populární filmy"), ("tv", "Právě populární seriály")):
             rows.append({"title": title, "items": [], "poster": True, "call": "discover_row",
                          "params": {"kind": kind, "category": "popular"}})
@@ -1383,11 +1386,17 @@ def video_size(params):
     return {"lines": lines}
 
 
+PLAYBACK_HOLD = 120   # s – tak dlouho po posledním uložení pozice přehrávání se na pozadí nic neověřuje
+
+
 def progress_save(params):
     """Uloží pozici přehrávání (aplikace volá průběžně a při zastavení)."""
     track = params.get("track") or ""
     position = float(params.get("position") or 0)
     total = float(params.get("total") or 0)
+    if not params.get("ended"):
+        # přehrává se: procházení seznamu dostupných titulů na pozadí počká, ať nebere připojení
+        app_discover._VERIFY["hold"] = max(app_discover._VERIFY.get("hold", 0), time.time() + PLAYBACK_HOLD)
     if not track or total <= 0:
         return {"saved": False}
     if params.get("ended") and total - position <= max(15, total * 0.08):
@@ -1588,6 +1597,10 @@ def quick_sync(params):
     result = _account_check(params)
     if _auto_enrich():
         result["refresh"] = True
+    try:
+        app_index.start()   # seznam dostupných titulů se plní na pozadí, dokud aplikace běží
+    except (ApiError, TmdbError):
+        pass
     return result
 
 
@@ -2693,9 +2706,11 @@ def update_check(params):
 
 import app_discover  # noqa: E402 – až po definicích výše: modul používá pomocné funkce odsud
 import app_extras  # noqa: E402
+import app_index  # noqa: E402
 
 ACTIONS = dict(app_discover.ACTIONS)
 ACTIONS.update(app_extras.ACTIONS)
+ACTIONS.update(app_index.ACTIONS)
 ACTIONS.update({
     "downloads": downloads, "download_add": download_add, "download_next": download_next,
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,
@@ -2802,6 +2817,7 @@ def diagnostics(params):
     add("Synchronizace", time.strftime("%d.%m.%Y %H:%M", time.localtime(last)) if last else "zatím neproběhla")
     prefs = _prefs(settings)
     add("Předvolby", "%s, %s" % (dict(LANGUAGE_CHOICES)[prefs["language"]], dict(QUALITY_CHOICES)[prefs["quality"]]))
+    add("Seznam dostupných titulů", app_index.summary_text())
     errors = ["%s  %s: %s" % (time.strftime("%d.%m. %H:%M", time.localtime(entry.get("time") or 0)),
                               entry.get("action") or "", entry.get("text") or "") for entry in _errors()]
     # zkušební předání oficiální aplikaci ČT: obrazovka podle něj zjistí, co aplikace v zařízení přijímá

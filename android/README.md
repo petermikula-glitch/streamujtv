@@ -251,6 +251,17 @@ Dotazy na pozadí drží rozestup (`_pace`, nejvýš asi čtyři za sekundu) a p
 pamatuje (`avail:<druh>:<číslo>`): nalezený 14 dní, nenalezený podle stáří titulu – letošní a loňský 12 hodin,
 starší pěti let 10 dní, jinak 2 dny (`_missing_ttl`).
 
+**Seznam dostupných titulů** (`app_index.py`): aby se neověřovalo až při otevření výpisu, prochází aplikace
+seznamy TMDB předem – populární, novinky, nejlépe hodnocené, československé a jednotlivé žánry, filmy
+i seriály (`_plan`). Spouští se po otevření aplikace (`quick_sync` → `app_index.start`), ověřuje asi titul za
+sekundu (`CHUNK`, `GAP`), nejvýš `DAILY_LIMIT` titulů denně, a ustoupí, když někdo čeká na hledání, když se
+ověřuje otevřený výpis nebo když se přehrává (`busy`; přehrávač odkládá přes `progress_save`). Kde skončil,
+si pamatuje (`index:state`), celý plán opakuje nejdřív po `CYCLE_EVERY`. Výsledek jde do stejných záznamů
+`avail:…`, takže projitý výpis je hned. Záznam nese i souhrn verzí (`_summary`: jaký dabing je k mání
+a nejlepší známé rozlišení), údaje pro kartu a čas `f`, odkdy je titul na Přehraj.to: podle něj je řada
+a výpis „Nově na Přehraj.to“ (`discover_fresh`; titul, který tam dřív nebyl a přibyl, nebo čerstvá novinka).
+Karty mají štítky CZ/SK (dabing) a 4K, filtr výpisu umí „jen s dabingem“. Stav je v Diagnostice.
+
 **Hodnocení a plakáty** se doplňují samy (`_auto_enrich`, volá se z `quick_sync` po otevření aplikace, i bez
 přihlášení k Přehraj.to): nové tituly hned, ty, u kterých doplnění selhalo, znovu po šesti hodinách
 a nenalezené po týdnu; jedno kolo nejvýš `AUTO_ENRICH_BATCH` titulů. Když se něco doplní, obrazovka se

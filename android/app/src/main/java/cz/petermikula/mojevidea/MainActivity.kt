@@ -465,6 +465,10 @@ class SectionFragment : RowsSupportFragment() {
             if (cards.isNotEmpty()) {
                 failed.remove(key)
                 remembered[key] = cards
+            } else if (result.data?.optBoolean("hide") == true) {
+                // řada, která nemá co ukázat (zatím nic „nově na Přehraj.to“): není to chyba, jen se neukáže
+                failed.remove(key)
+                remembered.remove(key)
             } else if (seconds > 0) {
                 // tituly řady se teprve ověřují (ukazují se jen ty, které opravdu jsou k mání):
                 // řada zatím zůstává jako obrysy karet, není to chyba
@@ -519,10 +523,10 @@ class SectionFragment : RowsSupportFragment() {
         }
         for (index in 0 until list.length()) {
             val row = list.optJSONObject(index) ?: continue
-            names.add(row.optString("title"))
-            tiles.add(row.optBoolean("tiles"))
             val call = row.optString("call")
             if (call.isEmpty()) {
+                names.add(row.optString("title"))
+                tiles.add(row.optBoolean("tiles"))
                 val cards = Card.list(row.optJSONArray("items"))
                 items.add(cards)
                 posters.add(CardPresenter.posterShape(cards))
@@ -535,6 +539,10 @@ class SectionFragment : RowsSupportFragment() {
             val age = fetchedAt[key]?.let { now - it }
             if (age == null || force || (reload && age > FRESH_MS)) fetch(key, call, params)
             val known = remembered[key]
+            // nepovinná řada se ukáže, až když má co nabídnout (jinak by probliklo prázdné místo)
+            if (row.optBoolean("optional") && known == null) continue
+            names.add(row.optString("title"))
+            tiles.add(row.optBoolean("tiles"))
             items.add(when {
                 known != null -> known
                 key in failed && key !in waiting -> listOf(Card.from(org.json.JSONObject()
