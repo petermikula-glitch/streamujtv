@@ -45,7 +45,8 @@ FAVORITES_EVERY = 3 * 3600       # hlídání oblíbených nejvýš jednou za tu
 FAVORITES_BATCH = 6              # a nejvýš tolika titulů najednou
 SEASON_DOWNLOAD_MAX = 40         # nejvýš tolik dílů při stažení celé řady
 # seriálové žánry TMDB bez vlastní ilustrace: nejbližší filmová, nebo dlaždice z iVysílání
-GENRE_ART = {10759: "genre_28", 10765: "genre_878", 10768: "genre_10752", 10762: "kids", 10763: "news"}
+GENRE_ART = {10759: "genre_28", 10765: "genre_878", 10768: "genre_10752", 10762: "kids", 10763: "news",
+             10764: "fun", 10766: "genre_10749", 10767: "society"}   # reality show, telenovela, talk show
 TITLE_PREFIX = "title:"          # název a plakát titulu z Objevuj (pro další díl a pokračování)
 RECENT_SERIES = "recent_series"  # naposledy sledované seriály z Objevuj
 KIND_NAMES = {"movie": "film", "tv": "seriál"}

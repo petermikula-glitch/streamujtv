@@ -96,7 +96,8 @@ obrysová ikona `ic_tile_<název>`. Ze zápisu `ikona:barva` (např. `folder:mov
 barevné odstíny kategorií tento vzhled nemá.
 
 Hotové malby mají dlaždice kategorií (`movies`, `series`, `live`, `news`, `docs`, `nature`, `kids`,
-`sport`, `fun`, `culture`, `past`, `advice`, `spirit`, `society`, `archive`). Prozatímní jsou malby
+`sport`, `fun`, `culture`, `past`, `advice`, `spirit`, `society`, `archive`) a všech 19 filmových žánrů
+(`genre_<číslo>`). Prozatímní jsou malby
 `discover_new`, `discover_popular`, `discover_top`, `discover_year`, logo, banner, ikona aplikace
 a pozadí; ostatní dlaždice mají obrysovou ikonu, dokud nedorazí zbytek sady.
 
