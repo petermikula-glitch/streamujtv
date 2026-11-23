@@ -71,6 +71,8 @@ object Navigator {
             "settings" -> activity.startActivity(Intent(activity, SettingsActivity::class.java))
             "diagnostics" -> activity.startActivity(Intent(activity, DiagnosticsActivity::class.java))
             "refresh" -> onChanged()  // „Zkusit znovu“: obrazovka si obsah načte znovu
+            "storage" -> chooseStorage(activity, onChanged)
+            "move" -> planMove(activity, target, onChanged)
             "input" -> askText(activity, title, target, onChanged)
             "choices" -> showChoices(activity, target, onChanged)
             "command" -> runCommand(activity, title, target, onChanged)
@@ -83,6 +85,62 @@ object Navigator {
                     onChanged()
                 }
             }
+        }
+    }
+
+    /** Výběr disku pro nová stahování (stejná volba je i v Nastavení). */
+    private fun chooseStorage(activity: FragmentActivity, onChanged: () -> Unit) {
+        val volumes = Storage.volumes(activity)
+        if (volumes.isEmpty()) {
+            Toast.makeText(activity, "Žádné úložiště není dostupné.", Toast.LENGTH_LONG).show()
+            return
+        }
+        AlertDialog.Builder(activity)
+            .setTitle(if (volumes.any { it.removable }) "Kam stahovat" else "Kam stahovat (USB disk není připojený)")
+            .setAdapter(Dialogs.items(activity, volumes.map { it.description })) { _, which ->
+                Api.call("settings_set", JSONObject().put("download_dir", volumes[which].dir.absolutePath)) {
+                    if (activity.isFinishing || activity.isDestroyed) return@call
+                    Toast.makeText(activity, "Nová stahování půjdou na: ${volumes[which].label}", Toast.LENGTH_LONG).show()
+                    DownloadService.start(activity)  // co čekalo na disk, může začít
+                    onChanged()
+                }
+            }
+            .showStyled()
+    }
+
+    /**
+     * Přesun stažených souborů na jiný disk: logika řekne, kolik toho je a kde to leží, aplikace
+     * nabídne připojené disky s volným místem a samotný přenos pak dělá služba stahování.
+     */
+    private fun planMove(activity: FragmentActivity, target: Target, onChanged: () -> Unit) {
+        Api.call("download_move_plan", target.params) { result ->
+            if (activity.isFinishing || activity.isDestroyed) return@call
+            val plan = result.data
+            if (plan == null) {
+                Toast.makeText(activity, result.error ?: "Přesun se nepodařilo připravit.", Toast.LENGTH_LONG).show()
+                return@call
+            }
+            val current = plan.optJSONArray("dirs")?.let { list -> (0 until list.length()).map { list.optString(it) } }.orEmpty()
+            // disky, na kterých soubory ještě (všechny) nejsou
+            val volumes = Storage.volumes(activity).filter { volume -> current != listOf(volume.dir.absolutePath) }
+            if (volumes.isEmpty()) {
+                Toast.makeText(activity, "Není kam přesouvat – připojte druhý disk a zkuste to znovu.", Toast.LENGTH_LONG).show()
+                return@call
+            }
+            val needed = plan.optLong("bytes")
+            val names = volumes.map { it.description + if (needed + Storage.RESERVE > it.free) " – málo místa" else "" }
+            AlertDialog.Builder(activity)
+                .setTitle("Kam přesunout (${plan.optInt("count")}× · ${Storage.sizeText(needed)})")
+                .setAdapter(Dialogs.items(activity, names)) { _, which ->
+                    val volume = volumes[which]
+                    if (needed + Storage.RESERVE > volume.free) {
+                        Toast.makeText(activity, "Na disku „${volume.label}“ není dost místa.", Toast.LENGTH_LONG).show()
+                        return@setAdapter
+                    }
+                    val params = JSONObject(target.params.toString()).put("dir", volume.dir.absolutePath)
+                    runCommand(activity, "Přesun na jiný disk", Target("command", target.call, params, ""), onChanged)
+                }
+                .showStyled()
         }
     }
 

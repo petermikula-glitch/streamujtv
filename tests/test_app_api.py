@@ -1359,7 +1359,9 @@ def test_whole_season_is_queued_and_watched_downloads_can_be_removed(api, tmp_pa
                                             "text": "3 díly. Velikost souborů není známá."}}
     assert api("download_season", **season["target"]["params"]) == {
         "message": "Zařazeno ke stažení: 3 dílů (1. řada).", "start": True}
-    assert len(api("downloads")["items"]) == 3
+    listed = api("downloads")["items"]
+    assert len([card for card in listed if card["target"]["type"] == "play"]) == 3
+    assert _titles(listed)[-1] == "Kam stahovat" and listed[-1]["target"] == {"type": "storage"}
     assert "už jsou stažené" in api("download_season", **season["target"]["params"])["message"]
     assert "žádné díly" in api("download_season", key="show:archa", season=4)["error"]
 
@@ -1378,7 +1380,8 @@ def test_whole_season_is_queued_and_watched_downloads_can_be_removed(api, tmp_pa
     api("progress_save", track=first, position=600, total=1200)
     assert os.path.exists(job["path"])                                       # rozkoukaný soubor zůstává
     api("progress_save", track=first, position=1190, total=1200, ended=True)
-    assert not os.path.exists(job["path"]) and len(api("downloads")["items"]) == 2
+    assert not os.path.exists(job["path"])
+    assert len([card for card in api("downloads")["items"] if card["target"]["type"] == "play"]) == 2
 
     api("settings_set", tmdb_key="k" * 32)                                   # řada seriálu z Objevuj
     _catalogue_search(monkeypatch, {"Krakonoš S01E01": [_web(81, "Krakonos S01E01 CZ")],
@@ -1691,6 +1694,89 @@ def test_best_quality_prefers_4k_however_the_site_labels_it(api, monkeypatch):
     with app_api._library() as lib:
         state = app_api._state(lib)
     assert app_api.app_discover._find_versions(["Duna"], 2021, None, state)[0]["video"]["id"] == full["id"]
+
+
+def test_downloaded_files_move_to_another_disk(api, tmp_path):
+    _fill()
+    first, second = tmp_path / "usb1", tmp_path / "usb2"
+    first.mkdir()
+    second.mkdir()
+    api("download_add", vid=REF)
+    _link(REF, "https://cdn.x/pelisky.mkv?sig=1")
+    job = api("download_next", dir=str(first))
+    (first / os.path.basename(job["path"])).write_bytes(b"x" * 40)
+    subtitle = first / "pelisky.cs.vtt"
+    subtitle.write_text("WEBVTT")
+    api("download_finish", vid=REF, size=40, subtitles=[str(subtitle)])
+
+    listed = api("downloads")["items"]
+    assert _titles(listed)[-2:] == ["Kam stahovat", "Přesunout vše na jiný disk"]
+    assert listed[-1]["target"] == {"type": "move", "call": "download_move", "params": {"all": True}}
+    menu = {item["title"]: item["target"] for item in listed[0]["menu"]}
+    assert menu["Přesunout na jiný disk"] == {"type": "move", "call": "download_move", "params": {"vid": REF}}
+
+    plan = api("download_move_plan", vid=REF)
+    assert plan == {"count": 1, "bytes": 40, "dirs": [str(first)]}
+    assert "není připojený" in api("download_move", vid=REF, dir=str(tmp_path / "nic"))["error"]
+    assert api("download_move", vid=REF, dir=str(first)) == {"message": "Soubory už na tomto disku jsou."}
+    assert api("move_next") == {"vid": ""}
+    started = api("download_move", all=True, dir=str(second))
+    assert started["start"] is True and "Přesouvám souborů: 1" in started["toast"]
+    assert api("downloads_pending") == {"pending": True}           # po restartu služba přesun dokončí
+    assert api("downloads")["items"][0]["subtitle"].startswith("Přesouvá se")
+    assert api("play", vid=REF)["url"] == job["path"]              # během přesunu se hraje z původního místa
+
+    move = api("move_next")
+    assert (move["vid"], move["from"], move["size"]) == (REF, job["path"], 40)
+    assert move["to"] == str(second / os.path.basename(job["path"])) and move["subtitles"] == [str(subtitle)]
+    # aplikace soubory zkopíruje a ohlásí nové umístění; teprve pak se původní smažou
+    (second / os.path.basename(job["path"])).write_bytes(b"x" * 40)
+    moved_subtitle = second / subtitle.name
+    moved_subtitle.write_text("WEBVTT")
+    assert api("move_finish", vid=REF, path=move["to"], subtitles=[str(moved_subtitle)]) == {"saved": True}
+    assert not os.path.exists(job["path"]) and not subtitle.exists() and moved_subtitle.exists()
+    assert api("play", vid=REF)["url"] == move["to"] and api("move_next") == {"vid": ""}
+    assert api("downloads_pending") == {"pending": False}
+
+    # nepovedený přesun: soubor zůstává na místě a nic se neztratí
+    api("download_move", vid=REF, dir=str(first))
+    back = api("move_next")
+    assert api("move_fail", vid=REF, error="Na disku není dost místa") == {"saved": True}
+    assert api("play", vid=REF)["url"] == move["to"] and api("move_next") == {"vid": ""}
+    assert not os.path.exists(back["to"])
+    # hlášení dokončení bez souboru na cíli nic nepřepíše
+    api("download_move", vid=REF, dir=str(first))
+    assert api("move_finish", vid=REF, path=back["to"], subtitles=[]) == {"saved": False}
+    assert api("play", vid=REF)["url"] == move["to"]
+    # cílový disk mezitím zmizel: přesun se sám zruší
+    api("download_move", vid=REF, dir=str(first))
+    first.rmdir()
+    assert api("move_next") == {"vid": ""} and api("downloads_pending") == {"pending": False}
+    assert "Není co přesouvat" in api("download_move_plan", vid="9:x:00000000000000ff")["error"]
+
+
+def test_changing_preferences_changes_the_offered_version_at_once(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    sharp = _web(61, "Pelisky 1999 CZ 1080p", 6600, "4 GB", quality="1080p")
+    small = _web(62, "Pelisky 1999 CZ 720p", 6600, "1 GB", quality="720p")
+    _catalogue_search(monkeypatch, {"Pelíšky 1999": [sharp, small]})
+
+    def offered():
+        with app_api._library() as lib:
+            state = app_api._state(lib)
+        return app_api.app_discover._find_versions(["Pelíšky"], 1999, None, state, choice="movie:11")[0]["video"]["id"]
+
+    assert offered() == sharp["id"]                                # nejvyšší kvalita: 1080p
+    with app_api._library() as lib:
+        lib.set_kv(app_api.CHOICE_PREFIX + "movie:11", sharp["id"])   # uživatel si kdysi vybral verzi ručně
+    api("settings_set", prefer_quality="720")
+    assert offered() == small["id"]                                # změna předvolby platí hned i přes dřívější volbu
+    with app_api._library() as lib:
+        assert lib.get_kv(app_api.CHOICE_PREFIX + "movie:11") is None
+        lib.set_kv(app_api.CHOICE_PREFIX + "movie:11", sharp["id"])
+    api("settings_set", prefer_quality="720", tmdb_key="k" * 32)   # stejná předvolba: ruční volby zůstávají
+    with app_api._library() as lib:
+        assert lib.get_kv(app_api.CHOICE_PREFIX + "movie:11") == sharp["id"]
 
 
 def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):

@@ -214,6 +214,8 @@ Díl se nikdy nepřeskočí potichu: chybí-li v katalogu bezprostředně násle
 na Přehraj.to, a teprve když tam není, nabídne se pozdější díl z katalogu – s poznámkou, který chybí,
 a bez samočinného spuštění. Zapamatovaná adresa souboru platí jen pro předvolbu kvality, se kterou
 vznikla; po změně předvolby se varianta vybere znovu.
+Změna předvolby jazyka nebo kvality platí hned: obrazovka se načte znovu a verze, které si uživatel
+dřív u titulů vybral ručně, přestanou mít přednost (`settings_set` je zapomene).
 Řada **Další díly** na hlavní obrazovce: po dokoukaném dílu z katalogu ten následující a seriály
 z Objevuj, které se naposledy přehrávaly (vedou na stránku seriálu s tlačítkem Pokračovat). Seriál jde
 z řady odebrat („Nenabízet další díly“ v nabídce karty); vrátí se, jakmile se z něj zase něco pustí.
@@ -377,6 +379,14 @@ Aplikace zapisuje do vlastní složky na disku (`Android/data/cz.petermikula.moj
 nepotřebuje žádné oprávnění; Android tuto složku při odinstalaci aplikace smaže. Úložiště se volí
 v Nastavení, bez volby se použije první připojený USB disk. Disk má být ve formátu exFAT – FAT32
 neuloží soubor větší než 4 GB (aplikace na to upozorní předem).
+
+**Úložiště a přesun.** Výpis Stahování končí kartami „Kam stahovat“ (výběr disku pro nová stahování,
+stejná volba je v Nastavení) a „Přesunout vše na jiný disk“; jednotlivý soubor jde přesunout z nabídky
+karty („Přesunout na jiný disk“) a smazat („Smazat stažený soubor“). Aplikace nabídne připojené disky
+s volným místem (`planMove` v `Navigator.kt`), přesun zařadí logika (`download_move`, `move_next`,
+`move_finish`, `move_fail`) a přenáší ho služba stahování: soubor zkopíruje pod dočasným jménem, ověří
+velikost a teprve potom se původní smaže. Během přesunu se hraje z původního místa; nepovedený přesun
+nechá soubor, kde byl.
 
 Před stažením celé řady se aplikace zeptá (`confirm` u cíle karty; `space_question` v `app_extras.py`):
 ukáže, kolik dílů se stáhne, odhad potřebného místa tam, kde katalog velikosti souborů zná, a volné

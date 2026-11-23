@@ -411,6 +411,7 @@ def _video_menu(state, params, point=None):
         items.append({"title": "Stáhnout na disk", "target": _target("download", "download_add", params)})
     elif entry.get("state") == "done":
         items.append({"title": "Smazat stažený soubor", "target": remove})
+        items.append({"title": "Přesunout na jiný disk", "target": _target("move", "download_move", {"vid": vid})})
     elif entry.get("state") == "failed":
         items.append({"title": "Zkusit stáhnout znovu", "target": _target("download", "download_add", params)})
         items.append({"title": "Odebrat ze stahování", "target": remove})
@@ -1284,8 +1285,15 @@ def settings_set(params):
             if key in params and params[key] is not None:
                 settings[key] = bool(params[key])
         account.append(before != (settings.get("username"), settings.get("password")))
+        account.append(wanted != (settings.get("prefer_language"), settings.get("prefer_quality")))
 
+    wanted = tuple(_settings().get(key) for key in ("prefer_language", "prefer_quality"))
     _change_settings(change)
+    if account[1]:
+        # Jiná předvolba jazyka nebo kvality: verze, které si uživatel dřív u titulů vybral ručně,
+        # by jinak zůstaly první a nabídka by se nezměnila. Nově platí pořadí podle předvoleb.
+        with _library() as lib, lib.conn:
+            lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE ?", (CHOICE_PREFIX + "%",))
     if account[0]:
         # Jiný účet nebo heslo: uložené přihlášení patřilo tomu předchozímu. Kdyby zůstalo, aplikace
         # by dál pracovala s původním účtem a i špatné heslo by vypadalo jako správné.
@@ -2008,7 +2016,8 @@ def _save_downloads(items, durable=True):
 
 def downloads_pending(params):
     """Čeká ve frontě něco ke stažení? (Aplikace se ptá, když se vrátí připojení nebo disk.)"""
-    return {"pending": any(entry.get("state") in ("queued", "downloading") for entry in _downloads().values())}
+    return {"pending": any(entry.get("state") in ("queued", "downloading") or entry.get("move_to")
+                           for entry in _downloads().values())}
 
 
 def downloads_cleanup(params):
@@ -2048,7 +2057,8 @@ def _download_status(entry):
     if state == "done":
         if not os.path.exists(entry.get("path") or ""):
             return "Disk není připojený"
-        return "Staženo · %s" % _size_text(total) if total else "Staženo"
+        status = "Staženo · %s" % _size_text(total) if total else "Staženo"
+        return "Přesouvá se · " + status if entry.get("move_to") else status
     if state == "failed":
         return "Chyba: %s" % (entry.get("error") or "stahování selhalo")
     if state == "downloading":
@@ -2127,8 +2137,15 @@ def downloads(params):
     with _library() as lib:
         cards = _download_cards(lib, _state(lib), episodes=episodes)
     title = {False: "Stažené filmy", True: "Stažené díly"}.get(episodes, "Stahování")
+    if cards and episodes is None:
+        # správa úložiště na konci výpisu: kam se stahuje a přesun stažených souborů mezi disky
+        cards.append(_card("Kam stahovat", _target("storage"), "Vybrat disk pro nová stahování", icon="settings"))
+        if any(entry.get("state") == "done" for entry in _downloads().values()):
+            cards.append(_card("Přesunout vše na jiný disk", _target("move", "download_move", {"all": True}),
+                               "Všechny stažené soubory", icon="download"))
     return {"title": title, "items": cards, "next": None,
-            "refresh": 3 if any(entry.get("state") in ("queued", "downloading")
+            # dokud se stahuje nebo přesouvá, výpis se sám obnovuje
+            "refresh": 3 if any(entry.get("state") in ("queued", "downloading") or entry.get("move_to")
                                 for entry in _downloads().values()) else 0,
             "empty": "Zatím tu nic není.\n\nPodržte tlačítko OK na filmu nebo dílu a zvolte „Stáhnout na disk“. "
                      "Stažené filmy pak hrají i bez internetu."}
@@ -2241,6 +2258,111 @@ def download_fail(params):
     return {"saved": True}
 
 
+# ---------------------------------------------------------------------------
+# Přesun stažených souborů mezi disky
+# ---------------------------------------------------------------------------
+
+def _movable(items, vid=""):
+    """Stažené soubory, které jde přesunout: hotové a právě dostupné (jejich disk je připojený)."""
+    return [(key, entry) for key, entry in items.items()
+            if entry.get("state") == "done" and os.path.exists(entry.get("path") or "") and (not vid or key == vid)]
+
+
+def download_move_plan(params):
+    """Co by se přesouvalo: počet souborů, jejich velikost a složky, kde teď leží (pro výběr cílového disku)."""
+    found = _movable(_downloads(), str(params.get("vid") or ""))
+    if not found:
+        raise ApiError("Není co přesouvat – žádný stažený soubor teď není dostupný.")
+    size = 0
+    for _key, entry in found:
+        try:
+            size += os.path.getsize(entry["path"])
+        except OSError:
+            pass
+    return {"count": len(found), "bytes": size, "dirs": sorted({os.path.dirname(entry["path"]) for _key, entry in found})}
+
+
+def download_move(params):
+    """Zařadí stažené soubory k přesunu na jiný disk (``dir``); přenáší je služba aplikace."""
+    directory = str(params.get("dir") or "").rstrip("/")
+    if not directory or not os.path.isdir(directory):
+        raise ApiError("Cílový disk není připojený.")
+    count = 0
+    with _DOWNLOADS_LOCK:
+        items = _downloads()
+        for _key, entry in _movable(items, str(params.get("vid") or "")):
+            if os.path.dirname(entry["path"]) != directory:
+                entry["move_to"] = directory
+                count += 1
+        if count:
+            _save_downloads(items)
+    if not count:
+        return {"message": "Soubory už na tomto disku jsou."}
+    return {"message": "", "toast": "Přesouvám souborů: %d. Průběh je v oznámení." % count, "start": True}
+
+
+def move_next(params):
+    """Další soubor k přesunu: ``{"vid", "title", "from", "to", "size", "subtitles"}``, nebo ``{"vid": ""}``.
+
+    Přesun, který nejde provést (zdroj zmizel, cílový disk není připojený), se ruší."""
+    with _DOWNLOADS_LOCK:
+        items = _downloads()
+        job, changed = None, False
+        for vid, entry in items.items():
+            target = entry.get("move_to")
+            if not target:
+                continue
+            source = entry.get("path") or ""
+            if entry.get("state") != "done" or not os.path.exists(source) or not os.path.isdir(target):
+                entry.pop("move_to", None)
+                changed = True
+                continue
+            job = {"vid": vid, "title": entry.get("title") or "", "from": source,
+                   "to": os.path.join(target, os.path.basename(source)), "size": os.path.getsize(source),
+                   "subtitles": [name for name in entry.get("subtitles") or [] if os.path.exists(name)]}
+            break
+        if changed:
+            _save_downloads(items)
+    return job or {"vid": ""}
+
+
+def move_finish(params):
+    """Soubor je na novém místě: evidence dostane novou cestu a původní soubory se smažou."""
+    vid, path = str(params.get("vid") or ""), str(params.get("path") or "")
+    kept = [str(name) for name in params.get("subtitles") or []]
+    with _DOWNLOADS_LOCK:
+        items = _downloads()
+        entry = items.get(vid)
+        if not entry or not path or not os.path.exists(path):
+            if entry:
+                entry.pop("move_to", None)
+                _save_downloads(items)
+            return {"saved": False}
+        old = [entry.get("path") or ""] + list(entry.get("subtitles") or [])
+        entry.update({"path": path, "subtitles": kept})
+        entry.pop("move_to", None)
+        _save_downloads(items)
+    for name in old:
+        if name and name != path and name not in kept:
+            try:
+                os.remove(name)
+            except OSError:
+                pass   # původní disk mezitím zmizel: soubor na něm zůstane, evidence už ukazuje na nový
+    return {"saved": True}
+
+
+def move_fail(params):
+    """Přesun se nepovedl: soubor zůstává, kde byl."""
+    vid = str(params.get("vid") or "")
+    with _DOWNLOADS_LOCK:
+        items = _downloads()
+        if vid in items:
+            items[vid].pop("move_to", None)
+            _save_downloads(items)
+    _remember_error("přesun", params.get("error") or "přesun se nepodařil")
+    return {"saved": True}
+
+
 def download_remove(params):
     """Zruší stahování nebo smaže stažený soubor (i rozpracovaný a titulky)."""
     vid = params.get("vid") or ""
@@ -2321,6 +2443,8 @@ ACTIONS.update({
     "downloads": downloads, "download_add": download_add, "download_next": download_next,
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,
     "download_remove": download_remove, "update_check": update_check,
+    "download_move_plan": download_move_plan, "download_move": download_move, "move_next": move_next,
+    "move_finish": move_finish, "move_fail": move_fail,
     "progress_remove": progress_remove, "watched_set": watched_set, "downloads_cleanup": downloads_cleanup,
     "downloads_pending": downloads_pending,
     "home": home, "discover_home": discover_home, "movies": movies, "shows": shows, "show": show, "played": played,

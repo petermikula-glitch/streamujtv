@@ -39,7 +39,7 @@ class DownloadService : Service() {
         private const val OFFLINE_WAITS = 20            // tolikrát služba počká na připojení (10 minut)
         private const val OFFLINE_WAIT_MS = 30_000L
         private const val PROGRESS_BYTES = 8L shl 20    // pokus, který stáhl aspoň tolik, nebyl marný
-        private const val RESERVE = 64L shl 20          // místo, které má na disku zůstat volné
+        private const val RESERVE = Storage.RESERVE     // místo, které má na disku zůstat volné
         private const val FAT_LIMIT = (4L shl 30) - 1   // největší soubor na FAT32
         @Volatile private var working = false
 
@@ -107,6 +107,7 @@ class DownloadService : Service() {
             var last = ""
             var waits = 0
             var cleaned = false
+            var moved = false
             while (!stopping) {
                 val preferred = Api.callBlocking("settings_get").data?.optString("download_dir").orEmpty()
                 val volume = Storage.target(this, preferred)
@@ -115,6 +116,15 @@ class DownloadService : Service() {
                     cleaned = true
                     Api.callBlocking("downloads_cleanup", JSONObject().put("dir", volume.dir.absolutePath))
                 }
+                // přesuny stažených souborů na jiný disk mají přednost: nepotřebují internet
+                val move = Api.callBlocking("move_next").data
+                if (move != null && move.optString("vid").isNotEmpty()) {
+                    relocate(move)
+                    moved = true
+                    continue
+                }
+                // po přesunu: když už není co stahovat, služba končí (a neptá se po disku pro stahování)
+                if (moved && Api.callBlocking("downloads_pending").data?.optBoolean("pending") != true) return
                 val next = Api.callBlocking(
                     "download_next",
                     JSONObject().put("dir", volume?.dir?.absolutePath.orEmpty()).put("fresh", attempt > 0),
@@ -174,6 +184,86 @@ class DownloadService : Service() {
             }
         } finally {
             if (wakeLock.isHeld) wakeLock.release()
+        }
+    }
+
+    /**
+     * Přesune stažený soubor (a jeho titulky) na jiný disk: zkopíruje ho pod dočasným jménem, ověří
+     * velikost a teprve pak ohlásí logice nové umístění – ta původní soubor smaže. Když se přesun
+     * nepovede, původní soubor zůstává na místě.
+     */
+    private fun relocate(job: JSONObject) {
+        val vid = job.optString("vid")
+        val title = job.optString("title")
+        val source = File(job.optString("from"))
+        val target = File(job.optString("to"))
+        val part = File(target.path + ".part")
+        val folder = target.parentFile
+        fun fail(message: String) {
+            part.delete()
+            Api.callBlocking("move_fail", JSONObject().put("vid", vid).put("error", "$title: $message"))
+            toast("$title: $message")
+        }
+        try {
+            val size = source.length()
+            if (folder == null || (!folder.exists() && !folder.mkdirs())) return fail("Cílový disk není dostupný.")
+            if (size > FAT_LIMIT && Storage.isFat(folder)) {
+                return fail("Soubor je větší než 4 GB a cílový disk je ve formátu FAT32, který takové soubory neuloží.")
+            }
+            if (folder.usableSpace < size + RESERVE) return fail("Na cílovém disku není dost místa.")
+            if (target.exists() && target.length() == size) {
+                // soubor tam už je celý (přesun přerušený těsně před koncem)
+            } else {
+                var done = 0L
+                var shown = 0L
+                source.inputStream().use { input ->
+                    FileOutputStream(part).use { output ->
+                        val buffer = ByteArray(1 shl 20)
+                        while (true) {
+                            if (stopping) {
+                                part.delete()
+                                return   // služba končí: přesun zůstává ve frontě a příště začne znovu
+                            }
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                            done += read
+                            val now = SystemClock.elapsedRealtime()
+                            if (now - shown > 1000) {
+                                shown = now
+                                showProgress("Přesouvám: $title", if (size > 0) (100 * done / size).toInt() else -1)
+                            }
+                        }
+                        output.fd.sync()
+                    }
+                }
+                if (part.length() != size) return fail("Soubor se nepodařilo zkopírovat celý.")
+                if (target.exists()) target.delete()
+                if (!part.renameTo(target)) return fail("Soubor se na cílovém disku nepodařilo uložit.")
+            }
+            val subtitles = ArrayList<String>()
+            val list = job.optJSONArray("subtitles")
+            for (index in 0 until (list?.length() ?: 0)) {
+                val original = File(list!!.optString(index))
+                val copy = File(folder, original.name)
+                try {
+                    original.copyTo(copy, overwrite = true)
+                    subtitles.add(copy.absolutePath)
+                } catch (error: IOException) {
+                    Log.w(TAG, "Titulky se nepodařilo přesunout: ${original.name}", error)
+                }
+            }
+            val saved = Api.callBlocking("move_finish", JSONObject().put("vid", vid).put("path", target.absolutePath)
+                .put("subtitles", JSONArray(subtitles))).data?.optBoolean("saved") == true
+            toast(if (saved) "Přesunuto: $title" else "$title: přesun se nepodařilo zapsat.")
+        } catch (error: IOException) {
+            Log.w(TAG, "Přesun $vid selhal", error)
+            fail("Přesun se nepodařil (disk byl odpojen nebo se z něj nedá číst).")
+        } catch (error: SecurityException) {
+            fail("K cílovému disku nemá aplikace přístup.")
+        } catch (error: RuntimeException) {
+            Log.e(TAG, "Přesun $vid selhal", error)
+            fail("Přesun se nepodařil.")
         }
     }
 

@@ -10,6 +10,9 @@ import java.io.File
  * disku (`Android/data/<aplikace>/files`). Android ji při odinstalaci aplikace smaže.
  */
 object Storage {
+    /** Místo, které má na disku zůstat volné. */
+    const val RESERVE = 64L shl 20
+
     class Volume(val dir: File, val label: String, val removable: Boolean) {
         val free: Long get() = dir.usableSpace
         val description: String get() = "$label · volno ${sizeText(free)}"
