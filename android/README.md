@@ -108,11 +108,13 @@ z obrysových SVG udělá vektorové obrázky Androidu (`rect` a `circle` převe
 Postranní nabídka má šest sekcí; každá je stránka s vlastními řadami (`home` v `app_api.py` vrací
 `sections` → `rows` → karty, v aplikaci `MainFragment` a `SectionFragment`):
 
-- **Filmy** – Objevuj filmy, Stažené filmy a vlastní filmy z účtu (nově přidané, podle názvu,
-  hodnocení a roku); nahoře panel s rozkoukaným filmem.
-- **Seriály** – Další díly, Objevuj seriály, Stažené díly a vlastní seriály; nahoře panel s rozkoukaným dílem.
+- **Filmy** – mřížka velkých dlaždic, tři vedle sebe (řady s příznakem `tiles`, další řada mřížky
+  nemá nadpis): Objevuj filmy (6 dlaždic) a Moje filmy (Stažené filmy, Filmy z mého účtu, Hledat);
+  pod ní nově přidané filmy z účtu.
+- **Seriály** – stejná mřížka: Objevuj seriály a Moje seriály (Stažené díly, Seriály z mého účtu, Hledat).
 - **Oblíbené** – řady Filmy, Seriály a Pořady z iVysílání.
-- **Rozkoukané** – řady Filmy, Seriály a iVysílání a dlaždice Naposledy přehrané.
+- **Rozkoukané** – nahoře panel s naposledy rozkoukaným videem, řady Filmy, Seriály, Další díly
+  a iVysílání a dlaždice Naposledy přehrané.
 - **iVysílání** – živé kanály, rozkoukané pořady, Moje pořady a kategorie; nic jiného.
 - **Nástroje** – hledání, stahování, synchronizace, metadata, nastavení, předvolby, profily, diagnostika.
 
@@ -186,6 +188,10 @@ návratech na hlavní obrazovku, nejvýš jednou za 3 hodiny a pár titulů naje
 objeví, aplikace ukáže okno s upozorněním a karta dostane štítek „Nově na Přehraj.to“. Na pozadí,
 když aplikace neběží, se nehledá.
 
+**Stažené** (`downloads`, volitelně `kind` = `movie` / `episode`): výpis stažených videí s plakáty.
+Plakát se bere z metadat katalogu, z titulu, ze kterého se video pouštělo (`choice:`), nebo se
+dohledá na TMDB podle názvu a roku; výsledek se u položky zapamatuje (`poster`).
+
 **Stažená verze má přednost**: mezi verzemi titulu je stažený soubor první (štítek „Na disku“)
 a tlačítko Přehrát hraje z disku; platí to i tehdy, když hledání na Přehraj.to zrovna nejde.
 
@@ -218,10 +224,11 @@ tu si přehrávač najde sám, a když ne, podívá se do manifestu logika (`man
 parametr `inspect`) a přehrání se zkusí ještě jednou. Územní omezení se neobchází a chráněný obsah
 se neukládá.
 
-**Stav (zkouška na zařízení v ČR, 0.7.0):** ČT chráněný stream vydá, ale adresu licence v odpovědi
-rozhraní ani v manifestu přehrávač nenašel („No license URL“). Pokud ji nenajde ani hledání
-v manifestu, zbývala by jen adresa a přístupový údaj opsané z oficiálního přehrávače, což pravidla
-projektu vylučují – chráněné pořady pak v aplikaci přehrát nejdou. Při chybě přehrávač ukáže, co
+**Stav (zkouška na zařízení v ČR, 0.9.0): chráněné pořady v aplikaci přehrát nejdou.** ČT chráněný
+stream vydá, ale adresu licenčního serveru neposílá: odpověď rozhraní má u streamu jen pole
+`audioDescriptionType`, `audioDescriptionUrl`, `duration`, `forceSubtitles`, `profileVersion` a `url`
+a manifest nese u ochrany jen `cenc(@default_KID)` a `widevine(pssh)`. Zbývala by jen adresa
+a přístupový údaj opsané z oficiálního přehrávače, což pravidla projektu vylučují. Při chybě přehrávač ukáže, co
 manifest o ochraně říká a která pole odpověď má (jen názvy, žádné hodnoty).
 
 ## Stahování na disk
