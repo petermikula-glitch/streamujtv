@@ -236,6 +236,10 @@ def _languages(values):
 LANGUAGE_CHOICES = (("dub", "Český dabing"), ("subs", "Originál s titulky"), ("any", "Je mi to jedno"))
 QUALITY_CHOICES = (("best", "Nejvyšší dostupná"), ("1080", "1080p"), ("720", "720p"),
                    ("small", "Úsporná (nejmenší soubor)"))
+# Nejnižší kvalita, která se z Přehraj.to ještě nabízí: na velké televizi nižší rozlišení nevypadá dobře.
+MINIMUM_CHOICES = (("1080", "Jen Full HD a vyšší (1080p, 2K, 4K)"), ("", "Bez omezení"))
+MIN_QUALITY_DEFAULT = "1080"
+FULL_HD_BITRATE = 2000000   # b/s: soubor bez uvedené kvality se za Full HD bere až od tohoto datového toku
 # kopie natočená v kině: obraz i zvuk jsou výrazně horší, nabízí se až jako poslední
 CAM_RE = re.compile(r"(?<![a-z0-9])(?:cam|camrip|hdcam|ts|hdts|telesync|tc|telecine|kinorip)(?![a-z0-9])", re.I)
 BAD_VIDEOS = "bad_videos"       # verze, které se nepodařilo přehrát
@@ -244,11 +248,28 @@ ART_PREFIX = "art:"             # titul z Objevuj, ze kterého se video pustilo 
 
 
 def _prefs(settings=None):
-    """Předvolby přehrávání z Přehraj.to: jazyk a kvalita."""
+    """Předvolby přehrávání z Přehraj.to: jazyk, kvalita a nejnižší kvalita, která se ještě nabízí."""
     settings = _settings() if settings is None else settings
     language, quality = settings.get("prefer_language"), settings.get("prefer_quality")
+    minimum = settings.get("min_quality")
     return {"language": language if language in dict(LANGUAGE_CHOICES) else "dub",
-            "quality": quality if quality in dict(QUALITY_CHOICES) else "best"}
+            "quality": quality if quality in dict(QUALITY_CHOICES) else "best",
+            "minimum": minimum if minimum in dict(MINIMUM_CHOICES) else MIN_QUALITY_DEFAULT}
+
+
+def _meets_minimum(video, prefs):
+    """Vyhovuje soubor nejnižší kvalitě, kterou si uživatel přeje vidět (Full HD a vyšší)?
+
+    Rozhoduje kvalita z výpisu nebo z názvu souboru (1080p, 2K, 4K projdou; 720p a nižší ne). Když
+    ji soubor neuvádí, odhadne se z velikosti a délky; soubor, o kterém se neví nic, neprojde."""
+    if (prefs or {}).get("minimum") != "1080":
+        return True
+    order = provider.QUALITY_ORDER
+    token = provider.quality_token(video.get("quality") or "")
+    if token:
+        return order.index(token) <= order.index("FHD")
+    size, duration = _size_bytes(video.get("size")), video.get("duration") or 0
+    return bool(size and duration) and size * 8.0 / duration >= FULL_HD_BITRATE
 
 
 def _size_bytes(text):
@@ -306,14 +327,18 @@ def _version_rank(video, prefs=None, bad=()):
 def _pick_stream(streams, prefs):
     """Varianta souboru k přehrání (originál, 2160p, 1080p…) podle předvolené kvality."""
     order = provider.QUALITY_ORDER
+    quality = prefs["quality"]
+    if prefs.get("minimum") == "1080" and quality in ("720", "small"):
+        quality = "1080"   # nejnižší povolená kvalita má přednost před úspornou předvolbou
+
     def rank(stream):
         token = stream.get("quality")
         index = order.index(token) if token in order else len(order)
-        if prefs["quality"] == "best":
+        if quality == "best":
             return index
-        if prefs["quality"] == "small":
+        if quality == "small":
             return -index if token != "ORIG" and index < len(order) else 1
-        wanted = order.index("FHD" if prefs["quality"] == "1080" else "HD")
+        wanted = order.index("FHD" if quality == "1080" else "HD")
         if token == "ORIG" or index == len(order):
             return 50
         return index - wanted if index >= wanted else 10 + (wanted - index)
@@ -1018,6 +1043,9 @@ def prehrajto_search(params):
                 video = dict(nameparser.parse(title), id=result["id"], raw_title=title,
                              thumb=result.get("thumb", ""), size=result.get("size", ""))
                 video["quality"] = _known_quality(result.get("quality"), video["quality"])
+                video["duration"] = result.get("duration") or 0
+                if not _meets_minimum(video, state["prefs"]):
+                    continue   # nižší kvalita, než jakou si uživatel přeje vidět
             if not _search_filter_passes(video, chosen):
                 continue
             key = "|".join(str(part) for part in (search_results.normalize(video.get("title") or ""),
@@ -1255,6 +1283,7 @@ def settings_get(params):
     return {"username": settings.get("username", ""), "has_password": bool(settings.get("password")),
             "tmdb_key": settings.get("tmdb_key", ""), "download_dir": settings.get("download_dir", ""),
             "prefer_language": prefs["language"], "prefer_quality": prefs["quality"],
+            "min_quality": prefs["minimum"],
             "delete_watched": bool(settings.get("delete_watched")),
             "languages": [{"id": key, "title": title} for key, title in LANGUAGE_CHOICES],
             "qualities": [{"id": key, "title": title} for key, title in QUALITY_CHOICES]}
@@ -1268,7 +1297,8 @@ def prefs_choices(params):
     prefs = _prefs()
     groups = []
     for title, key, choices, current in (("Jazyk", "prefer_language", LANGUAGE_CHOICES, prefs["language"]),
-                                         ("Kvalita", "prefer_quality", QUALITY_CHOICES, prefs["quality"])):
+                                         ("Kvalita", "prefer_quality", QUALITY_CHOICES, prefs["quality"]),
+                                         ("Nejnižší kvalita", "min_quality", MINIMUM_CHOICES, prefs["minimum"])):
         groups.append({"title": title, "value": dict(choices)[current],
                        "options": [{"title": name, "current": value == current, "params": {key: value}}
                                    for value, name in choices]})
@@ -1280,22 +1310,30 @@ def settings_set(params):
 
     def change(settings):
         before = (settings.get("username"), settings.get("password"))
-        for key in ("username", "password", "tmdb_key", "download_dir", "prefer_language", "prefer_quality"):
+        for key in ("username", "password", "tmdb_key", "download_dir", "prefer_language", "prefer_quality",
+                    "min_quality"):
             if key in params and params[key] is not None:
                 settings[key] = str(params[key]).strip()
         for key in ("delete_watched", "onboarded"):   # přepínače
             if key in params and params[key] is not None:
                 settings[key] = bool(params[key])
         account.append(before != (settings.get("username"), settings.get("password")))
-        account.append(wanted != (settings.get("prefer_language"), settings.get("prefer_quality")))
+        account.append(wanted != tuple(settings.get(key) for key in watched))
+        account.append(lowest != _prefs(settings)["minimum"])
 
-    wanted = tuple(_settings().get(key) for key in ("prefer_language", "prefer_quality"))
+    watched = ("prefer_language", "prefer_quality", "min_quality")
+    wanted = tuple(_settings().get(key) for key in watched)
+    lowest = _prefs()["minimum"]
     _change_settings(change)
     if account[1]:
         # Jiná předvolba jazyka nebo kvality: verze, které si uživatel dřív u titulů vybral ručně,
         # by jinak zůstaly první a nabídka by se nezměnila. Nově platí pořadí podle předvoleb.
         with _library() as lib, lib.conn:
             lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE ?", (CHOICE_PREFIX + "%",))
+    if account[2]:
+        # Jiná nejnižší kvalita: co je „k mání“, se počítá jinak – dostupnost titulů se ověří znovu.
+        with _library() as lib, lib.conn:
+            lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE ?", (app_discover.AVAILABLE_PREFIX + "%",))
     if account[0]:
         # Jiný účet nebo heslo: uložené přihlášení patřilo tomu předchozímu. Kdyby zůstalo, aplikace
         # by dál pracovala s původním účtem a i špatné heslo by vypadalo jako správné.

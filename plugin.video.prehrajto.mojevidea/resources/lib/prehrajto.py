@@ -184,7 +184,7 @@ def _quality_from_res(res):
 
 
 # Jak se kvalita píše slovy; pořadí je důležité („Full HD“ dřív než „HD“).
-_QUALITY_WORDS = (("UHD", r"2160p?|4k|uhd|ultra\s?hd"), ("FHD", r"1080[pi]?|fhd|full\s?hd"),
+_QUALITY_WORDS = (("UHD", r"2160p?|4k|uhd|ultra\s?hd"), ("FHD", r"1080[pi]?|fhd|full?\s?hd|1440p?|2k|w?qhd"),
                   ("HD", r"720p?|hd(?:\s?ready)?"), ("SD", r"576p?|480p?|360p?|sd"), ("ORIG", r"orig(?:in[aá]l)?"))
 
 

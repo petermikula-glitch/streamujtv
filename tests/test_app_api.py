@@ -22,6 +22,8 @@ def api(tmp_path, monkeypatch):
     app_api.app_discover._PAUSED.clear()   # žádná služba není z dřívějšího testu „mimo provoz“
     # výpisy z Objevuj v testech na ověření dostupnosti čekají; ověřování na pozadí má vlastní test
     monkeypatch.setattr(app_api.app_discover, "BACKGROUND", False)
+    # nejnižší nabízená kvalita je v aplikaci zapnutá (Full HD a vyšší); testy ji zapínají jen tam, kde o ni jde
+    monkeypatch.setattr(app_api, "MIN_QUALITY_DEFAULT", "")
     app_api.app_discover._VERIFY.update(queue=[], active=set(), thread=None, failed={})
     service = FakeService()
     monkeypatch.setattr(ivysilani.urllib.request, "build_opener", lambda *handlers: service)
@@ -1816,6 +1818,68 @@ def test_watch_next_uses_the_sharp_wide_picture_of_the_title(api, monkeypatch):
     assert {item["id"]: item for item in api("watch_next")["items"]}[wide]["image"].endswith("w1280/b.jpg")
 
 
+def test_only_full_hd_and_better_is_offered_when_asked(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32, prefer_language="any")
+    hour = 3600
+    found = [_web(71, "Duna 2021 CZ", 2 * hour, "9 GB", quality="1080p"),
+             _web(72, "Duna 2021 CZ", 2 * hour, "3 GB", quality="720p"),
+             _web(73, "Duna 2021 CZ 4K", 2 * hour, "22 GB"),
+             _web(74, "Duna 2021 CZ 2K", 2 * hour, "12 GB"),
+             _web(75, "Duna 2021 CZ dvdrip", 2 * hour, "1 GB", quality="SD"),
+             _web(76, "Duna 2021 CZ", 2 * hour, "4 GB"),          # kvalitu neuvádí: 4 GB na dvě hodiny je Full HD
+             _web(77, "Duna 2021 CZ", 2 * hour, "700 MB"),        # kvalitu neuvádí a je malý
+             _web(78, "Duna 2021 CZ")]                            # neví se o něm nic
+    _catalogue_search(monkeypatch, {"Duna 2021": found, "Duna": found})
+
+    def offered():
+        with app_api._library() as lib:
+            state = app_api._state(lib)
+        versions = app_api.app_discover._find_versions(["Duna"], 2021, None, state)
+        return {int(version["video"]["id"].split(":")[0]) for version in versions}, state["below_minimum"]
+
+    assert offered() == ({71, 72, 73, 74, 75, 76, 77, 78}, 0)                 # bez omezení všechno
+    settings = api("settings_set", min_quality="1080")
+    assert settings["min_quality"] == "1080"
+    assert offered() == ({71, 73, 74, 76}, 4)                                # jen Full HD, 2K a 4K
+    listed = api("prehrajto_search", q="Duna")["items"]
+    assert {int(card["target"]["params"]["vid"].split(":")[0]) for card in listed} == {71, 73, 74, 76}
+    choices = api("prefs_choices")["filters"]
+    assert [group["title"] for group in choices] == ["Jazyk", "Kvalita", "Nejnižší kvalita"]
+    assert choices[2]["value"] == "Jen Full HD a vyšší (1080p, 2K, 4K)"
+    assert choices[2]["options"][1] == {"title": "Bez omezení", "current": False, "params": {"min_quality": ""}}
+
+    # varianta souboru k přehrání: úsporná předvolba nesmí sáhnout pod Full HD
+    streams = [{"quality": "FHD"}, {"quality": "HD"}, {"quality": "SD"}]
+    assert app_api._pick_stream(streams, {"quality": "small", "minimum": "1080"})["quality"] == "FHD"
+    assert app_api._pick_stream(streams, {"quality": "small", "minimum": ""})["quality"] == "SD"
+
+    # film, který je jen v nižší kvalitě: stránka titulu to řekne a poradí, kde omezení vypnout
+    low = [_web(91, "Nizky 2001 CZ", 2 * hour, "3 GB", quality="720p"), _web(92, "Nizky 2001 CZ dvdrip", 2 * hour, quality="SD")]
+    _catalogue_search(monkeypatch, {"Nízký 2001": low, "Nízký": low})
+    _fake_tmdb(monkeypatch, {})
+    page = api("discover_title", kind="movie", id=0, title="Nízký", year=2001)
+    assert "jen v nižší kvalitě než Full HD (nalezeno: 2)" in page["detail"]["plot"]
+    api("settings_set", min_quality="")
+    _catalogue_search(monkeypatch, {"Duna 2021": found, "Duna": found})
+    assert offered() == ({71, 72, 73, 74, 75, 76, 77, 78}, 0)
+    assert app_api.provider.quality_token("2K") == app_api.provider.quality_token("1440p") == "FHD"
+    assert app_api.provider.quality_token("FulHD") == "FHD"
+
+
+def test_minimum_quality_is_on_by_default_and_resets_availability(api, monkeypatch):
+    monkeypatch.setattr(app_api, "MIN_QUALITY_DEFAULT", "1080")              # jako ve skutečné aplikaci
+    assert api("settings_get")["min_quality"] == "1080"
+    with app_api._library() as lib:
+        lib.set_kv(app_api.app_discover.AVAILABLE_PREFIX + "movie:11", "{}")
+        lib.set_kv(app_api.CHOICE_PREFIX + "movie:11", "x")
+    assert api("settings_set", min_quality="")["min_quality"] == ""          # vypnutí platí a pamatuje se
+    with app_api._library() as lib:
+        # co je „k mání“, se počítá jinak: dostupnost se ověří znovu a ruční volby verzí se zapomenou
+        assert lib.get_kv(app_api.app_discover.AVAILABLE_PREFIX + "movie:11") is None
+        assert lib.get_kv(app_api.CHOICE_PREFIX + "movie:11") is None
+    assert api("settings_get")["min_quality"] == ""
+
+
 def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):
     assert api("home")["welcome"] is True
     api("settings_set", onboarded=True)
@@ -1999,7 +2063,7 @@ def test_playback_preferences_are_offered_as_choices(api):
     offered = api("prefs_choices")
     assert offered["apply"] == "settings_set" and offered["reset"] is None
     assert [(group["title"], group["value"]) for group in offered["filters"]] == [
-        ("Jazyk", "Český dabing"), ("Kvalita", "Nejvyšší dostupná")]
+        ("Jazyk", "Český dabing"), ("Kvalita", "Nejvyšší dostupná"), ("Nejnižší kvalita", "Bez omezení")]
     subtitles = offered["filters"][0]["options"][1]
     assert subtitles == {"title": "Originál s titulky", "current": False, "params": {"prefer_language": "subs"}}
     api(offered["apply"], **subtitles["params"])
@@ -2071,7 +2135,8 @@ def test_unfinished_videos_count_after_a_minute_and_mix_both_sources(api, monkey
         lib.ivys_touch("777", "9", "Díl 3", "Vyprávěj", "")
         lib.ivys_record_play("777", 300, 3000, now=4102444800)               # přehráno jako poslední
         lib.ivys_touch("888", "10", "Krakonošovo tajemství", "Krakonošovo tajemství", "")
-        lib.ivys_record_play("888", 300, 3000)
+        # výslovně dřív než Pelíšky: se stejným časem by pořadí záleželo na tom, jestli mezitím přeskočila vteřina
+        lib.ivys_record_play("888", 300, 3000, now=1000)
     rows = _section(api, "progress")                                         # iVysílání ve stejných řadách
     assert _titles(rows["Seriály"]) == ["Vyprávěj · Díl 3", "Archa 1x01"]
     assert _titles(rows["Filmy"]) == ["Pelíšky", "Krakonošovo tajemství"]    # pořad bez dílů je film

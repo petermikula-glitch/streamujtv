@@ -865,7 +865,11 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
                     found.setdefault(result["id"], (result, parsed))
             if not cursor:
                 break
-        if found and (not thorough or _good_enough(found.values(), prefs, names)):
+        # Ověřování dostupnosti stačí, že titul je – ale jen ve kvalitě, kterou si uživatel přeje vidět.
+        usable = [item for item in found.values() if api._meets_minimum(
+            dict(item[1], quality=api._known_quality(item[0].get("quality"), item[1].get("quality")),
+                 size=item[0].get("size", ""), duration=item[0].get("duration") or 0), prefs)]
+        if usable and (not thorough or _good_enough(usable, prefs, names)):
             break
     with api._library() as lib:
         chosen = lib.get_kv(api.CHOICE_PREFIX + choice) if choice else ""
@@ -897,6 +901,10 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
                          or search_results.is_preview(video["raw_title"], names),
                          "cam": bool(api.CAM_RE.search(video["raw_title"])), "bad": video["id"] in bad,
                          "chosen": bool(chosen) and video["id"] == chosen, "saved": api._saved(state, video["id"])})
+    # Verze v nižší kvalitě, než si uživatel přeje vidět, se nenabízejí (stažená na disku zůstává).
+    shown = [version for version in versions if version["saved"] or api._meets_minimum(version["video"], prefs)]
+    state["below_minimum"] = len(versions) - len(shown)
+    versions = shown
     # stažená verze má přednost (hraje z disku, bez čekání a bez internetu), pak naposledy zvolená
     versions.sort(key=lambda version: (version["short"], not version["saved"], not version["chosen"]) +
                   api._version_rank(version["video"], prefs, bad))
@@ -1017,6 +1025,8 @@ def title_csfd(params):
 
 
 NOT_FOUND = "Na Přehraj.to jsem tento film nenašel. Zkuste hledat ručně pod jiným názvem."
+LOW_QUALITY = ("Na Přehraj.to je tento film jen v nižší kvalitě než Full HD (nalezeno: %d). Nižší kvalitu "
+               "povolíte tlačítkem Jazyk a kvalita → Nejnižší kvalita.")
 
 
 def _title_television(kind, params):
@@ -1114,6 +1124,9 @@ def _title_page(params, kind):
         actions.insert(0, {"title": "Přehrát", "subtitle": best["title"], "target": best["target"]})
         rows.append({"title": "Verze na Přehraj.to (%d)" % len(good),
                      "items": [_version_card(version, state, choice) for version in good]})
+    elif state.get("below_minimum"):
+        # film na Přehraj.to je, ale jen v nižší kvalitě, než si uživatel přeje vidět
+        detail["plot"] = (LOW_QUALITY % state["below_minimum"] + "\n\n" + detail["plot"]).strip()
     else:
         detail["plot"] = (NOT_FOUND + "\n\n" + detail["plot"]).strip()
     rest = [version for version in versions if version["short"]]

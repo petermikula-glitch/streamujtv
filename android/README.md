@@ -214,6 +214,13 @@ Díl se nikdy nepřeskočí potichu: chybí-li v katalogu bezprostředně násle
 na Přehraj.to, a teprve když tam není, nabídne se pozdější díl z katalogu – s poznámkou, který chybí,
 a bez samočinného spuštění. Zapamatovaná adresa souboru platí jen pro předvolbu kvality, se kterou
 vznikla; po změně předvolby se varianta vybere znovu.
+**Nejnižší kvalita** (`min_quality`, výchozí „Jen Full HD a vyšší“; `_meets_minimum` v `app_api.py`): z Přehraj.to
+se nabízejí jen verze v rozlišení 1080p a vyšším (Full HD, 2K, 4K) – na stránce titulu, v hledání souborů,
+u dalšího dílu i při stahování řady – a titul, který je jen v nižší kvalitě, se v Objevuj nepočítá mezi dostupné.
+Rozhoduje kvalita z výpisu nebo z názvu souboru; když ji soubor neuvádí, odhadne se z velikosti a délky
+(od 2 Mb/s), a soubor, o kterém se neví nic, se nenabídne. Vlastní soubory v katalogu a stažené soubory se
+neskrývají. Vypíná se v předvolbách „Jazyk a kvalita“ → Nejnižší kvalita → Bez omezení; stránka titulu, který
+je jen v nižší kvalitě, to sama napíše.
 Změna předvolby jazyka nebo kvality platí hned: obrazovka se načte znovu a verze, které si uživatel
 dřív u titulů vybral ručně, přestanou mít přednost (`settings_set` je zapomene).
 Řada **Další díly** na hlavní obrazovce: po dokoukaném dílu z katalogu ten následující a seriály
