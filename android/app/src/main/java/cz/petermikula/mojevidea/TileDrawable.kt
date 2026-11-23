@@ -84,11 +84,23 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
         } else {
             glyph?.let {
                 // obrysová ikona v pravém horním rohu; název má vlevo dole volné místo
-                val size = min(area.width() * 0.26f, area.height() * 0.44f).toInt()
-                val left = area.right - (padding * 1.3f).toInt() - size
+                var size = min(area.width() * 0.26f, area.height() * 0.44f).toInt()
+                val right = area.right - (padding * 1.3f).toInt()
                 val top = area.top + (padding * 1.2f).toInt()
-                it.setBounds(left, top, left + size, top + size)
-                it.draw(canvas)
+                // Název přes dva nebo tři řádky sahá až pod ikonu a písmo se s ní překrývalo:
+                // ikona se pak zmenší do místa, které nad názvem zbývá (a když žádné není, vynechá se).
+                if (layout != null) {
+                    val textTop = area.bottom - padding - layout.height
+                    val reaches = (0 until layout.lineCount).any { line ->
+                        textTop + layout.getLineTop(line) < top + size &&
+                            area.left + padding + layout.getLineRight(line) > right - size - GAP * density
+                    }
+                    if (reaches) size = min(size, (textTop - GAP * density - top).toInt())
+                }
+                if (size >= MIN_GLYPH * density) {
+                    it.setBounds(right - size, top, right, top + size)
+                    it.draw(canvas)
+                }
             }
         }
         if (layout != null) {
@@ -113,5 +125,7 @@ class TileDrawable(context: Context, private val title: String, icon: String) : 
 
     private companion object {
         const val SMALL = 240   // šířka (dp), pod kterou se dlaždice bere jako malá karta
+        const val GAP = 6       // dp: mezera mezi ikonou a názvem
+        const val MIN_GLYPH = 18   // dp: menší ikona by byla jen skvrna, to ať raději není
     }
 }
