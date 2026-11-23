@@ -2676,3 +2676,44 @@ def test_title_page_search_retries_a_temporary_failure_and_says_why(api, monkeyp
     assert failed["actions"][0]["title"] == "Zkusit znovu" and failed["retry"] is True   # obrazovka to zkusí sama
     assert len(calls) == 2 and "retry" not in page
     assert "HTTP 429" in str(api("diagnostics")["errors"][0])                   # technický důvod je v Diagnostice
+
+
+def test_search_shares_one_client_and_survives_a_failed_login_check(api, monkeypatch):
+    # Dřív si každá stránka titulu ověřovala přihlášení znovu, a když ověření neprošlo, selhalo celé hledání.
+    api("settings_set", tmdb_key="k" * 32, username="a@b.cz", password="heslo")
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    found = [_web(41, "Pelisky 1999 CZ 1080p", 7200, "6 GB")]
+    made, logins = [], []
+
+    class Client(object):
+        request_timeout, request_retries = 20, 2
+
+        def __init__(self, username):
+            self.has_credentials = bool(username)
+            made.append(username)
+
+        def login(self):
+            logins.append(1)
+            if logins == [1]:
+                return True
+            raise app_api.provider.TemporaryError("HTTP 503")
+
+        def search_page(self, query, page, cursor):
+            return found, ""
+
+        def get_streams(self, vid):
+            raise app_api.provider.VideoUnavailableError("není")
+
+    monkeypatch.setattr(app_api.provider, "make_client", lambda username, password, **kwargs: Client(username))
+    first = api("discover_title", **FILM)
+    again = api("discover_title", **FILM)
+    assert first["actions"][0]["title"] == again["actions"][0]["title"] == "Přehrát"
+    assert made == ["a@b.cz"] and logins == [1]              # jeden klient, přihlášení ověřené jednou
+    assert api("prehrajto_search", q="Pelíšky")["items"] and made == ["a@b.cz"]
+
+    api("settings_set", password="jine")                    # jiný účet: nový klient; ověření přihlášení neprošlo
+    page = api("discover_title", **FILM)
+    assert page["actions"][0]["title"] == "Přehrát"         # hledá se bez přihlášení, stránka funguje dál
+    assert made == ["a@b.cz", "a@b.cz", ""] and len(logins) == 2
+    api("discover_title", **FILM)
+    assert len(made) == 3 and len(logins) == 2              # a přihlášení se nezkouší před každým hledáním znovu

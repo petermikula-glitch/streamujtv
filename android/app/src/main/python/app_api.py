@@ -1172,9 +1172,7 @@ def search_filters(params):
 def prehrajto_search(params):
     query = (params.get("q") or "").strip()
     page = max(1, _offset({"offset": params.get("page")}))
-    client = _client(allow_anonymous=True)
-    client.request_timeout = 5
-    client.request_retries = 0
+    client = app_discover._search_client(timeout=5)   # společný klient: přihlášení se neověřuje před každým hledáním
     try:
         results, cursor = provider.search_catalog(client, query, page, params.get("cursor", ""))
     except provider.LoginError:

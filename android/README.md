@@ -189,7 +189,10 @@ pod verzemi řady Celá série, Podobné tituly a Hrají. Hodnocení ČSFD se do
 Když hledání na Přehraj.to selže, stránka zůstane použitelná a nabídne Zkusit znovu. Dočasnou chybu
 (omezení počtu dotazů, vypršení času) zkusí hledání po chvíli samo ještě jednou (`_search_page`), hláška
 říká důvod a technický detail je v Diagnostice. Hledání, na které někdo čeká, má přednost před ověřováním
-dostupnosti na pozadí: to po `SEARCH_HOLD` sekund nezačíná další dávku.
+dostupnosti na pozadí: to po `SEARCH_HOLD` sekund nezačíná další dávku. Když hledání přesto selže, stránka
+ho po chvíli zopakuje sama (nejvýš dvakrát). Hledá se jedním klientem společným pro celou aplikaci
+(`_search_client`): přihlášení se ověří jednou, ne před každým hledáním, a když ověření neprojde, hledá se
+dočasně bez přihlášení.
 U filmu první tlačítko přehraje nejlepší verzi podle předvoleb a řady nabízejí ostatní verze. Stránka
 seriálu je stejná: první tlačítko pustí díl, na kterém se skončilo (rozkoukaný, jinak další po
 posledním zhlédnutém, jinak první), a řady jsou díly po řadách (prvních `SEASON_ROWS` řad, další za

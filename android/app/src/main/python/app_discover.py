@@ -802,18 +802,33 @@ def _duration_text(seconds):
     return "%d h %02d min" % divmod(minutes, 60) if minutes >= 60 else "%d min" % minutes
 
 
+_SEARCH = {"key": None, "client": None, "until": 0}   # společný klient pro hledání
+_SEARCH_LOCK = threading.Lock()
+ANONYMOUS_FOR = 300              # tolik sekund se po nepovedeném přihlášení hledá bez něj (pak nový pokus)
+
+
 def _search_client(timeout=8):
-    """Klient pro veřejné hledání na Přehraj.to. Hledat jde i bez přihlášení: když přihlášení selže
-    (špatné heslo), hledá se bez něj – jinak by každý dotaz zkoušel přihlášení znovu a hledání by
-    vypadalo jako výpadek."""
-    client = api._client(allow_anonymous=True)
-    if client.has_credentials:
-        try:
-            client.login()
-        except provider.LoginError:
-            client = provider.make_client("", "")
-        except provider.ProviderError:
-            pass   # výpadek: ohlásí ho až samo hledání
+    """Klient pro veřejné hledání na Přehraj.to – jeden pro celou aplikaci.
+
+    Dřív si ho každá stránka titulu i každá dávka ověřování na pozadí vytvářela znovu a pokaždé si
+    dotazem na profil ověřovala přihlášení: dotaz navíc před každým hledáním, a když zrovna neprošel,
+    selhalo s ním celé hledání. Teď se přihlášení ověří jednou a klient se sdílí.
+
+    Hledat jde i bez přihlášení: když přihlášení selže (špatné heslo, výpadek), hledá se nějakou dobu
+    bez něj – jinak by každý dotaz zkoušel přihlášení znovu a hledání by vypadalo jako výpadek."""
+    settings = api._settings()
+    key = (settings.get("username") or "", settings.get("password") or "", api._STATE.get("dir"),
+           id(provider.make_client))
+    with _SEARCH_LOCK:
+        client = _SEARCH["client"] if _SEARCH["key"] == key and _SEARCH["until"] > time.time() else None
+        if client is None:
+            client, keep = api._client(allow_anonymous=True), 24 * 3600
+            if client.has_credentials:
+                try:
+                    client.login()
+                except provider.ProviderError:
+                    client, keep = provider.make_client("", ""), ANONYMOUS_FOR
+            _SEARCH.update(key=key, client=client, until=time.time() + keep)
     client.request_timeout = timeout
     client.request_retries = 0
     return client
@@ -985,7 +1000,7 @@ def _verify_best(versions, state):
         if not best or best["saved"] or best["video"].get("real", {}).get("checked"):
             break
         try:
-            client = client or api._client(allow_anonymous=True)
+            client = client or _search_client()
             best["video"]["real"] = api.real_fetch(client, best["video"]["id"])
         except (api.ApiError, provider.ProviderError):
             break
