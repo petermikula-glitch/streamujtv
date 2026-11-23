@@ -460,16 +460,20 @@ class SectionFragment : RowsSupportFragment() {
         waiting[key] = mutableListOf(done)
         Api.call(call, params) { result ->
             val cards = Card.list(result.data?.optJSONArray("items"))
+            val seconds = result.data?.optInt("refresh") ?: 0
             fetchedAt[key] = android.os.SystemClock.elapsedRealtime()
-            if (cards.isEmpty()) {
-                failed.add(key)
-            } else {
+            if (cards.isNotEmpty()) {
                 failed.remove(key)
                 remembered[key] = cards
+            } else if (seconds > 0) {
+                // tituly řady se teprve ověřují (ukazují se jen ty, které opravdu jsou k mání):
+                // řada zatím zůstává jako obrysy karet, není to chyba
+                failed.remove(key)
+            } else {
+                failed.add(key)
             }
             waiting.remove(key)?.forEach { it() }
             // řada, jejíž tituly se ještě ověřují na pozadí, si za chvíli řekne o čerstvý stav
-            val seconds = result.data?.optInt("refresh") ?: 0
             if (seconds > 0) later.postDelayed({ if (isAdded) fetch(key, call, params) }, seconds * 1000L)
         }
     }

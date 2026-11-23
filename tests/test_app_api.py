@@ -26,6 +26,8 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(app_api, "MIN_QUALITY_DEFAULT", "")
     app_api.app_discover._VERIFY.update(queue=[], active=set(), thread=None, failed={}, hold=0)
     monkeypatch.setattr(app_api.app_discover, "SEARCH_RETRY_WAIT", 0)   # druhý pokus po dočasné chybě bez čekání
+    monkeypatch.setattr(app_api.app_discover, "PACE_FASTEST", 0)        # ověřování na pozadí bez rozestupů
+    app_api.app_discover._PACE.update(interval=0, next=0)
     service = FakeService()
     monkeypatch.setattr(ivysilani.urllib.request, "build_opener", lambda *handlers: service)
     monkeypatch.setattr(app_api.provider, "make_client",
@@ -2249,7 +2251,7 @@ def test_discover_offers_only_titles_available_on_prehrajto_or_ivysilani(api, mo
 
     series = api("discover", kind="tv", category="popular")                  # seriál, který je jen v iVysílání
     assert _titles(series["items"]) == ["Filtr", "Vyprávěj"] and series["items"][1]["badges"] == ["iVysílání"]
-    assert ("Vyprávěj S01E01", 1) in asked                                   # u seriálu se hledá první díl
+    assert ("Vyprávěj", 1) in asked and ("Vyprávěj S01E01", 1) not in asked   # seriál se hledá jako celek, ne jeden díl
     page = api("discover_title", **series["items"][1]["target"]["params"])
     assert page["actions"][0] == {"title": "Díly v iVysílání", "subtitle": "Česká televize", "target": {
         "type": "list", "call": "ivys_show", "params": {"id": "12"}, "title": "Vyprávěj"}}
@@ -2270,7 +2272,7 @@ def test_discover_offers_only_titles_available_on_prehrajto_or_ivysilani(api, mo
     assert "error" in empty or _titles(empty["items"]) == ["Filtr"]
 
 
-def test_titles_that_cannot_be_verified_stay_in_the_list(api, monkeypatch):
+def test_titles_that_cannot_be_verified_are_not_shown_and_the_list_says_so(api, monkeypatch):
     api("settings_set", tmdb_key="k" * 32)
     films = [{"id": 11, "title": "Pelíšky", "release_date": "1999-04-08"}]
     more = [{"id": 12, "title": "Kolja", "release_date": "1996-05-15"},
@@ -2282,10 +2284,11 @@ def test_titles_that_cannot_be_verified_stay_in_the_list(api, monkeypatch):
         raise app_api.provider.ProviderError("výpadek")
 
     monkeypatch.setattr(app_api.provider, "search_catalog", broken)
-    listing = api("discover", kind="movie", category="popular")["items"]     # hledání nejde: titul zůstane, bez štítku
-    assert _titles(listing) == ["Filtr", "Pelíšky"] and "badges" not in listing[1]
+    listing = api("discover", kind="movie", category="popular")              # hledání nejde: neověřený titul se neukáže
+    assert _titles(listing["items"]) == ["Filtr"] and "nepodařilo ověřit" in listing["status"]
+    assert "refresh" not in listing                                          # a obrazovka se netočí dokola
     asked = _catalogue_search(monkeypatch, {})
-    assert len(api("discover", kind="movie", category="popular")["items"]) == 2   # chvíli se služba nezkouší
+    assert len(api("discover", kind="movie", category="popular")["items"]) == 1   # chvíli se služba nezkouší
     assert asked == []
     app_api.app_discover._PAUSED.clear()                                     # po pauze se titul ověří
     assert _titles(api("discover", kind="movie", category="popular")["items"]) == ["Filtr"]
@@ -2385,8 +2388,9 @@ def test_search_survives_a_wrong_password_and_partial_failures_are_not_remembere
     monkeypatch.setattr(app_api.provider, "search_catalog", search_catalog)
     listing = api("discover", kind="movie", category="popular")["items"]
     assert len(logins) == 1 and not any(logged for _query, logged in asked)  # jedno přihlášení, pak bez účtu
-    assert _titles(listing) == ["Filtr", "Pelíšky", "Kolja"]                 # Kolja: „nevím“, ne „není tam“
-    assert listing[1]["badges"] == ["Přehraj.to"] and "badges" not in listing[2]
+    assert _titles(listing) == ["Filtr", "Pelíšky"] and listing[1]["badges"] == ["Přehraj.to"]
+    with app_api._library() as lib:                                          # Kolja: „nevím“, ne „není tam“ –
+        assert "movie:12" not in app_api.app_discover._known(lib, "movie", [11, 12])   # nic se o něm nezapsalo
 
 
 def test_available_only_list_keeps_looking_and_missing_series_favourite_says_so(api, monkeypatch):
@@ -2470,12 +2474,12 @@ def test_availability_is_verified_in_the_background_while_the_list_is_shown(api,
         return ([_web(32, "Pelisky.1999.CZ.1080p", 7000)] if query == "Pelíšky 1999" else []), ""
 
     monkeypatch.setattr(app_api.provider, "search_catalog", search_catalog)
-    first = api("discover", kind="movie", category="popular")                # výpis je hned, nic nečeká
-    assert _titles(first["items"]) == ["Filtr", "Pelíšky", "Kolja"] and asked == []
-    assert [card["badges"] for card in first["items"][1:]] == [["Ověřuji…"], ["Ověřuji…"]]
-    assert first["refresh"] == 2 and first["status"].endswith("zbývá 2")
+    first = api("discover", kind="movie", category="popular")                # výpis je hned, nic nečeká;
+    assert _titles(first["items"]) == ["Filtr"] and asked == []              # neověřené tituly v něm ale nejsou
+    assert first["refresh"] == 2 and first["status"].endswith("zbývá ověřit 2")
+    assert first["next"] is None                                             # a dál se nejde, dokud není jasno
     row = api("discover_row", kind="movie", category="popular")              # řada na hlavní obrazovce stejně
-    assert row["refresh"] == 2 and len(row["items"]) == 3
+    assert row["refresh"] == 2 and row["items"] == []
     thread = discover._VERIFY["thread"]
     release.set()
     thread.join(10)
@@ -2495,8 +2499,8 @@ def test_availability_is_verified_in_the_background_while_the_list_is_shown(api,
     assert waiting["refresh"] == 2
     (discover._VERIFY["thread"] or thread).join(10)                          # mohlo už doběhnout
     settled = api("discover", kind="movie", category="top_rated")
-    assert _titles(settled["items"]) == ["Filtr", "Samotáři"] and "refresh" not in settled
-    assert "badges" not in settled["items"][1]
+    assert _titles(settled["items"]) == ["Filtr"] and "refresh" not in settled
+    assert "nepodařilo ověřit" in settled["status"]
 
 
 def _stream_pages(monkeypatch, offered, account=True):
@@ -2756,3 +2760,94 @@ def test_ratings_and_posters_fill_in_by_themselves(api, monkeypatch):
     assert api("quick_sync") == {"new": 0, "skipped": "account", "refresh": True} and len(asked) == 2
     assert api("quick_sync") == {"new": 0, "skipped": "account"} and len(asked) == 2   # hotovo: už se neptá
     assert "samo" in _section(api, "tools")["Nástroje"][3]["subtitle"]
+
+
+def test_listing_fills_step_by_step_and_does_not_run_ahead(api, monkeypatch):
+    # Ve výpisu je jen to, co se už ověřilo; dokud se ověřuje první stránka, další se ani nenačítají.
+    discover = app_api.app_discover
+    monkeypatch.setattr(discover, "BACKGROUND", True)
+    api("settings_set", tmdb_key="k" * 32)
+    first = [{"id": 11, "title": "Pelíšky", "release_date": "1999-04-08"},
+             {"id": 12, "title": "Kolja", "release_date": "1996-05-15"}]
+    second = [{"id": 13, "title": "Samotáři", "release_date": "2000-04-20"}]
+    pages = []
+
+    def fetch(self, path, timeout, params):
+        if path != "/movie/popular":
+            raise app_api.TmdbError("TMDB: HTTP 404")
+        pages.append(params.get("page"))
+        return {"results": first if params.get("page") in (None, 1) else second, "total_pages": 2}
+
+    monkeypatch.setattr(app_api.Tmdb, "_fetch", fetch)
+    _catalogue_search(monkeypatch, {"Pelíšky 1999": [_web(32, "Pelisky.1999.CZ.1080p", 7000)],
+                                    "Samotáři 2000": [_web(33, "Samotari.2000.CZ.1080p", 7000)]})
+    monkeypatch.setattr(discover, "_ivys_match", lambda kind, names, year: "")
+    listing = api("discover", kind="movie", category="popular")
+    assert _titles(listing["items"]) == ["Filtr"] and listing["next"] is None and listing["refresh"] == 2
+    assert len(pages) == 1                                                   # druhá stránka TMDB se nenačetla
+    thread = discover._VERIFY["thread"]
+    if thread:
+        thread.join(10)
+    listing = api("discover", kind="movie", category="popular")              # první stránka je ověřená: jde se dál
+    assert _titles(listing["items"]) == ["Filtr", "Pelíšky"] and listing["refresh"] == 2
+    thread = discover._VERIFY["thread"]
+    if thread:
+        thread.join(10)
+    done = api("discover", kind="movie", category="popular")
+    assert _titles(done["items"]) == ["Filtr", "Pelíšky", "Samotáři"] and "refresh" not in done
+
+
+def test_missing_titles_are_rechecked_sooner_when_they_are_new(api, monkeypatch):
+    discover = app_api.app_discover
+    year = __import__("time").localtime().tm_year
+    assert discover._missing_ttl(year) == discover._missing_ttl(year - 1) == discover.MISSING_FRESH
+    assert discover._missing_ttl(year - 3) == discover.MISSING_TTL
+    assert discover._missing_ttl(year - 20) == discover.MISSING_OLD
+    discover._remember_availability("movie", 21, 0, "", year)                # letošní film, nenalezený
+    discover._remember_availability("movie", 22, 0, "", 1990)                # starý film, nenalezený
+    now = __import__("time").time()
+    monkeypatch.setattr(discover.time, "time", lambda: now + 24 * 3600)      # o den později
+    with app_api._library() as lib:
+        known = discover._known(lib, "movie", [21, 22])
+    assert "movie:21" not in known and known["movie:22"] == {"n": 0, "iv": ""}   # novinka se ověří znovu, starý film ne
+
+
+def test_title_is_found_under_its_slovak_name_too(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    film = {"id": 31, "title": "Ledové království", "original_title": "Frozen", "release_date": "2013-11-27"}
+    names = {"translations": {"translations": [
+        {"iso_639_1": "sk", "data": {"title": "Ľadové kráľovstvo"}}, {"iso_639_1": "de", "data": {"title": "Die Eiskönigin"}},
+        {"iso_639_1": "cs", "data": {"title": "Ledové království"}}]},
+        "alternative_titles": {"titles": [{"iso_3166_1": "CZ", "title": "Frozen: Ledové království"},
+                                          {"iso_3166_1": "US", "title": "Frozen 3D"}]}}
+    _fake_tmdb(monkeypatch, {"/movie/popular": {"results": [film], "total_pages": 1}, "/movie/31": names})
+    asked = _catalogue_search(monkeypatch, {"Ľadové kráľovstvo 2013": [_web(51, "Ladove kralovstvo 2013 SK dabing 1080p", 6000)]})
+    listing = api("discover", kind="movie", category="popular")["items"]
+    assert _titles(listing) == ["Filtr", "Ledové království"] and listing[1]["badges"] == ["Přehraj.to"]
+    assert [query for query, _page in asked] == ["Ledové království 2013", "Ledové království", "Frozen 2013",
+                                                 "Ľadové kráľovstvo 2013"]   # další názvy až když první nic nenajdou
+    page = api("discover_title", **listing[1]["target"]["params"])           # i stránka titulu ho pod ním najde
+    assert page["actions"][0]["title"] == "Přehrát" and page["rows"][0]["items"][0]["title"].startswith("SK dabing")
+
+
+def test_episode_is_searched_in_the_1x05_form_too(api, monkeypatch):
+    with app_api._library() as lib:
+        state = app_api._state(lib)
+    asked = _catalogue_search(monkeypatch, {"Archa 1x05": [_web(61, "Archa 1x05 CZ dabing", 2700)]})
+    versions = app_api.app_discover._find_versions(["Archa"], 0, (1, 5), state)
+    assert [query for query, _page in asked] == ["Archa S01E05", "Archa 1x05"] and len(versions) == 1
+
+
+def test_background_checks_slow_down_when_the_site_pushes_back():
+    discover = app_api.app_discover
+    discover._PACE.update(interval=0.25, next=0)
+    discover._pace_result(True)
+    discover._pace_result(True)
+    assert discover._PACE["interval"] == 1.0                                 # po odmítnutí se zpomalí
+    for _ in range(60):
+        discover._pace_result(False)
+    assert discover._PACE["interval"] == discover.PACE_FASTEST or discover._PACE["interval"] <= 0.25
+    discover._PACE.update(interval=discover.PACE_SLOWEST, next=0)
+    discover._pace_result(True)
+    assert discover._PACE["interval"] == discover.PACE_SLOWEST               # ale ne donekonečna
+    discover._PACE.update(interval=0, next=0)

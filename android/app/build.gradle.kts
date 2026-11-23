@@ -25,8 +25,8 @@ android {
         applicationId = "cz.petermikula.mojevidea"
         minSdk = 24
         targetSdk = 35
-        versionCode = 20
-        versionName = "0.16.0"
+        versionCode = 21
+        versionName = "0.17.0"
         ndk {
             // 32bitový i 64bitový Android (řada Android TV boxů má 32bitový systém)
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")

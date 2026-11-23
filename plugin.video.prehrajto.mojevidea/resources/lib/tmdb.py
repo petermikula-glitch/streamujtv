@@ -188,6 +188,24 @@ class Tmdb(object):
         return list(dict.fromkeys(entry["title"].strip() for entry in alternatives
                                   if entry.get("iso_3166_1") in ("CZ", "SK") and entry.get("title", "").strip()))
 
+    def local_titles(self, kind, tmdb_id):
+        """Jak se titul jmenuje česky a slovensky: přeložené názvy a alternativní názvy pro CZ a SK.
+
+        Soubory na Přehraj.to bývají pojmenované i slovensky nebo starším distribučním názvem; pod
+        jedním názvem by se takový titul nenašel. Jeden dotaz na TMDB (jde přes mezipaměť)."""
+        kind = "tv" if kind == "tv" else "movie"
+        data = self._get("/%s/%d" % (kind, int(tmdb_id)), append_to_response="translations,alternative_titles")
+        names = []
+        for entry in (data.get("translations") or {}).get("translations") or []:
+            if entry.get("iso_639_1") in ("cs", "sk"):
+                fields = entry.get("data") or {}
+                names.append((fields.get("title") or fields.get("name") or "").strip())
+        alternatives = data.get("alternative_titles") or {}
+        for entry in alternatives.get("titles") or alternatives.get("results") or []:
+            if entry.get("iso_3166_1") in ("CZ", "SK"):
+                names.append((entry.get("title") or "").strip())
+        return list(dict.fromkeys(name for name in names if name))
+
     def search_people(self, query, page=1):
         data = self._get("/search/person", query=query, page=page, include_adult="false")
         people = [item for item in data.get("results") or [] if item.get("id") and item.get("name")]

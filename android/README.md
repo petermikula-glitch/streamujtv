@@ -239,6 +239,18 @@ Díl se nikdy nepřeskočí potichu: chybí-li v katalogu bezprostředně násle
 na Přehraj.to, a teprve když tam není, nabídne se pozdější díl z katalogu – s poznámkou, který chybí,
 a bez samočinného spuštění. Zapamatovaná adresa souboru platí jen pro předvolbu kvality, se kterou
 vznikla; po změně předvolby se varianta vybere znovu.
+**Jen to, co je k mání** (`_collect`, `_check_available`, `_verify_loop` v `app_discover.py`): výpisy Objevuj
+ukazují jen tituly, o kterých se už ví, že jsou na Přehraj.to nebo v iVysílání. Neověřený titul se neukáže:
+ověří se na pozadí, obrazovka se po `VERIFY_REFRESH` sekundách zeptá znovu a výpis se tak plní postupně
+(stavový řádek říká, kolik zbývá). Dál než na stránku TMDB, která se ještě ověřuje, se nejde. Co se ověřit
+nepodařilo (služba neodpovídá), se neukáže a výpis to napíše. Ve Filtru jde zapnout Všechny tituly.
+Ověřování: u filmu dotazy „název rok“, „název“ a totéž pod původním názvem; když se nenajde nic, ještě
+slovenský a další české názvy z TMDB (`Tmdb.local_titles`, i na stránce titulu a při přehrání). Seriál se
+ověřuje jako celek (`series=True`: vyhoví kterýkoli jeho díl), díl se hledá jako „S01E05“ i „1x05“.
+Dotazy na pozadí drží rozestup (`_pace`, nejvýš asi čtyři za sekundu) a po odmítnutí zpomalí. Výsledek se
+pamatuje (`avail:<druh>:<číslo>`): nalezený 14 dní, nenalezený podle stáří titulu – letošní a loňský 12 hodin,
+starší pěti let 10 dní, jinak 2 dny (`_missing_ttl`).
+
 **Hodnocení a plakáty** se doplňují samy (`_auto_enrich`, volá se z `quick_sync` po otevření aplikace, i bez
 přihlášení k Přehraj.to): nové tituly hned, ty, u kterých doplnění selhalo, znovu po šesti hodinách
 a nenalezené po týdnu; jedno kolo nejvýš `AUTO_ENRICH_BATCH` titulů. Když se něco doplní, obrazovka se
