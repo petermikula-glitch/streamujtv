@@ -64,6 +64,7 @@ class ListFragment : VerticalGridSupportFragment() {
     private var generation = 0
     private var reloadWanted = false  // obnovení, které přišlo během načítání další stránky
     private var emptyBatches = 0  // kolik dávek po sobě nepřineslo žádný titul (výpis „jen dostupné“)
+    private var pagesLoaded = 0   // kolik stránek výpisu je načteno (obnova jich načte zase tolik)
     private var status: TextView? = null  // řádek dole: co se právě děje na pozadí (ověřování dostupnosti)
     private var backdrop: Backdrop? = null
 
@@ -127,9 +128,11 @@ class ListFragment : VerticalGridSupportFragment() {
         }
         loading = true
         val ticket = ++generation
-        // obnovovaný výpis má mít zase tolik karet, kolik jich uživatel načetl: jinak by po akci
-        // z nabídky karty nebo po návratu z přehrávače spadl na první stránku a výběr s ním
-        val wanted = if (loaded) cards.size() else 0
+        // Obnovovaný výpis se načte ve stejném rozsahu (tolik stránek, kolik jich uživatel načetl): jinak
+        // by po akci z nabídky karty nebo po návratu z přehrávače spadl na první stránku a výběr s ním.
+        // Počítají se stránky, ne karty: z výpisu „jen dostupné“ karty při ověřování ubývají, a kdyby
+        // se dorovnával jejich počet, tahal by si výpis při každé obnově další a další stránky.
+        val wanted = if (loaded) pagesLoaded.coerceAtLeast(1) else 1
         if (!loaded) {
             // místo textu „Načítám…“ obrysy karet v budoucím tvaru
             showMessage("")
@@ -161,11 +164,11 @@ class ListFragment : VerticalGridSupportFragment() {
         }
     }
 
-    /** Donačte další stránky obnovovaného výpisu, dokud nemá tolik karet jako předtím, a pak ho zobrazí. */
+    /** Donačte další stránky obnovovaného výpisu, dokud jich nemá tolik jako předtím, a pak ho zobrazí. */
     private fun gather(first: JSONObject, list: ArrayList<Card>, following: JSONObject?, wanted: Int, ticket: Int, pages: Int) {
-        if (following == null || list.size >= wanted || pages >= 12) {
+        if (following == null || pages >= wanted || pages >= 12) {
             loading = false
-            fill(first, list, following)
+            fill(first, list, following, pages)
             return
         }
         Api.call(following.optString("call"), following.optJSONObject("params") ?: JSONObject()) { result ->
@@ -177,7 +180,7 @@ class ListFragment : VerticalGridSupportFragment() {
             val data = result.data
             if (data == null) {
                 loading = false
-                fill(first, list, following)  // co se načetlo, to se zobrazí; zbytek se dotáhne posunem
+                fill(first, list, following, pages)  // co se načetlo, to se zobrazí; zbytek se dotáhne posunem
                 return@call
             }
             list.addAll(Card.list(data.optJSONArray("items")))
@@ -194,8 +197,10 @@ class ListFragment : VerticalGridSupportFragment() {
         data: JSONObject,
         list: List<Card> = Card.list(data.optJSONArray("items")),
         following: JSONObject? = data.optJSONObject("next"),
+        pages: Int = 1,
     ) {
         loaded = true
+        pagesLoaded = pages
         if (list.isNotEmpty() && CardPresenter.posterShape(list) != presenter.poster) {
             handler.removeCallbacks(refresh)
             (activity as? ListActivity)?.show(!presenter.poster, data, params)
@@ -382,6 +387,7 @@ class ListFragment : VerticalGridSupportFragment() {
             }
             val items = Card.list(data.optJSONArray("items"))
             cards.addAll(cards.size(), items)
+            pagesLoaded++
             next = data.optJSONObject("next")
             emptyBatches = if (items.isEmpty()) emptyBatches + 1 else 0
             val seconds = data.optInt("refresh")
