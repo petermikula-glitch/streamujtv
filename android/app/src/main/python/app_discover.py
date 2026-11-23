@@ -30,6 +30,8 @@ CHECK_WORKERS = 4                # kolik titulů se ověřuje souběžně
 ONLY_ENOUGH = 12                 # výpis „jen dostupné“: tolik titulů stačí na jedno načtení…
 ONLY_PAGES = 3                   # …a víc stránek TMDB kvůli nim najednou neprojde,
 ONLY_SECONDS = 12                # ani když ověřování trvá déle než tolik sekund
+SEARCH_RETRY_WAIT = 2.5          # po dočasné chybě hledání se tolik sekund počká a zkusí se to jednou znovu
+SEARCH_HOLD = 20                 # tolik sekund po hledání, na které někdo čeká, ověřování na pozadí nezačíná další dávku
 CHECK_PAUSE = 120                # služba, která neodpovídá, se tolik sekund nezkouší (výpis na ni nečeká)
 CHECK_WAIT = 20                  # déle výpis nečeká, až doběhne jiné ověřování
 BACKGROUND = True                # výpis na ověřování nečeká: tituly ukáže hned a ověřuje je na pozadí
@@ -37,7 +39,7 @@ VERIFY_QUEUE = 120               # víc titulů na ověření nečeká (starší
 VERIFY_REFRESH = 2               # po kolika sekundách si má obrazovka říct o čerstvý stav
 # Ověřování na pozadí: fronta titulů (naposledy otevřený výpis první), právě ověřované a ty, které se
 # ověřit nepodařilo (chvíli se nezkoušejí, aby se výpis neobnovoval donekonečna).
-_VERIFY = {"queue": [], "active": set(), "thread": None, "failed": {}}
+_VERIFY = {"queue": [], "active": set(), "thread": None, "failed": {}, "hold": 0}
 _VERIFY_LOCK = threading.Lock()
 _PAUSED = {}                     # {"prehrajto" | "ivysilani": do kdy se nezkouší}
 _CHECK_LOCK = threading.Lock()   # ověřování běží nejvýš jedno (řady hlavní obrazovky se nepředbíhají)
@@ -445,6 +447,12 @@ def _verify_later(kind, items, state):
 def _verify_loop(state):
     """Vlákno ověřování: bere z fronty po pár titulech stejného druhu, dokud není prázdná."""
     while True:
+        # Dokud běží hledání, na které někdo čeká, další dávka nezačne: obojí naráz by si navzájem
+        # bralo dotazy, které Přehraj.to v krátké době povolí.
+        waited = 0
+        while _VERIFY.get("hold", 0) > time.time() and waited < SEARCH_HOLD * 2:
+            time.sleep(0.5)
+            waited += 0.5
         with _VERIFY_LOCK:
             if not _VERIFY["queue"]:
                 _VERIFY["thread"] = None
@@ -829,6 +837,34 @@ def _good_enough(found, prefs, names):
     return False
 
 
+SEARCH_FAILED = ("Hledání na Přehraj.to se teď nezdařilo%s. Neznamená to, že tam titul není – zkuste to "
+                 "za chvíli znovu.")
+
+
+def _failure_reason(text):
+    """Proč hledání selhalo, srozumitelně (technický detail je v Diagnostice)."""
+    lowered = (text or "").lower()
+    if "429" in lowered or "omezuje" in lowered:
+        return ": Přehraj.to dočasně omezuje počet dotazů"
+    if "timed out" in lowered or "timeout" in lowered or "nedostupné" in lowered or "nelze načíst" in lowered:
+        return ": Přehraj.to neodpovídá nebo je pomalé připojení"
+    if "http 5" in lowered:
+        return ": Přehraj.to má výpadek"
+    return ""
+
+
+def _search_page(client, query, page, cursor, retry=False):
+    """Stránka hledání. Dočasnou chybu (omezení dotazů, vypršení času) zkusí po chvíli ještě jednou,
+    když na výsledek čeká člověk – jinak by stránka titulu hlásila neúspěch kvůli jedinému zaváhání."""
+    try:
+        return provider.search_catalog(client, query, page, cursor)
+    except provider.TemporaryError:
+        if not retry:
+            raise
+        time.sleep(SEARCH_RETRY_WAIT)
+        return provider.search_catalog(client, query, page, cursor)
+
+
 def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", client=None, queries_max=4,
                    strict=False, thorough=True):
     """Verze titulu (nebo dílu) na Přehraj.to, vyčištěné a seřazené podle předvoleb.
@@ -855,14 +891,18 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
                 queries.append(query)
     queries = queries[:queries_max]
     prefs, bad = state.get("prefs") or api._prefs(), state.get("bad", ())
-    found, failed = {}, 0
+    found, failed, reason = {}, 0, ""
+    if not strict:
+        # Hledání, na které člověk čeká (stránka titulu, přehrání), má přednost před ověřováním na pozadí.
+        _VERIFY["hold"] = time.time() + SEARCH_HOLD
     for query in queries:
         cursor = ""
         for page in range(1, pages + 1):
             try:
-                results, cursor = provider.search_catalog(client, query, page, cursor)
-            except provider.ProviderError:
+                results, cursor = _search_page(client, query, page, cursor, retry=not strict)
+            except provider.ProviderError as error:
                 failed += page == 1
+                reason = str(error)
                 break
             for result in results:
                 parsed = nameparser.parse(result["title"])
@@ -892,7 +932,9 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
                                "quality": video.get("quality") or ""}, nameparser.parse(video["raw_title"]))
     # ``strict`` (ověřování dostupnosti): i jediný nepovedený dotaz znamená „nevím“, ne „není tam“
     if not found and queries and (failed == len(queries) or (strict and failed)):
-        raise api.ApiError("Hledání na Přehraj.to se nezdařilo. Zkuste to znovu.")
+        if not strict:
+            api._remember_error("hledání na Přehraj.to", reason)   # důvod je vidět v Diagnostice
+        raise api.ApiError(SEARCH_FAILED % _failure_reason(reason))
     versions, seen = [], set()
     for result, parsed in found.values():
         video = dict(parsed, id=result["id"], raw_title=result["title"], thumb=result.get("thumb", ""),

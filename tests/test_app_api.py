@@ -24,7 +24,8 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(app_api.app_discover, "BACKGROUND", False)
     # nejnižší nabízená kvalita je v aplikaci zapnutá (Full HD a vyšší); testy ji zapínají jen tam, kde o ni jde
     monkeypatch.setattr(app_api, "MIN_QUALITY_DEFAULT", "")
-    app_api.app_discover._VERIFY.update(queue=[], active=set(), thread=None, failed={})
+    app_api.app_discover._VERIFY.update(queue=[], active=set(), thread=None, failed={}, hold=0)
+    monkeypatch.setattr(app_api.app_discover, "SEARCH_RETRY_WAIT", 0)   # druhý pokus po dočasné chybě bez čekání
     service = FakeService()
     monkeypatch.setattr(ivysilani.urllib.request, "build_opener", lambda *handlers: service)
     monkeypatch.setattr(app_api.provider, "make_client",
@@ -746,7 +747,8 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
 
     monkeypatch.setattr(app_api.provider, "search_catalog", broken)
     failed = api("discover_title", **FILM)                                   # hledání selhalo: stránka není slepá ulička
-    assert failed["detail"]["title"] == "Pelíšky" and failed["detail"]["plot"].startswith("Hledání na Přehraj.to se nezdařilo")
+    assert failed["detail"]["title"] == "Pelíšky" and failed["detail"]["plot"].startswith(
+        "Hledání na Přehraj.to se teď nezdařilo: Přehraj.to má výpadek. Neznamená to, že tam titul není")
     assert "Rodinná komedie." in failed["detail"]["plot"] and failed["rows"] == []
     assert [(action["title"], action["target"]["type"]) for action in failed["actions"]] == [
         ("Zkusit znovu", "refresh"), ("Odebrat z oblíbených", "command"), ("Hledat ručně", "search"),
@@ -2644,3 +2646,32 @@ def test_bigger_file_wins_among_versions_labelled_just_hd(api, monkeypatch):
     assert order()[0] == 61                            # úsporná předvolba: nejmenší soubor
     api("settings_set", prefer_quality="best", min_quality="")
     assert order() == [65, 62, 63, 61, 64]
+
+
+def test_title_page_search_retries_a_temporary_failure_and_says_why(api, monkeypatch):
+    # Jedno zaváhání Přehraj.to (omezení dotazů, vypršení času) nesmí stránku titulu shodit do „nezdařilo se“.
+    api("settings_set", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    found = [_web(41, "Pelisky 1999 CZ 1080p", 7200, "6 GB")]
+    calls = []
+
+    def flaky(client, query, page, cursor):
+        calls.append(query)
+        if len(calls) == 1:
+            raise app_api.provider.TemporaryError("Přehraj.to dočasně omezuje dotazy (HTTP 429), zkus to za chvíli")
+        return found, ""
+
+    monkeypatch.setattr(app_api.provider, "search_catalog", flaky)
+    page = api("discover_title", **FILM)
+    assert calls == ["Pelíšky 1999", "Pelíšky 1999"] and page["actions"][0]["title"] == "Přehrát"   # druhý pokus vyšel
+    assert app_api.app_discover._VERIFY["hold"] > 0          # ověřování na pozadí mezitím nezačíná další dávku
+
+    def limited(client, query, page, cursor):
+        raise app_api.provider.TemporaryError("Přehraj.to dočasně omezuje dotazy (HTTP 429), zkus to za chvíli")
+
+    monkeypatch.setattr(app_api.provider, "search_catalog", limited)
+    failed = api("discover_title", **FILM)
+    assert failed["detail"]["plot"].startswith(
+        "Hledání na Přehraj.to se teď nezdařilo: Přehraj.to dočasně omezuje počet dotazů. Neznamená to, že tam titul není")
+    assert failed["actions"][0]["title"] == "Zkusit znovu"
+    assert "HTTP 429" in str(api("diagnostics")["errors"][0])                   # technický důvod je v Diagnostice
