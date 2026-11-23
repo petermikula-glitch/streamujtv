@@ -51,6 +51,7 @@ class ListFragment : VerticalGridSupportFragment() {
     var initial: JSONObject? = null
     private val presenter = CardPresenter(false) { card -> Navigator.menu(requireActivity(), card) { reload() } }
     private var emptyText = "Nic tu není."
+    private var verifying = false   // tituly výpisu se právě ověřují na pozadí (výpis se sám obnoví)
     private var emptyArt = EmptyArt.NOTHING
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val refresh = Runnable { if (isResumed) reload(quiet = true) }
@@ -213,6 +214,7 @@ class ListFragment : VerticalGridSupportFragment() {
         handler.removeCallbacks(refresh)
         val seconds = data.optInt("refresh")
         if (seconds > 0) handler.postDelayed(refresh, seconds * 1000L)
+        verifying = seconds > 0 && data.optString("status").isNotEmpty()
         val same = cards.size() == list.size &&
             (0 until cards.size()).all { (cards.get(it) as? Card)?.key == list[it].key }
         // Výpis z Objevuj se při ověřování dostupnosti obnovuje sám a karty z něj ubývají: mění se na
@@ -262,7 +264,10 @@ class ListFragment : VerticalGridSupportFragment() {
             return
         }
         val empty = contentCount() == 0
-        if (empty && next != null && emptyBatches < 5) {
+        if (empty && verifying) {
+            // Tituly se teprve ověřují (řádek dole říká, kolik zbývá): „nic tu není“ by teď nebyla pravda.
+            showMessage("")
+        } else if (empty && next != null && emptyBatches < 5) {
             showMessage("Hledám další tituly, které jsou k mání…")
             loadNext()
         } else {
@@ -306,8 +311,19 @@ class ListFragment : VerticalGridSupportFragment() {
         }
         val label = message ?: return
         label.text = text
-        EmptyArt.show(label, if (text.isEmpty()) "" else art)
-        (label.parent as? View)?.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+        // ilustrace jen na jinak prázdné obrazovce: vedle karty Filtr by se pod ni nevešla
+        EmptyArt.show(label, if (text.isEmpty() || cards.size() > 0) "" else art)
+        (label.parent as? View)?.let { box ->
+            box.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+            // Když ve výpisu zůstala karta (Filtr), patří zpráva pod ni, ne přes ni: dolů nad stavový řádek.
+            val place = box.layoutParams as? FrameLayout.LayoutParams
+            if (place != null) {
+                val below = cards.size() > 0
+                place.gravity = if (below) Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL else Gravity.CENTER
+                place.bottomMargin = if (below) (72 * resources.displayMetrics.density).toInt() else 0
+                box.layoutParams = place
+            }
+        }
         again?.visibility = if (retry && text.isNotEmpty()) View.VISIBLE else View.GONE
         if (retry && text.isNotEmpty()) again?.requestFocus()
     }
@@ -394,6 +410,7 @@ class ListFragment : VerticalGridSupportFragment() {
             val seconds = data.optInt("refresh")
             if (seconds > 0) {
                 // nově načtená stránka se ještě ověřuje: výpis se za chvíli obnoví celý
+                verifying = data.optString("status").isNotEmpty()
                 showStatus(data.optString("status"))
                 handler.removeCallbacks(refresh)
                 handler.postDelayed(refresh, seconds * 1000L)
