@@ -1514,6 +1514,7 @@ def settings_set(params):
     watched = ("prefer_language", "prefer_quality", "min_quality")
     wanted = tuple(_settings().get(key) for key in watched)
     lowest = _prefs()["minimum"]
+    need = _need_lines(_prefs())
     _change_settings(change)
     if account[1]:
         # Jiná předvolba jazyka nebo kvality: verze, které si uživatel dřív u titulů vybral ručně,
@@ -1521,9 +1522,10 @@ def settings_set(params):
         with _library() as lib, lib.conn:
             lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE ?", (CHOICE_PREFIX + "%",))
     if account[2]:
-        # Jiná nejnižší kvalita: co je „k mání“, se počítá jinak – dostupnost titulů se ověří znovu.
-        with _library() as lib, lib.conn:
-            lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE ?", (app_discover.AVAILABLE_PREFIX + "%",))
+        # Jiná nejnižší kvalita: co je „k mání“, se počítá jinak. Seznam ověřených titulů se kvůli tomu
+        # nemaže – tituly se přeověří na pozadí a do té doby platí, co se o nich ví.
+        app_discover.minimum_changed(need, _need_lines(_prefs()))
+        app_index.restart()
     if account[0]:
         # Jiný účet nebo heslo: uložené přihlášení patřilo tomu předchozímu. Kdyby zůstalo, aplikace
         # by dál pracovala s původním účtem a i špatné heslo by vypadalo jako správné.

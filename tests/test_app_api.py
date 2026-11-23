@@ -27,7 +27,9 @@ def api(tmp_path, monkeypatch):
     app_api.app_discover._VERIFY.update(queue=[], active=set(), thread=None, failed={}, hold=0)
     monkeypatch.setattr(app_api.app_discover, "SEARCH_RETRY_WAIT", 0)   # druhý pokus po dočasné chybě bez čekání
     monkeypatch.setattr(app_api.app_discover, "PACE_FASTEST", 0)        # ověřování na pozadí bez rozestupů
-    app_api.app_discover._PACE.update(interval=0, next=0)
+    monkeypatch.setattr(app_api.app_discover, "GENTLE_PACE", 0)
+    app_api.app_discover._PACE.update(interval=0, next=0, gentle=0)
+    app_api.app_discover._LIMITED.update(until=0.0, wait=0, last=0.0, hits=0)   # Přehraj.to dotazy neomezuje
     service = FakeService()
     monkeypatch.setattr(ivysilani.urllib.request, "build_opener", lambda *handlers: service)
     monkeypatch.setattr(app_api.provider, "make_client",
@@ -1905,22 +1907,52 @@ def test_only_full_hd_and_better_is_offered_when_asked(api, monkeypatch):
     assert app_api.provider.quality_token("FulHD") == "FHD"
 
 
-def test_minimum_quality_is_on_by_default_and_resets_availability(api, monkeypatch):
+def test_minimum_quality_is_on_by_default_and_keeps_what_was_verified(api, monkeypatch):
     monkeypatch.undo()                                                       # výchozí hodnota jako ve skutečné aplikaci
+    discover, prefix = app_api.app_discover, app_api.app_discover.AVAILABLE_PREFIX
+    monkeypatch.setattr(discover, "BACKGROUND", False)                       # (seznam se v testu na pozadí neplní)
     assert api("settings_get")["min_quality"] == "720"                       # HD a vyšší
     # „Jen Full HD“ uložené verzí 0.14.0 (tehdy výchozí) se bere jako nezvolené; nová volba platí
     app_api._change_settings(lambda settings: settings.update(min_quality="1080"))
     assert api("settings_get")["min_quality"] == "720"
-    assert api("settings_set", min_quality="1080")["min_quality"] == "1080"
-    assert api("settings_get")["min_quality"] == "1080"
+    now = int(__import__("time").time())
     with app_api._library() as lib:
-        lib.set_kv(app_api.app_discover.AVAILABLE_PREFIX + "movie:11", "{}")
+        lib.set_kv(prefix + "movie:11", json.dumps({"n": 2, "ts": now, "r": 2, "d": "cz", "q": 2160, "s": 0, "t": "Ve 4K"}))
+        lib.set_kv(prefix + "movie:12", json.dumps({"n": 1, "ts": now, "r": 2, "d": "cz", "q": 720, "s": 0, "f": now}))
+        lib.set_kv(prefix + "movie:13", json.dumps({"n": 0, "ts": now, "r": 2, "ttl": 86400}))
+        lib.set_kv(prefix + "movie:14", json.dumps({"n": 0, "ts": now, "r": 2, "iv": "777", "ttl": 86400}))
         lib.set_kv(app_api.CHOICE_PREFIX + "movie:11", "x")
-    assert api("settings_set", min_quality="")["min_quality"] == ""          # vypnutí platí a pamatuje se
+        app_api.app_index._save({"step": 7, "finished": now})
+
+    def known():
+        with app_api._library() as lib:
+            return discover._known(lib, "movie", [11, 12, 13, 14])
+
+    assert api("settings_set", min_quality="1080")["min_quality"] == "1080"  # přísněji
+    assert api("settings_get")["min_quality"] == "1080"
+    state = known()
+    # Seznam ověřených titulů se nemaže: co vyhovuje, zůstává a jen se ověří znovu; co novému požadavku
+    # podle známé kvality nestačí, se skryje, dokud nové ověření nerozhodne; „není tam“ platí dál.
+    assert state["movie:11"]["n"] == 2 and state["movie:11"]["stale"]
+    assert state["movie:12"]["n"] == 0 and state["movie:12"]["stale"]
+    assert state["movie:13"]["n"] == 0 and not state["movie:13"].get("stale")
+    assert state["movie:14"]["iv"] == "777"
     with app_api._library() as lib:
-        # co je „k mání“, se počítá jinak: dostupnost se ověří znovu a ruční volby verzí se zapomenou
-        assert lib.get_kv(app_api.app_discover.AVAILABLE_PREFIX + "movie:11") is None
-        assert lib.get_kv(app_api.CHOICE_PREFIX + "movie:11") is None
+        assert json.loads(lib.get_kv(prefix + "movie:11"))["t"] == "Ve 4K"   # údaje pro kartu zůstaly
+    index = app_api.app_index._state()
+    assert index["step"] == 0 and "finished" not in index                    # plán se projde znovu od začátku
+    # Titul skrytý nastavením se po novém ověření nepočítá jako „nově na Přehraj.to“.
+    discover._remember_availability("movie", 12, 1, "", 2010, {"d": "cz", "q": 1080, "s": 0})
+    with app_api._library() as lib:
+        assert json.loads(lib.get_kv(prefix + "movie:12"))["f"] == now
+
+    assert api("settings_set", min_quality="")["min_quality"] == ""          # vypnutí platí a pamatuje se
+    state = known()
+    assert state["movie:11"]["n"] == 2 and state["movie:12"]["n"] == 1       # nalezené zůstávají
+    assert "movie:13" not in state                                           # nenalezený může teď vyhovět: neověřený
+    assert state["movie:14"]["iv"] == "777"                                  # co je v iVysílání, se neztratí
+    with app_api._library() as lib:
+        assert lib.get_kv(app_api.CHOICE_PREFIX + "movie:11") is None        # ruční volby verzí se zapomenou
     assert api("settings_get")["min_quality"] == ""
 
 
@@ -2911,17 +2943,105 @@ def test_episode_is_searched_in_the_1x05_form_too(api, monkeypatch):
 
 def test_background_checks_slow_down_when_the_site_pushes_back():
     discover = app_api.app_discover
-    discover._PACE.update(interval=0.25, next=0)
+    discover._PACE.update(interval=discover.PACE_FASTEST, next=0)
     discover._pace_result(True)
     discover._pace_result(True)
-    assert discover._PACE["interval"] == 1.0                                 # po odmítnutí se zpomalí
+    assert discover._PACE["interval"] == discover.PACE_FASTEST * 4           # po odmítnutí se zpomalí
     for _ in range(60):
         discover._pace_result(False)
-    assert discover._PACE["interval"] == discover.PACE_FASTEST or discover._PACE["interval"] <= 0.25
+    assert discover._PACE["interval"] == discover.PACE_FASTEST               # a pozvolna zase zrychlí
     discover._PACE.update(interval=discover.PACE_SLOWEST, next=0)
     discover._pace_result(True)
     assert discover._PACE["interval"] == discover.PACE_SLOWEST               # ale ne donekonečna
     discover._PACE.update(interval=0, next=0)
+
+
+def test_rate_limit_stops_background_checks_but_not_the_person(api, monkeypatch):
+    """HTTP 429: ověřování na pozadí si dá přestávku (při opakování delší) a Přehraj.to mezitím
+    nedostává nic; hledání, na které někdo čeká, se zkouší dál. Co bylo nalezené, zůstává."""
+    discover, index = app_api.app_discover, app_api.app_index
+    api("settings_set", tmdb_key="k" * 32)
+    films = [{"id": 11, "title": "Pelíšky", "release_date": "1999-04-08"},
+             {"id": 12, "title": "Kolja", "release_date": "1996-05-15"}]
+    _fake_tmdb(monkeypatch, {"/movie/popular": {"results": films, "total_pages": 1},
+                             "/tv/popular": {"results": [], "total_pages": 1}})
+    asked = []
+    answer = {"limit": True}
+
+    def search(client, query, page, cursor):
+        asked.append(query)
+        if answer["limit"]:
+            raise app_api.provider.TemporaryError("Přehraj.to dočasně omezuje dotazy (HTTP 429), zkus to za chvíli")
+        return ([_web(1, query + " CZ dabing 1080p", 6000)], "")
+
+    monkeypatch.setattr(app_api.provider, "search_catalog", search)
+    now = [1000000.0]
+    monkeypatch.setattr(discover.time, "time", lambda: now[0])
+    monkeypatch.setattr(index.time, "time", lambda: now[0])
+    monkeypatch.setattr(discover.time, "sleep", lambda seconds: None)
+    assert index.step() == {"done": False, "checked": 2, "failed": True}
+    assert len(asked) <= 2 and index._state()["step"] == 0                   # po odmítnutí se další názvy nezkoušejí
+    assert discover.limited() == discover.LIMIT_WAIT and discover.search_paused() >= discover.LIMIT_WAIT
+    line = next(line for line in api("diagnostics")["lines"] if line["label"] == "Seznam dostupných titulů")
+    assert "omezuje počet dotazů" in line["value"]
+    del asked[:]
+    assert index.step()["failed"] and asked == []                            # během přestávky se neposílá nic
+    listing = api("discover", kind="movie", category="popular")
+    assert asked == [] and "omezuje počet dotazů" in listing["status"]       # a výpis řekne proč
+    # hledání, na které čeká člověk (stránka titulu), se zkusí i tak – a přestávku neprodlouží
+    with app_api._library() as lib:
+        state = app_api._state(lib)
+    with pytest.raises(app_api.ApiError) as failure:
+        discover._find_versions(["Pelíšky"], 1999, None, state)
+    assert asked and "omezuje počet dotazů" in str(failure.value) and discover.limited() == discover.LIMIT_WAIT
+    # po přestávce se pokračuje; další odmítnutí znamená dvakrát delší přestávku
+    discover._PAUSED.clear()
+    now[0] += discover.LIMIT_WAIT + 1
+    assert index.step()["failed"] and discover.limited() == discover.LIMIT_WAIT * 2
+    discover._PAUSED.clear()
+    now[0] += discover.LIMIT_WAIT * 2 + 1
+    answer["limit"] = False
+    assert index.step() == {"done": False, "checked": 2, "failed": False} and index._state()["step"] == 1
+    with app_api._library() as lib:
+        assert discover._known(lib, "movie", [11, 12])["movie:11"]["n"] == 1
+
+
+def test_found_title_survives_misses_that_come_together(api, monkeypatch):
+    """Titul, který na Přehraj.to byl, nevypadne kvůli dvěma neúspěchům krátce po sobě (tentýž výpadek),
+    ani kvůli „nenašlo se“ těsně po tom, co Přehraj.to odmítalo dotazy."""
+    discover = app_api.app_discover
+    now = [2000000.0]
+    monkeypatch.setattr(discover.time, "time", lambda: now[0])
+
+    def entry():
+        with app_api._library() as lib:
+            return json.loads(lib.get_kv(discover.AVAILABLE_PREFIX + "movie:11"))
+
+    discover._remember_availability("movie", 11, 2, "", 1999)                # starý záznam bez souhrnu verzí
+    discover._remember_availability("movie", 11, 0, "", 1999)
+    discover._remember_availability("movie", 11, 0, "", 1999)                # hned znovu: tentýž výpadek
+    assert entry()["n"] == 2 and entry()["miss"] == 1 and entry()["d"] == ""
+    with app_api._library() as lib:
+        assert not discover._known(lib, "movie", [11])["movie:11"].get("stale")   # ověří se až za čas, ne pořád dokola
+    now[0] += discover.MISS_TTL + 1
+    discover._remember_availability("movie", 11, 0, "", 1999)                # s odstupem podruhé: už tam není
+    assert entry()["n"] == 0
+
+    api("settings_set", tmdb_key="k" * 32)
+    discover._remember_availability("movie", 12, 1, "", 1996, {"d": "cz", "q": 1080, "s": 0})
+    now[0] += discover.AVAILABLE_TTL + 1                                     # údaj zestárl: ověří se znovu
+    _catalogue_search(monkeypatch, {})                                       # hledání nic nevrací
+    discover._LIMITED["last"] = now[0] - 60                                  # před minutou Přehraj.to odmítalo dotazy
+    with app_api._library() as lib:
+        state = app_api._state(lib)
+    item = {"id": 12, "title": "Kolja", "release_date": "1996-05-15"}
+    assert discover._check_available("movie", [item], state)["movie:12"]["n"] == 1
+    with app_api._library() as lib:
+        assert "miss" not in json.loads(lib.get_kv(discover.AVAILABLE_PREFIX + "movie:12"))
+    discover._LIMITED["last"] = 0.0
+    discover._check_available("movie", [item], state)
+    with app_api._library() as lib:
+        assert json.loads(lib.get_kv(discover.AVAILABLE_PREFIX + "movie:12"))["miss"] == 1
 
 
 def test_list_of_available_titles_fills_in_the_background(api, monkeypatch):

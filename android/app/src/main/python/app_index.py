@@ -33,7 +33,7 @@ STATE_KEY = "index:state"        # kde se v plánu skončilo a kolik se dnes ov�
 CYCLE_EVERY = 20 * 3600          # celý plán se prochází znovu nejdřív po této době
 DAILY_LIMIT = 3000               # tolik titulů nejvýš se za den ověří na pozadí
 CHUNK = 2                        # tolik titulů najednou…
-GAP = 2.0                        # …a pak tolik sekund pauza: asi titul za sekundu
+GAP = 2.0                        # …a pak tolik sekund pauza; dotazy samy drží rozestup ``discover.GENTLE_PACE``
 START_DELAY = 20                 # s po otevření aplikace, než se začne procházet
 FAILURES_MAX = 3                 # po tolika nepovedených dávkách za sebou se procházení odloží
 FRESH_DAYS = 30                  # jak dlouho je titul „nově na Přehraj.to“
@@ -146,10 +146,10 @@ def step(limit=None):
             batch = batch[:start]
             break
         chunk = batch[start:start + CHUNK]
-        fresh = discover._check_available(kind, chunk, shared)
+        fresh = discover._check_available(kind, chunk, shared, gentle=True)
         checked += len(chunk)
-        if any("%s:%s" % (kind, item["id"]) not in fresh for item in chunk):
-            failed = True                  # služba neodpovídá: nemá cenu pokračovat
+        if discover.search_paused() or any("%s:%s" % (kind, item["id"]) not in fresh for item in chunk):
+            failed = True                  # služba neodpovídá nebo omezuje dotazy: nemá cenu pokračovat
             break
         if start + CHUNK < len(batch):
             time.sleep(GAP)
@@ -158,7 +158,15 @@ def step(limit=None):
         position += 1                      # stránka je hotová
         if position >= len(plan):
             state["finished"] = int(time.time())
-    state["step"] = position
+    # Stav se mezitím mohl změnit (změna nastavení začíná průchod znovu): zapsat jen to, co se tu změnilo.
+    latest = _state()
+    if latest.get("restart") != state.get("restart"):
+        position = int(latest.get("step") or 0)
+    else:
+        latest.update({name: state[name] for name in ("finished", "started") if name in state})
+    latest.update(day=state["day"], count=state["count"], step=position,
+                  pace=round(discover.gentle_pace(recover=bool(checked) and not failed), 2))
+    state = latest
     _save(state)
     return {"done": position >= len(plan) or int(state["count"]) >= DAILY_LIMIT,
             "checked": checked, "failed": failed}
@@ -227,7 +235,9 @@ def harvest(force=False):
             for start in range(0, len(todo), CHUNK):
                 if _CRAWL["stop"]:
                     break
-                discover._check_available(kind, todo[start:start + CHUNK], shared)
+                if discover.search_paused():
+                    break
+                discover._check_available(kind, todo[start:start + CHUNK], shared, gentle=True)
                 if start + CHUNK < len(todo):
                     time.sleep(GAP)
     except (provider.ProviderError, TmdbError, api.ApiError) as error:
@@ -259,12 +269,14 @@ def _loop():
     try:
         time.sleep(START_DELAY)            # start aplikace má přednost: nejdřív ať se načte, co je na obrazovce
         try:
-            if not busy():
+            if not busy() and not discover.search_paused():
                 harvest()                  # nejdřív to, co nabízí samo Přehraj.to
         except Exception as error:         # neznámá podoba stránek nesmí zastavit zbytek
             api._remember_error("nabídka Přehraj.to", error)
         while not _CRAWL["stop"]:
-            if busy():
+            if busy() or discover.search_paused():
+                # Přednost má, co dělá člověk; a když Přehraj.to dotazy odmítá, čeká se, až přestávka
+                # skončí (při opakování je pokaždé delší) – na pozadí se mu mezitím neposílá nic.
                 time.sleep(2)
                 continue
             try:
@@ -274,6 +286,8 @@ def _loop():
                 return
             if result["done"]:
                 return
+            if result["failed"] and discover.limited():
+                continue                   # omezení dotazů není výpadek: po přestávce se pokračuje pomaleji
             failures = failures + 1 if result["failed"] else 0
             if failures >= FAILURES_MAX:
                 return                     # služba neodpovídá: zkusí se to při příštím otevření aplikace
@@ -283,11 +297,23 @@ def _loop():
             _CRAWL["thread"] = None
 
 
+def restart():
+    """Začne plán procházet znovu od začátku (po změně nastavení, která mění, co je „k mání“).
+    Co je ověřené a platí, se přeskočí; ověří se jen tituly, kterých se změna týká."""
+    state = _state()
+    state.update(step=0, restart=int(state.get("restart") or 0) + 1)
+    state.pop("finished", None)
+    _save(state)
+    return start()
+
+
 def start():
     """Spustí procházení na pozadí, pokud neběží a je co procházet. Volá se po otevření aplikace."""
     if not api._tmdb().enabled or not discover.BACKGROUND:
         return False
     state = _state()
+    if state.get("pace"):
+        discover.gentle_pace(max(float(state["pace"]), discover.gentle_pace()))   # tempo naučené minule
     if state.get("day") == _today() and int(state.get("count") or 0) >= DAILY_LIMIT:
         return False
     with _LOCK:
@@ -336,9 +362,12 @@ def summary_text():
         total = len(_plan())
     except Exception:   # bez TMDB se plán nesestaví; stav jde ukázat i tak
         total = 0
-    return "ověřeno %d titulů, k mání %d; dnes ověřeno %d; výpisů projito %d z %d; celý průchod dokončen: %s%s" % (
+    wait = discover.limited()
+    limit = "; Přehraj.to teď omezuje počet dotazů – pokračuje se asi za %s" % discover._duration_text(wait + 59) \
+        if wait else ""
+    return "ověřeno %d titulů, k mání %d; dnes ověřeno %d; výpisů projito %d z %d; celý průchod dokončen: %s%s%s" % (
         info["known"], info["available"], info["today"], min(info["step"], total), total, when,
-        " (právě běží)" if info["running"] else "")
+        " (právě běží)" if info["running"] else "", limit)
 
 
 def _fresh(kind=None):

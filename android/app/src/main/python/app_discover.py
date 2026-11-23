@@ -35,8 +35,16 @@ MISSING_FRESH = 12 * 3600        # letošní a loňský titul
 MISSING_OLD = 10 * 24 * 3600     # titul starší pěti let
 LOCAL_NAMES = 3                  # tolik dalších názvů z TMDB (slovenský, jiný český) se nejvýš zkouší
 QUERIES_MAX = 6                  # tolik dotazů nejvýš na jedno hledání, na které někdo čeká
-PACE_FASTEST = 0.25              # s mezi dotazy ověřování na pozadí (nejvýš asi čtyři za sekundu)
+PACE_FASTEST = 0.4               # s mezi dotazy ověřování výpisu, na který se někdo dívá
 PACE_SLOWEST = 4.0               # když Přehraj.to dotazy omezuje, zpomalí se až na tolik
+GENTLE_PACE = 1.5                # s mezi dotazy, když se seznam plní sám na pozadí (nikdo nečeká)
+GENTLE_SLOWEST = 8.0             # … a když je Přehraj.to odmítá, zpomalí se až na tolik
+# Přehraj.to odmítlo dotaz (HTTP 429): ověřování na pozadí se na chvíli zastaví úplně, aby zbylo na
+# hledání, na které někdo čeká. Když odmítne znovu, čeká se pokaždé dvakrát déle.
+LIMIT_WAIT = 90                  # s: první přestávka
+LIMIT_WAIT_MAX = 1800            # s: nejdelší přestávka
+LIMIT_FORGET = 1800              # s bez odmítnutí, po kterých se zase začíná krátkou přestávkou
+LIMIT_DISTRUST = 900             # s po odmítnutí: „nenašlo se“ u titulu, který tam byl, se nepočítá
 CHECK_WORKERS = 4                # kolik titulů se ověřuje souběžně
 ONLY_ENOUGH = 12                 # výpis „jen dostupné“: tolik titulů stačí na jedno načtení…
 ONLY_PAGES = 3                   # …a víc stránek TMDB kvůli nim najednou neprojde,
@@ -333,6 +341,39 @@ def _known(lib, kind, ids):
     return known
 
 
+def minimum_changed(before, after):
+    """Uživatel změnil nejnižší nabízenou kvalitu (``before`` → ``after``, v řádcích; 0 = bez omezení).
+
+    Co je „k mání“, se tím počítá jinak – ale co už se zjistilo, se nezahazuje (dřív se seznam smazal
+    celý a ověřovalo se od začátku). Nalezené tituly zůstávají a jen se na pozadí ověří znovu; při
+    zpřísnění se hned skryjí ty, jejichž nejlepší známá kvalita novému požadavku nestačí. Nenalezené
+    se při zmírnění berou jako neověřené (mohou teď vyhovět), při zpřísnění platí dál."""
+    with api._library() as lib, lib.conn:
+        rows = lib.conn.execute("SELECT k, v FROM settings_kv WHERE k LIKE ?", (AVAILABLE_PREFIX + "%",)).fetchall()
+        for key, value in rows:
+            try:
+                entry = json.loads(value or "null")
+            except ValueError:
+                entry = None
+            if not isinstance(entry, dict):
+                continue
+            if isinstance(entry.get("iv"), str) and "its" not in entry:
+                entry["its"] = entry.get("ts") or 0      # údaj o iVysílání má dál své stáří
+            if entry.get("n"):
+                if after > before and int(entry.get("q") or 0) < after:
+                    entry.update(n=0, x=1)               # skrytý nastavením; nové ověření rozhodne
+                    entry.pop("miss", None)
+                entry["ts"] = 0                          # ověřit znovu (do té doby platí, co se ví)
+            elif after < before:
+                if entry.get("iv"):
+                    entry["ts"] = 0
+                else:
+                    entry["r"] = 0                       # „není tam“ platilo pro přísnější požadavek
+            else:
+                continue
+            lib.conn.execute("UPDATE settings_kv SET v=? WHERE k=?", (json.dumps(entry), key))
+
+
 def _fresh(known, key):
     """Je údaj o titulu čerstvý a úplný (není ho třeba ověřovat)?"""
     entry = known.get(key)
@@ -414,13 +455,18 @@ def _remember_availability(kind, tmdb_id, count, television=None, year=0, extra=
         # údaje pro kartu a souhrn zůstávají, dokud je nepřepíše čerstvější
         entry.update({name: old[name] for name in ("t", "o", "y", "rd", "p", "v", "d", "q", "s", "f") if name in old})
         entry.update(extra or {})
+        misses = int(old.get("miss") or 0)
+        again = bool(misses) and now - int(old.get("ts") or 0) < MISS_TTL / 2
         if not count and old.get("n") and old.get("r") == AVAILABLE_RULES \
-                and int(old.get("miss") or 0) + 1 < MISSES_TO_DROP:
+                and (misses + 1 < MISSES_TO_DROP or again):
             # Byl tam a teď se nenašel: jedno hledání se může splést (web zrovna nic nevrátil). Titul
-            # zůstává, jen se brzy ověří znovu; přestane se nabízet až po dalším neúspěchu.
+            # zůstává, jen se brzy ověří znovu; přestane se nabízet až po dalším neúspěchu – a ten se
+            # počítá, jen když přijde s odstupem (dva neúspěchy krátce po sobě jsou tentýž výpadek).
             count = entry["n"] = int(old["n"])
-            entry["miss"] = int(old.get("miss") or 0) + 1
-            entry.update({name: old[name] for name in ("d", "q", "s") if name in old})
+            entry["miss"] = misses if again else misses + 1
+            if again:
+                entry["ts"] = int(old.get("ts") or now)
+            entry.update({name: old.get(name, default) for name, default in (("d", ""), ("q", 0), ("s", 0))})
         if not count:
             entry.pop("f", None)
         elif old.get("n"):
@@ -429,8 +475,8 @@ def _remember_availability(kind, tmdb_id, count, television=None, year=0, extra=
                 entry["f"] = old["f"]
             else:
                 entry.pop("f", None)
-        elif "f" in (extra or {}):
-            pass
+        elif "f" in (extra or {}) or old.get("x"):
+            pass   # (``x``: titul skryla změna nejnižší kvality, ne to, že by na Přehraj.to nebyl)
         elif not old.get("n"):
             released = entry.get("rd") or ""
             try:
@@ -480,13 +526,14 @@ def _item_names(item):
         int(date[:4]) if date[:4].isdigit() else 0
 
 
-def _count_versions(kind, tmdb_id, names, year, state, client):
+def _count_versions(kind, tmdb_id, names, year, state, client, gentle=False):
     """Kolik verzí titulu je na Přehraj.to (u seriálu: kolik jeho dílů se našlo) a jejich souhrn
     (``_summary``). Když se pod českým a původním názvem nenajde nic, zkusí se ještě slovenský a další
-    názvy z TMDB."""
+    názvy z TMDB. ``gentle``: nikdo na výsledek nečeká, dotazy jdou pomalu (viz ``GENTLE_PACE``)."""
     def search(which):
         versions = _find_versions(which, year if kind == "movie" else 0, None, state, pages=1, client=client,
-                                  queries_max=3, strict=True, thorough=False, series=kind == "tv")
+                                  queries_max=3, strict=True, thorough=False, series=kind == "tv",
+                                  gentle=gentle)
         return [version for version in versions if not version["short"]]
 
     found = search(names)
@@ -497,10 +544,16 @@ def _count_versions(kind, tmdb_id, names, year, state, client):
     return len(found), _summary(found)
 
 
-def _check_available(kind, items, state):
+def search_paused():
+    """Kolik sekund se ještě Přehraj.to na pozadí nezkouší (neodpovídá, nebo omezuje dotazy); 0 = jde to."""
+    return max(0.0, _PAUSED.get("prehrajto", 0) - time.time(), limited())
+
+
+def _check_available(kind, items, state, gentle=False):
     """Ověří tituly, u kterých aplikace dostupnost nezná: hledání na Přehraj.to (u seriálu jeho
     první díl) a jedno v iVysílání, pár titulů souběžně. Výsledek si pamatuje (viz ``_known``);
-    co se zjistit nepodařilo, zůstane neznámé a zkusí se příště. Vrací čerstvý stav všech titulů."""
+    co se zjistit nepodařilo, zůstane neznámé a zkusí se příště. Vrací čerstvý stav všech titulů.
+    ``gentle``: seznam se plní sám na pozadí, dotazy jdou pomalu."""
     ids = [item["id"] for item in items]
     if not _CHECK_LOCK.acquire(timeout=CHECK_WAIT):
         # jiné ověřování běží moc dlouho (opuštěné výpisy): vrátit, co se ví, a nedržet další vlákno
@@ -515,7 +568,7 @@ def _check_available(kind, items, state):
         client = _search_client(timeout=5)   # jeden klient pro všechna hledání (jedno přihlášení)
 
         def paused(service):
-            return _PAUSED.get(service, 0) > time.time()
+            return _PAUSED.get(service, 0) > time.time() or (service == "prehrajto" and limited() > 0)
 
         def check(item):
             # Služba, která neodpovídá, se dál nezkouší: výpis by na ni čekal u každého titulu zvlášť.
@@ -527,10 +580,14 @@ def _check_available(kind, items, state):
             extra = _card_fields(item)
             if count is None and not paused("prehrajto"):
                 try:
-                    count, summary = _count_versions(kind, item["id"], names, year, state, client)
+                    count, summary = _count_versions(kind, item["id"], names, year, state, client, gentle)
                     extra.update(summary)
+                    if not count and entry and entry["n"] and time.time() - _LIMITED["last"] < LIMIT_DISTRUST:
+                        # Byl tam, a krátce po tom, co Přehraj.to odmítalo dotazy, se nenašel:
+                        # takovému výsledku se nevěří, titul se ověří později.
+                        count = None
                 except api.ApiError:
-                    _PAUSED["prehrajto"] = time.time() + CHECK_PAUSE
+                    _PAUSED["prehrajto"] = time.time() + max(CHECK_PAUSE, limited())
             if not paused("ivysilani"):
                 television = _ivys_match(kind, names, year)
                 if television is None:
@@ -696,6 +753,10 @@ def _checking_note(state):
                 "status": "Hledám, co je k mání na Přehraj.to a v iVysílání – zbývá ověřit %d" % count}
     if state.get("unverified"):
         # nic se neověřuje a přesto něco chybí: služba neodpovídá; neověřené tituly se neukazují
+        wait = limited()
+        if wait:
+            return {"status": "Přehraj.to teď omezuje počet dotazů – zbylé tituly se ověří asi za %s."
+                              % _duration_text(wait + 59)}
         return {"status": "Část titulů se teď nepodařilo ověřit (Přehraj.to neodpovídá) – zkuste to za chvíli."}
     if state.get("rechecking"):
         # starší údaje se potichu ověřují znovu: výpis se za chvíli obnoví, kdyby se něco změnilo
@@ -1062,17 +1123,20 @@ def _failure_reason(text):
     return ""
 
 
-_PACE = {"interval": PACE_FASTEST, "next": 0.0}
+_PACE = {"interval": PACE_FASTEST, "next": 0.0, "gentle": GENTLE_PACE}
 _PACE_LOCK = threading.Lock()
+# Přehraj.to odmítá dotazy: do kdy se na pozadí nehledá, jak dlouhá byla poslední přestávka, kdy
+# odmítlo naposledy a kolikrát celkem (podle toho zpomaluje plnění seznamu, viz ``app_index``).
+_LIMITED = {"until": 0.0, "wait": 0, "last": 0.0, "hits": 0}
 
 
-def _pace():
+def _pace(gentle=False):
     """Rozestup dotazů ověřování na pozadí: několik vláken dohromady nepošle víc, než kolik Přehraj.to
-    snese. Čeká, až na dotaz přijde řada."""
+    snese. Čeká, až na dotaz přijde řada. ``gentle``: delší rozestup pro plnění seznamu na pozadí."""
     with _PACE_LOCK:
         now = time.time()
         start = max(now, _PACE["next"])
-        _PACE["next"] = start + _PACE["interval"]
+        _PACE["next"] = start + (max(_PACE["interval"], _PACE["gentle"]) if gentle else _PACE["interval"])
     if start > now:
         time.sleep(start - now)
 
@@ -1080,23 +1144,62 @@ def _pace():
 def _pace_result(failed):
     """Přizpůsobí tempo: po odmítnutém nebo nepovedeném dotazu se zpomalí, po povedeném pozvolna zrychlí."""
     with _PACE_LOCK:
-        _PACE["interval"] = min(PACE_SLOWEST, _PACE["interval"] * 2) if failed \
-            else max(PACE_FASTEST, _PACE["interval"] * 0.9)
+        _PACE["interval"] = min(PACE_SLOWEST, max(_PACE["interval"], PACE_FASTEST) * 2) if failed \
+            else max(PACE_FASTEST, _PACE["interval"] * 0.95)
 
 
-def _search_page(client, query, page, cursor, retries, paced=False):
+def _is_limit(error):
+    """Odmítlo Přehraj.to dotaz proto, že jich přišlo moc (HTTP 429)?"""
+    text = str(error).lower()
+    return "429" in text or "omezuje" in text
+
+
+def _rate_limited():
+    """Přehraj.to právě odmítlo dotaz: ověřování na pozadí si dá přestávku (při opakování delší)."""
+    with _PACE_LOCK:
+        now = time.time()
+        if now < _LIMITED["until"]:
+            return                         # přestávka už běží (odmítnutí dotazu, na který čekal člověk)
+        again = _LIMITED["wait"] and now - _LIMITED["last"] < LIMIT_FORGET
+        _LIMITED["wait"] = min(LIMIT_WAIT_MAX, _LIMITED["wait"] * 2) if again else LIMIT_WAIT
+        _LIMITED.update(until=now + _LIMITED["wait"], last=now, hits=_LIMITED["hits"] + 1)
+        _PACE["gentle"] = min(GENTLE_SLOWEST, _PACE["gentle"] * 1.5)
+
+
+def limited():
+    """Kolik sekund ještě trvá přestávka po odmítnutí dotazů; 0 = žádná."""
+    return max(0.0, _LIMITED["until"] - time.time())
+
+
+def gentle_pace(value=None, recover=False):
+    """Rozestup dotazů při plnění seznamu na pozadí. ``value`` ho nastaví (uložený z minula),
+    ``recover`` ho po povedené dávce o kousek zkrátí – pod ``GENTLE_PACE`` nikdy."""
+    with _PACE_LOCK:
+        if value is not None:
+            _PACE["gentle"] = min(GENTLE_SLOWEST, max(GENTLE_PACE, float(value)))
+        elif recover:
+            _PACE["gentle"] = max(GENTLE_PACE, _PACE["gentle"] * 0.98)
+        return _PACE["gentle"]
+
+
+def _search_page(client, query, page, cursor, retries, paced=False, gentle=False):
     """Stránka hledání. Dočasnou chybu (omezení dotazů, vypršení času) zkusí po chvíli ještě jednou,
     když na výsledek čeká člověk – jinak by stránka titulu hlásila neúspěch kvůli jedinému zaváhání.
     ``retries`` je počitadlo ``[kolik opakování zbývá]`` společné pro celé hledání titulu, aby se
-    při výpadku nečekalo u každého dotazu zvlášť. ``paced``: dotaz ověřování na pozadí, drží rozestup."""
+    při výpadku nečekalo u každého dotazu zvlášť. ``paced``: dotaz ověřování na pozadí, drží rozestup
+    (``gentle``: delší) a po dobu, kdy Přehraj.to dotazy odmítá, se vůbec neposílá."""
     if paced:
-        _pace()
+        if limited():
+            raise provider.TemporaryError("Přehraj.to dočasně omezuje dotazy (HTTP 429) – ověřování čeká")
+        _pace(gentle)
     try:
         found = provider.search_catalog(client, query, page, cursor)
         if paced:
             _pace_result(False)
         return found
-    except provider.TemporaryError:
+    except provider.TemporaryError as error:
+        if _is_limit(error):
+            _rate_limited()
         if paced:
             _pace_result(True)
         if retries[0] <= 0:
@@ -1108,7 +1211,7 @@ def _search_page(client, query, page, cursor, retries, paced=False):
 
 def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", client=None,
                    queries_max=QUERIES_MAX,
-                   strict=False, thorough=True, series=False):
+                   strict=False, thorough=True, series=False, gentle=False):
     """Verze titulu (nebo dílu) na Přehraj.to, vyčištěné a seřazené podle předvoleb.
 
     Vrací ``[{"video", "result", "short", "cam", "bad", "chosen"}]``. Hledá se více variantami názvu;
@@ -1148,7 +1251,7 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
         cursor = ""
         for page in range(1, pages + 1):
             try:
-                results, cursor = _search_page(client, query, page, cursor, retries, paced=strict)
+                results, cursor = _search_page(client, query, page, cursor, retries, paced=strict, gentle=gentle)
             except provider.ProviderError as error:
                 failed += page == 1
                 reason = str(error)
@@ -1159,6 +1262,8 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
                     found.setdefault(result["id"], (result, parsed))
             if not cursor:
                 break
+        if strict and failed and limited():
+            break                          # Přehraj.to odmítá: další názvy by dopadly stejně
         # Ověřování dostupnosti stačí, že titul je – ale jen ve kvalitě, kterou si uživatel přeje vidět.
         usable = [item for item in found.values() if api._meets_minimum(
             dict(item[1], quality=api._known_quality(item[0].get("quality"), item[1].get("quality")),

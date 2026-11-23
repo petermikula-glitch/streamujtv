@@ -261,21 +261,28 @@ nepodařilo (služba neodpovídá), se neukáže a výpis to napíše. Ve Filtru
 Ověřování: u filmu dotazy „název rok“, „název“ a totéž pod původním názvem; když se nenajde nic, ještě
 slovenský a další české názvy z TMDB (`Tmdb.local_titles`, i na stránce titulu a při přehrání). Seriál se
 ověřuje jako celek (`series=True`: vyhoví kterýkoli jeho díl), díl se hledá jako „S01E05“ i „1x05“.
-Dotazy na pozadí drží rozestup (`_pace`, nejvýš asi čtyři za sekundu) a po odmítnutí zpomalí. Výsledek se
+Dotazy na pozadí drží rozestup (`_pace`: u výpisu, na který se někdo dívá, `PACE_FASTEST`; když se seznam
+plní sám, `GENTLE_PACE`) a po odmítnutí zpomalí. Když Přehraj.to dotaz odmítne (HTTP 429), ověřování na
+pozadí si dá přestávku (`_rate_limited`: `LIMIT_WAIT`, při opakování pokaždé dvojnásobek až po
+`LIMIT_WAIT_MAX`) a po tu dobu mu neposílá nic – dotazy zbydou na hledání, na které někdo čeká (stránka
+titulu, přehrání); výpis i Diagnostika napíšou, že Přehraj.to dotazy omezuje a kdy se pokračuje. Výsledek se
 pamatuje (`avail:<druh>:<číslo>`): nalezený 14 dní, nenalezený podle stáří titulu – letošní a loňský 12 hodin,
 starší pěti let 10 dní, jinak 2 dny (`_missing_ttl`).
 Co se jednou zjistilo, zůstává: záznam, kterému vypršela platnost, platí dál a jen se na pozadí ověří znovu
 (`stale` v `_known`, `_fresh`). Nalezený titul se tedy ukazuje, dokud nové ověření neřekne, že tam není –
 a ani pak hned: jedno hledání se může splést, a tak titul vypadne až po `MISSES_TO_DROP` nepovedených
-ověřeních za sebou (`miss` v záznamu, další pokus po `MISS_TTL`). Přeověřování výpis neblokuje ani neukazuje
+ověřeních za sebou (`miss` v záznamu, další pokus po `MISS_TTL`; dva neúspěchy krátce po sobě se počítají
+jako jeden a „nenašlo se“ do `LIMIT_DISTRUST` po odmítnutí dotazů se nepočítá vůbec). Přeověřování výpis neblokuje ani neukazuje
 stav; výpis se jen po `RECHECK_REFRESH` sekundách potichu obnoví. Na výpis čekají jen tituly, o kterých se
 neví vůbec nic. Ve výpisu jdou napřed tituly v jazyce podle předvolby (`_preferred_first`): dabované, pak
 originály s titulky (`s` v souhrnu), pak ostatní; uvnitř skupiny pořadí TMDB.
 
 **Seznam dostupných titulů** (`app_index.py`): aby se neověřovalo až při otevření výpisu, prochází aplikace
 seznamy TMDB předem – populární, novinky, nejlépe hodnocené, československé a jednotlivé žánry, filmy
-i seriály (`_plan`). Spouští se po otevření aplikace (`quick_sync` → `app_index.start`), ověřuje asi titul za
-sekundu (`CHUNK`, `GAP`), nejvýš `DAILY_LIMIT` titulů denně, a ustoupí, když někdo čeká na hledání, když se
+i seriály (`_plan`). Spouští se po otevření aplikace (`quick_sync` → `app_index.start`), ověřuje šetrně
+(dotaz nejvýš jednou za `GENTLE_PACE` sekund; po každém odmítnutí se rozestup prodlouží až na
+`GENTLE_SLOWEST`, pamatuje se i do příště a jen pozvolna se vrací), nejvýš `DAILY_LIMIT` titulů denně,
+a ustoupí, když někdo čeká na hledání, když se
 ověřuje otevřený výpis nebo když se přehrává (`busy`; přehrávač odkládá přes `progress_save`). Kde skončil,
 si pamatuje (`index:state`), celý plán opakuje nejdřív po `CYCLE_EVERY`. Výsledek jde do stejných záznamů
 `avail:…`, takže projitý výpis je hned. Záznam nese i souhrn verzí (`_summary`: jaký dabing je k mání
@@ -307,7 +314,9 @@ stejně jako Full HD a 4K. Rozhoduje proto, co je jisté – změřené rozliše
 videa (viz Skutečná kvalita) a přesný údaj v názvu souboru („1080p“, „4K“) – a teprve potom odhad z velikosti
 a délky (HD od 1,5 Mb/s, Full HD od 2 Mb/s; 4K se neodhaduje). Soubor, o kterém se neví nic, se nenabídne.
 Vlastní soubory v katalogu a stažené soubory se neskrývají. Mění se v předvolbách „Jazyk a kvalita“ →
-Nejnižší kvalita; stránka titulu, který je jen v nižší kvalitě, to sama napíše.
+Nejnižší kvalita; stránka titulu, který je jen v nižší kvalitě, to sama napíše. Změna seznam ověřených
+titulů nemaže (`minimum_changed`): nalezené tituly zůstávají a přeověří se na pozadí (plán se projde znovu,
+`app_index.restart`), při zpřísnění se hned skryjí ty, jejichž nejlepší známá kvalita nestačí.
 Při předvolbě „nejvyšší dostupná“ má mezi verzemi stejné kvality přednost soubor s vyšším datovým tokem
 (větší na minutu) a soubor označený jen „HD“ se od 6 Mb/s řadí mezi Full HD (`_version_rank`).
 Změna předvolby jazyka nebo kvality platí hned: obrazovka se načte znovu a verze, které si uživatel
