@@ -304,7 +304,10 @@ neuloží soubor větší než 4 GB (aplikace na to upozorní předem).
 Aplikace se při startu (nejvýš jednou za 6 hodin) zeptá na vydání na GitHubu
 (`releases` se značkou `app-v<verze>` a přílohou `.apk`), nabídne novější verzi, stáhne ji a předá
 systémovému instalátoru; ruční kontrola je v Nastavení. Poprvé je potřeba aplikaci povolit instalaci
-z neznámých zdrojů. Nová verze musí být podepsaná stejným klíčem jako ta nainstalovaná.
+z neznámých zdrojů. Nová verze musí být podepsaná stejným klíčem jako ta nainstalovaná. Stažený soubor
+se před instalací porovná s otiskem SHA-256, který GitHub u vydání uvádí. Vydávané sestavení není
+laditelné (data aplikace včetně hesla nejdou přečíst přes ADB); pro zkoušky v emulátoru se sestavuje
+s `-Pdebuggable`.
 
 Vydání vytváří `.github/workflows/android.yml` při změně na hlavní větvi: spustí testy, sestaví APK,
 podepíše ho klíčem ze `signing/` (tajná proměnná `SIGNING_KEYSTORE_BASE64` s úložištěm klíčů v base64

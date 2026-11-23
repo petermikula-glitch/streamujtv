@@ -514,7 +514,8 @@ def test_update_check_finds_newer_release_and_throttles(api, monkeypatch):
         {"tag_name": "app-v0.4.0", "prerelease": True, "assets": [{"name": "a.apk", "browser_download_url": "u4"}]},
         {"tag_name": "app-v0.3.0", "body": "Stahování na disk", "assets": [
             {"name": "notes.txt", "browser_download_url": "n"},
-            {"name": "MojeVidea-0.3.0.apk", "browser_download_url": "https://gh/MojeVidea-0.3.0.apk", "size": 42}]},
+            {"name": "MojeVidea-0.3.0.apk", "browser_download_url": "https://gh/MojeVidea-0.3.0.apk", "size": 42,
+             "digest": "sha256:" + "AB" * 32}]},
         {"tag_name": "app-v0.10.0", "assets": []},                           # vydání bez APK se přeskočí
         {"tag_name": "app-v0.2.0", "assets": [{"name": "old.apk", "browser_download_url": "old"}]},
     ]
@@ -528,8 +529,8 @@ def test_update_check_finds_newer_release_and_throttles(api, monkeypatch):
 
     monkeypatch.setattr(app_api.urllib.request, "urlopen", urlopen)
     found = api("update_check", current="0.2.0")
-    assert found == {"available": True, "current": "0.2.0", "version": "0.3.0", "size": 42,
-                     "url": "https://gh/MojeVidea-0.3.0.apk", "notes": "Stahování na disk"}
+    assert found == {"available": True, "current": "0.2.0", "version": "0.3.0", "size": 42, "sha256": "ab" * 32,
+                     "url": "https://gh/MojeVidea-0.3.0.apk", "notes": "Stahování na disk"}   # i s otiskem souboru
     assert asked == [app_api.UPDATE_URL]
     assert api("update_check", current="0.2.0") == {"available": False, "current": "0.2.0"}   # hned znovu se neptá
     assert len(asked) == 1

@@ -36,6 +36,8 @@ object Updater {
     fun checkOnStart(activity: FragmentActivity) {
         if (askedThisRun) return
         askedThisRun = true
+        // soubor z minulé aktualizace už není potřeba (instalace proběhla, nebo se nepovedla)
+        File(activity.cacheDir, "update.apk").delete()
         check(activity, force = false)
     }
 
@@ -56,13 +58,29 @@ object Updater {
             AlertDialog.Builder(activity)
                 .setTitle("Nová verze ${data.optString("version")}")
                 .setMessage("Máte verzi $current." + if (notes.isEmpty()) "" else "\n\n$notes")
-                .setPositiveButton("Aktualizovat") { _, _ -> download(activity, data.optString("url")) }
+                .setPositiveButton("Aktualizovat") { _, _ ->
+                    download(activity, data.optString("url"), data.optString("sha256"))
+                }
                 .setNegativeButton("Později", null)
                 .show()
         }
     }
 
-    private fun download(activity: FragmentActivity, url: String) {
+    /** Otisk SHA-256 souboru, malými písmeny. */
+    private fun sha256(file: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(128 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun download(activity: FragmentActivity, url: String, expected: String = "") {
         val dialog = AlertDialog.Builder(activity)
             .setTitle("Aktualizace")
             .setMessage("Stahuji novou verzi…")
@@ -75,6 +93,11 @@ object Updater {
             val error = try {
                 fetch(url, file) { percent ->
                     main.post { if (dialog.isShowing) dialog.setMessage("Stahuji novou verzi… $percent %") }
+                }
+                // GitHub u vydání uvádí otisk souboru: stažený soubor se před instalací porovná
+                if (expected.isNotEmpty() && !sha256(file).equals(expected, ignoreCase = true)) {
+                    file.delete()
+                    throw java.io.IOException("Stažený soubor neodpovídá vydání (má jiný otisk). Zkuste to znovu.")
                 }
                 main.post { if (dialog.isShowing) dialog.setMessage("Předávám systému k instalaci…") }
                 install(context, file)

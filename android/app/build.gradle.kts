@@ -51,6 +51,9 @@ android {
     buildTypes {
         debug {
             signingConfigs.findByName("personal")?.let { signingConfig = it }
+            // Vydávané sestavení není laditelné: z laditelné aplikace jde přes ADB přečíst její data
+            // (včetně uloženého hesla k Přehraj.to). Pro zkoušky v emulátoru: -Pdebuggable
+            isDebuggable = providers.gradleProperty("debuggable").isPresent
         }
     }
     // Jen pro zkoušku v emulátoru za proxy, která znovu šifruje HTTPS: -PtestCa=/cesta/ca.crt
