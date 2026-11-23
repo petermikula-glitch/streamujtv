@@ -397,8 +397,15 @@ a tlačítko Přehrát hraje z disku; platí to i tehdy, když hledání na Pře
 typu `filter`). Aplikace si zavolá `discover_filters` nebo `catalog_filters`, ukáže skupiny (žánr,
 období, hodnocení, země, řazení) a po výběru hodnoty načte stejný výpis s parametry, které volba nese.
 
-**Hledání osob**: hledání nabízí i řadu Herci a režiséři (TMDB); karta osoby vede na její filmy
-a seriály (`discover_person`) – nejdřív ty, které režírovala. Vlastní katalog se podle herců a režisérů
+**Hledání osob** (`find_people`, `people_rows`, `discover_person` v `app_discover.py`): hledání nabízí řadu
+Herci a režiséři z TMDB. Zůstanou v ní jen lidé, jejichž jméno hledanému výrazu opravdu odpovídá (každé
+hledané slovo je začátkem některého slova jména, bez ohledu na diakritiku) a o kterých TMDB něco ví (fotka
+nebo známé tituly); první je přesná shoda jména, pak podle oblíbenosti, a karta říká, čím je osoba známá.
+Když výraz přesně odpovídá jménu, jde osoba napřed a pod ní řada jejích nejznámějších titulů. Karta osoby
+vede na filmografii: jen uvedené tituly a skutečné role (bez talk show, zpravodajství a reality show, bez
+„sám sebe“ a archivních záběrů, bez hostování v jediném dílu), u režiséra režie první, jinak role první,
+v každé skupině od nejznámějšího titulu. Ukazuje jen to, co je k mání na Přehraj.to nebo v iVysílání
+(ověřuje se postupně jako výpisy Objevuj); první karta přepíná na celou filmografii. Vlastní katalog se podle herců a režisérů
 prohledává také.
 
 **Dostupnost** titulů z Objevuj se neověřuje hromadně sama: dlaždice „Ověřit dostupnost“ projde jednu

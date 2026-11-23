@@ -2007,35 +2007,83 @@ def test_catalogue_lists_can_be_filtered(api):
 
 def test_search_finds_people_and_lists_their_films(api, monkeypatch):
     api("settings_set", tmdb_key="k" * 32)
-    _catalogue_search(monkeypatch, {})
+    found = {"Kolja 1996": [_web(40, "Kolja.1996.CZ.1080p", 6000)],
+             "Seriál": [_web(41, "Serial S01E01 CZ", 2700)]}
+    asked = _catalogue_search(monkeypatch, found)
+    monkeypatch.setattr(app_api.app_discover, "_ivys_match", lambda kind, names, year: "")
     _fake_tmdb(monkeypatch, {
-        "/search/multi": {"results": [], "total_pages": 0},
+        "/search/multi": {"results": [{"id": 90, "media_type": "movie", "title": "Svěrák: dokument",
+                                       "release_date": "2015-01-01"}], "total_pages": 1},
         "/search/person": {"results": [
-            {"id": 5, "name": "Jan Svěrák", "known_for_department": "Directing", "profile_path": "/s.jpg"},
-            {"id": 6, "name": "Zdeněk Svěrák", "known_for_department": "Acting"}, {"name": "bez čísla"}]},
+            {"id": 7, "name": "Petr Novák", "popularity": 30, "profile_path": "/n.jpg"},      # jméno výrazu neodpovídá
+            {"id": 6, "name": "Zdeněk Svěrák", "known_for_department": "Acting", "popularity": 9,
+             "known_for": [{"title": "Vesničko má středisková"}, {"title": "Kolja"}, {"title": "Obecná škola"}]},
+            {"id": 5, "name": "Jan Svěrák", "known_for_department": "Directing", "profile_path": "/s.jpg",
+             "popularity": 4, "known_for": [{"title": "Kolja"}, {"name": "Seriál"}]},
+            {"id": 8, "name": "Jan Sverak ml.", "popularity": 0.1},                           # nic o něm: vynechá se
+            {"name": "bez čísla"}]},
         "/person/5/combined_credits": {
             "cast": [{"media_type": "movie", "id": 21, "title": "Kuky se vrací", "release_date": "2010-05-20",
-                      "character": "vypravěč"},
-                     {"media_type": "movie", "id": 20, "title": "Kolja", "release_date": "1996-05-15", "character": "host"}],
+                      "character": "vypravěč", "vote_count": 40},
+                     {"media_type": "movie", "id": 20, "title": "Kolja", "release_date": "1996-05-15", "character": "host"},
+                     {"media_type": "tv", "id": 31, "name": "Talk show", "first_air_date": "2005-01-01",
+                      "character": "Self", "genre_ids": [10767], "vote_count": 900},              # sám sebe v talk show
+                     {"media_type": "movie", "id": 23, "title": "Dokument o filmu", "release_date": "2000-01-01",
+                      "character": "Self (archive footage)", "vote_count": 500},
+                     {"media_type": "tv", "id": 32, "name": "Cizí seriál", "first_air_date": "2003-01-01",
+                      "character": "host", "episode_count": 1, "vote_count": 800},              # jeden díl
+                     {"media_type": "movie", "id": 24, "title": "Chystaný film", "character": "role", "vote_count": 0}],
             "crew": [{"media_type": "movie", "id": 20, "title": "Kolja", "release_date": "1996-05-15", "job": "Director",
-                      "vote_average": 7.7},
-                     {"media_type": "tv", "id": 30, "name": "Seriál", "first_air_date": "2001-01-01", "job": "Director"},
+                      "vote_average": 7.7, "vote_count": 300},
+                     {"media_type": "tv", "id": 30, "name": "Seriál", "first_air_date": "2001-01-01", "job": "Director",
+                      "vote_count": 20},
+                     {"media_type": "movie", "id": 25, "title": "Film z budoucnosti", "release_date": "2099-01-01",
+                      "job": "Director", "vote_count": 999},
                      {"media_type": "movie", "id": 22, "title": "Jiný film", "job": "Producer"}]},
     })
-    rows = {row["title"]: row["items"] for row in api("search", q="Svěrák")["rows"]}
-    director, actor = rows["Herci a režiséři"]
+    rows = api("search", q="sverak")["rows"]                                 # i bez diakritiky; jen kdo jménu odpovídá
+    assert [row["title"] for row in rows][:2] == ["Filmy", "Herci a režiséři"]
+    actor, director = rows[1]["items"]                                       # od známějšího
+    assert (actor["title"], actor["subtitle"], actor["image"], actor["wide"]) == (
+        "Zdeněk Svěrák", "herectví · Vesničko má středisková, Kolja", "", True)
     assert (director["title"], director["subtitle"], director["image"]) == (
-        "Jan Svěrák", "režie", "https://image.tmdb.org/t/p/h632/s.jpg")
-    assert (actor["subtitle"], actor["image"], actor["wide"]) == ("herectví", "", True)
-    assert director["target"] == {"type": "list", "call": "discover_person", "params": {"id": 5, "name": "Jan Svěrák"},
-                                  "title": "Jan Svěrák", "poster": True}
-    films = api("discover_person", **director["target"]["params"])
-    assert films["title"] == "Jan Svěrák" and films["next"] is None
-    assert [(card["title"], card["subtitle"]) for card in films["items"]] == [   # režie první, pak role; bez opakování
-        ("Seriál", "2001 · seriál · režie"), ("Kolja", "1996 · 77 % · film · režie"),
+        "Jan Svěrák", "režie · Kolja, Seriál", "https://image.tmdb.org/t/p/h632/s.jpg")
+    assert director["target"] == {"type": "list", "call": "discover_person", "title": "Jan Svěrák", "poster": True,
+                                  "params": {"id": 5, "name": "Jan Svěrák", "dept": "Directing"}}
+
+    exact = api("search", q="Jan Svěrák")["rows"]                            # přesné jméno: osoba a její tituly napřed
+    assert [row["title"] for row in exact][:3] == ["Herci a režiséři", "Jan Svěrák – nejznámější tituly", "Filmy"]
+    assert _titles(exact[0]["items"]) == ["Jan Svěrák"]
+    assert _titles(exact[1]["items"]) == ["Kolja", "Seriál", "Kuky se vrací", "Zobrazit vše"]
+    assert exact[1]["items"][0]["subtitle"] == "1996 · 77 % · film · režie"
+    assert exact[1]["items"][-1]["target"]["call"] == "discover_person"
+
+    films = api("discover_person", **director["target"]["params"])           # filmografie: jen co je k mání
+    assert films["title"] == "Jan Svěrák" and films["next"] is None and "refresh" not in films
+    assert [(card["title"], card["subtitle"]) for card in films["items"]] == [
+        ("Celá filmografie", "Teď: jen na Přehraj.to a v iVysílání"),
+        ("Kolja", "1996 · 77 % · film · režie"), ("Seriál", "2001 · seriál · režie")]
+    assert films["items"][1]["badges"] == ["Přehraj.to", "CZ"] and films["items"][2]["target"]["params"]["kind"] == "tv"
+    assert ("Kuky se vrací 2010", 1) in asked and not any("Talk show" in query for query, _page in asked)
+    everything = api("discover_person", **films["items"][0]["target"]["params"])
+    assert [(card["title"], card["subtitle"]) for card in everything["items"]] == [   # režie první, od nejznámějšího;
+        ("Jen co je k mání", "Teď: všechny tituly"),                                    # bez talk show, archivu,
+        ("Kolja", "1996 · 77 % · film · režie"), ("Seriál", "2001 · seriál · režie"),   # hostování a neuvedených
         ("Kuky se vrací", "2010 · film · vypravěč")]
-    assert films["items"][0]["target"]["params"]["kind"] == "tv"
+    assert everything["items"][3]["badges"] == ["Nenalezeno"]
     assert "Chybí osoba" in api("discover_person")["error"]
+
+    discover = app_api.app_discover
+    assert discover._name_matches("Tom Hanks", "tom han") and discover._name_matches("Zdeněk Svěrák", "SVERAK")
+    assert not discover._name_matches("Avatar Singh", "avatar 2") and not discover._name_matches("Tom Hanks", "")
+    # herec: role první, režie až za nimi
+    acting = {"cast": [{"media_type": "movie", "id": 1, "title": "Role", "release_date": "2001-01-01", "character": "Jan",
+                        "vote_count": 5}],
+              "crew": [{"media_type": "movie", "id": 2, "title": "Režie", "release_date": "2002-01-01", "job": "Director",
+                        "vote_count": 500}]}
+    _fake_tmdb(monkeypatch, {"/person/9/combined_credits": acting})
+    assert [item["title"] for _role, item in discover._person_credits(9, "Acting")] == ["Role", "Režie"]
+    assert [item["title"] for _role, item in discover._person_credits(9, "Directing")] == ["Režie", "Role"]
 
 
 MANIFEST = """<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" xmlns:cenc="urn:mpeg:cenc:2013" xmlns:dashif="https://dashif.org/"

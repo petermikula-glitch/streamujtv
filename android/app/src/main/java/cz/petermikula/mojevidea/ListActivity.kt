@@ -218,7 +218,8 @@ class ListFragment : VerticalGridSupportFragment() {
         // Výpis z Objevuj se při ověřování dostupnosti obnovuje sám a karty z něj ubývají: mění se na
         // místě, ať výběr neuskočí na začátek. Jinde se při jiném složení staví znovu.
         val known = (0 until cards.size()).mapNotNull { (cards.get(it) as? Card)?.key }.toHashSet()
-        val similar = call == "discover" && list.isNotEmpty() && list.count { it.key in known } * 2 >= list.size
+        val similar = (call == "discover" || call == "discover_person") && list.isNotEmpty() &&
+            list.count { it.key in known } * 2 >= list.size
         cards.setItems(list, if (same || similar) Card.DIFF else null)
         next = following
         emptyBatches = 0

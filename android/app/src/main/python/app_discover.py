@@ -7,6 +7,7 @@ jeho verze. Oblíbené jsou jen v aplikaci (favorites.json): položka katalogu, 
 """
 import json
 import os
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -1963,8 +1964,39 @@ def title_rows(items, state, results):
     return rows
 
 
-def people_row(query):
-    """Řada Herci a režiséři pro hledaný výraz."""
+DEPARTMENTS = {"Acting": "herectví", "Directing": "režie", "Writing": "scénář", "Production": "produkce"}
+PEOPLE_MAX = 8                   # tolik osob nejvýš v řadě Herci a režiséři
+PERSON_PAGE = 20                 # tolik titulů filmografie na jedno načtení (a jedno ověřování dostupnosti)
+PERSON_ROW = 15                  # tolik nejznámějších titulů osoby rovnou ve výsledcích hledání
+# Vystoupení, která do filmografie nepatří: osoba hraje sama sebe, archivní záběry, neuvedená v titulcích
+_SELF_RE = re.compile(r"\b(?:self|himself|herself|themselves|s[aá]m sebe|sama sebe)\b|archiv|uncredited|neuveden",
+                      re.I)
+_NOT_FICTION = {10767, 10763, 10764}   # žánry TMDB: talk show, zpravodajství, reality show
+_DOCUMENTARY = 99
+
+
+def _name_matches(name, query):
+    """Odpovídá jméno hledanému výrazu? Každé hledané slovo musí být začátkem některého slova jména
+    (bez ohledu na diakritiku): „sverak“ najde Svěráka, „tom han“ Toma Hankse, ale „avatar“ nikoho."""
+    words = search_results.normalize(name).split()
+    wanted = search_results.normalize(query).split()
+    return bool(wanted) and all(any(word.startswith(part) for word in words) for part in wanted)
+
+
+def _known_for(person, limit=2):
+    """Nejznámější tituly osoby, jak je uvádí TMDB – ať je poznat, o koho jde."""
+    titles = [(item.get("title") or item.get("name") or "").strip() for item in person.get("known_for") or []
+              if isinstance(item, dict)]
+    return [title for title in titles if title][:limit]
+
+
+def find_people(query):
+    """Osoby, které odpovídají hledanému výrazu, od nejznámější: ``[osoba z TMDB]``.
+
+    TMDB vrací na jméno i desítky lidí, kteří se jen podobně jmenují nebo o nich nic neví. Zůstanou
+    jen ti, jejichž jméno výrazu opravdu odpovídá (``_name_matches``) a kteří mají fotku nebo známé
+    tituly; první je přesná shoda jména, pak podle oblíbenosti. Když jménu neodpovídá nikdo (TMDB
+    hledá i v přezdívkách a přepisech), nechají se ti nejznámější z toho, co vrátilo."""
     client = api._tmdb()
     if not client.enabled:
         return []
@@ -1972,47 +2004,167 @@ def people_row(query):
         people, _pages = client.search_people(query)
     except TmdbError:
         return []
-    persons = []
-    for person in people[:12]:
-        photo = person.get("profile_path") or ""
-        persons.append(api._card(
-            person["name"], api._target("list", "discover_person", {"id": person["id"], "name": person["name"]},
-                                        person["name"]),
-            DEPARTMENTS.get(person.get("known_for_department") or "", ""),
-            IMG + "h632" + photo if isinstance(photo, str) and photo.startswith("/") else "",
-            wide=not photo, icon="movies"))
-    return [{"title": "Herci a režiséři", "items": persons}] if persons else []
+    people = [person for person in people if person.get("profile_path") or person.get("known_for")]
+    matching = [person for person in people if _name_matches(person["name"], query)]
+    if not matching:
+        matching = [person for person in people if (person.get("popularity") or 0) >= 5]
+    target = search_results.normalize(query)
+    matching.sort(key=lambda person: (search_results.normalize(person["name"]) != target,
+                                      -(person.get("popularity") or 0), person["name"]))
+    return matching[:PEOPLE_MAX]
 
 
-DEPARTMENTS = {"Acting": "herectví", "Directing": "režie", "Writing": "scénář", "Production": "produkce"}
-PERSON_PAGE = 40
+def _person_card(person):
+    photo = person.get("profile_path") or ""
+    department = person.get("known_for_department") or ""
+    subtitle = " · ".join(part for part in (DEPARTMENTS.get(department, ""), ", ".join(_known_for(person))) if part)
+    return api._card(
+        person["name"], api._target("list", "discover_person",
+                                    {"id": person["id"], "name": person["name"], "dept": department}, person["name"]),
+        subtitle, IMG + "h632" + photo if isinstance(photo, str) and photo.startswith("/") else "",
+        wide=not photo, icon="movies")
+
+
+def people_rows(query, state):
+    """Řady pro hledání osob: ``(řady, přesná shoda)``. Řada Herci a režiséři, a když výraz přesně
+    odpovídá jménu jedné osoby, i řada jejích nejznámějších titulů – hledá-li někdo „Brad Pitt“,
+    chce jeho filmy, ne tituly, které mají to jméno v názvu."""
+    people = find_people(query)
+    if not people:
+        return [], False
+    rows = [{"title": "Herci a režiséři", "items": [_person_card(person) for person in people]}]
+    first = people[0]
+    exact = search_results.normalize(first["name"]) == search_results.normalize(query)
+    if exact:
+        try:
+            credits = _person_credits(first["id"], first.get("known_for_department") or "")
+        except (TmdbError, api.ApiError):
+            credits = []
+        credits = credits[:PERSON_ROW]
+        if credits:
+            with api._library() as lib:
+                for kind in ("movie", "tv"):
+                    _mark_known(state, _known(lib, kind, [item["id"] for _role, item in credits
+                                                          if _credit_kind(item) == kind]))
+            # co je k mání, jde dopředu; jinak pořadí podle známosti
+            credits.sort(key=lambda entry: not state.get("available", {}).get(
+                "%s:%s" % (_credit_kind(entry[1]), entry[1]["id"])))
+            cards = [_credit_card(role, item, state) for role, item in credits]
+            cards.append(api._card("Zobrazit vše", api._target(
+                "list", "discover_person", {"id": first["id"], "name": first["name"],
+                                            "dept": first.get("known_for_department") or ""}, first["name"]),
+                "Celá filmografie, jen co je k mání", icon="all"))
+            rows.append({"title": "%s – nejznámější tituly" % first["name"], "items": cards})
+    return rows, exact
+
+
+def _credit_kind(item):
+    return "tv" if item.get("media_type") == "tv" else "movie"
+
+
+def _credit_card(role, item, state):
+    card = _item_card(item, _credit_kind(item), state)
+    card["subtitle"] = " · ".join(part for part in (card["subtitle"], role) if part)
+    return card
+
+
+def _released(item):
+    """Titul už byl uveden (má datum a to není v budoucnu)."""
+    date = item.get("release_date") or item.get("first_air_date") or ""
+    return bool(date) and date[:10] <= time.strftime("%Y-%m-%d")
+
+
+def _real_role(item):
+    """Je to skutečná role ve filmu nebo seriálu? Ne vystoupení v talk show, zpravodajství nebo reality
+    show, ne „sám sebe“ v dokumentu, archivní záběry, role neuvedená v titulcích ani hostování
+    v jediném dílu seriálu."""
+    genres = set(item.get("genre_ids") or [])
+    character = item.get("character") or ""
+    if genres & _NOT_FICTION or _SELF_RE.search(character):
+        return False
+    if _DOCUMENTARY in genres and not character:
+        return False
+    if item.get("media_type") == "tv" and item.get("episode_count") == 1:
+        return False
+    return not item.get("video")
+
+
+def _person_credits(person_id, department=""):
+    """Filmografie osoby: ``[(role, titul)]`` – jen uvedené tituly a skutečné role (``_real_role``),
+    režie u režiséra první (jinak role první), v každé skupině od nejznámějšího titulu."""
+    client = _tmdb()
+    directed = [("režie", item) for item in client.directing_credits(person_id)
+                if _released(item) and not set(item.get("genre_ids") or []) & _NOT_FICTION]
+    acted = [(item.get("character") or "", item) for item in client.acting_credits(person_id)
+             if _released(item) and _real_role(item)]
+
+    def known(entry):
+        item = entry[1]
+        return (-(item.get("vote_count") or 0), -(item.get("popularity") or 0),
+                item.get("release_date") or item.get("first_air_date") or "")
+
+    groups = [sorted(directed, key=known), sorted(acted, key=known)]
+    if department != "Directing" and len(acted) >= len(directed):
+        groups.reverse()               # herec: role první, režie až potom
+    credits, seen = [], set()
+    for group in groups:
+        for role, item in group:
+            key = (item.get("media_type"), item.get("id"))
+            if key not in seen:
+                seen.add(key)
+                credits.append((role, item))
+    return credits
 
 
 def discover_person(params):
-    """Filmy a seriály jedné osoby: nejdřív ty, které režírovala, pak ty, kde hraje; od nejnovějších."""
+    """Filmy a seriály jedné osoby – jen ty, které jsou k mání na Přehraj.to nebo v iVysílání.
+
+    Filmografie je očištěná (``_person_credits``) a řazená od nejznámějších titulů. Dostupnost se
+    ověřuje stejně jako u výpisů Objevuj: neověřený titul se neukáže, ověří se na pozadí a výpis se
+    plní postupně; dál než na část, která se ověřuje, se nejde. S ``all`` se ukáže celá filmografie
+    (se štítky tam, kde už se dostupnost ví)."""
     person_id = int(params.get("id") or 0)
     if not person_id:
         raise api.ApiError("Chybí osoba.")
     offset = api._offset(params)
-    client = _tmdb()
-    credits, seen = [], set()
-    for role, items in (("režie", client.directing_credits(person_id)), ("", client.acting_credits(person_id))):
-        for item in items:
-            key = (item.get("media_type"), item.get("id"))
-            if key not in seen:
-                seen.add(key)
-                credits.append((role or item.get("character") or "", item))
+    everything = bool(params.get("all"))
+    credits = _person_credits(person_id, params.get("dept") or "")
     with api._library() as lib:
         state = api._state(lib)
-    cards = []
-    for role, item in credits[offset:offset + PERSON_PAGE]:
-        card = _item_card(item, "tv" if item.get("media_type") == "tv" else "movie", state)
-        card["subtitle"] = " · ".join(part for part in (card["subtitle"], role) if part)
-        cards.append(card)
-    following = {"call": "discover_person", "params": dict(params, offset=offset + PERSON_PAGE)} \
-        if offset + PERSON_PAGE < len(credits) else None
-    return {"title": params.get("name") or "", "items": cards, "next": following,
-            "empty": "TMDB u této osoby neuvádí žádné filmy ani seriály."}
+    window = credits[offset:offset + PERSON_PAGE]
+    checking = state.setdefault("checking", set())
+    state.setdefault("unverified", 0)
+    known = {}
+    for kind in ("movie", "tv"):
+        items = [item for _role, item in window if _credit_kind(item) == kind]
+        if not items:
+            continue
+        if everything or BACKGROUND:
+            with api._library() as lib:
+                found = _known(lib, kind, [item["id"] for item in items])
+            if not everything:
+                todo = [item for item in items if (found.get("%s:%s" % (kind, item["id"])) or {"iv": None})["iv"] is None]
+                pending = {"%s:%s" % key for key in _verify_later(kind, todo, state)}
+                checking.update(key for key in pending if key not in found)
+                state["unverified"] += len([item for item in todo if "%s:%s" % (kind, item["id"]) not in found
+                                            and "%s:%s" % (kind, item["id"]) not in pending])
+        else:
+            found = _check_available(kind, items, state)
+            state["unverified"] += len([item for item in items if "%s:%s" % (kind, item["id"]) not in found])
+        _mark_known(state, found)
+        known.update(found)
+    cards = [_credit_card(role, item, state) for role, item in window
+             if everything or _there(known, _credit_kind(item), item)]
+    if offset == 0 and credits:
+        base = {key: value for key, value in params.items() if key not in ("offset", "all")}
+        cards.insert(0, api._card(
+            "Jen co je k mání" if everything else "Celá filmografie",
+            api._target("list", "discover_person", base if everything else dict(base, all=1), params.get("name") or ""),
+            "Teď: všechny tituly" if everything else "Teď: jen na Přehraj.to a v iVysílání", icon="settings:search"))
+    more = offset + PERSON_PAGE < len(credits) and not checking
+    following = {"call": "discover_person", "params": dict(params, offset=offset + PERSON_PAGE)} if more else None
+    return dict(_checking_note(state), title=params.get("name") or "", items=cards, next=following,
+                empty="TMDB u této osoby neuvádí žádné filmy ani seriály.")
 
 
 ACTIONS = {

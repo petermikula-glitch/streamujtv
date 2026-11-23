@@ -1080,16 +1080,18 @@ def search(params):
     with ThreadPoolExecutor(max_workers=4) as pool:
         web = pool.submit(prehrajto_search, {"q": query, "group": True})
         titles = pool.submit(app_discover.search_titles, query)
-        people = pool.submit(app_discover.people_row, query)
+        people = pool.submit(app_discover.people_rows, query, dict(state))
         television = pool.submit(_ivys_search_rows, query)
         try:
             results = web.result()
         except ApiError as error:
             response["notice"] = str(error)
             results = {"items": [], "next": None}
-        # nejdřív tituly (s vyznačením, co na Přehraj.to opravdu je), pak osoby, soubory a iVysílání
-        rows.extend(app_discover.title_rows(titles.result(), state, results.get("results") or []))
-        rows.extend(people.result())
+        # nejdřív tituly (s vyznačením, co na Přehraj.to opravdu je), pak osoby, soubory a iVysílání;
+        # když výraz přesně odpovídá jménu herce nebo režiséra, jde napřed on a jeho tituly
+        found_titles = app_discover.title_rows(titles.result(), state, results.get("results") or [])
+        found_people, exact = people.result()
+        rows.extend(found_people + found_titles if exact else found_titles + found_people)
         cards = results["items"]
         if cards:
             cards.append(_card("Filtrovat videa", _target("list", "prehrajto_search",
