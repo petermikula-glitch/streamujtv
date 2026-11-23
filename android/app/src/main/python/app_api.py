@@ -51,6 +51,11 @@ ERRORS_KEEP = 15
 VIDEO_SUFFIXES = (".mp4", ".mkv", ".avi", ".webm", ".ts", ".mov", ".m4v", ".mpg", ".mpeg", ".wmv")
 UPDATE_URL = "https://api.github.com/repos/petermikula-glitch/streamujtv/releases?per_page=20"
 UPDATE_TAG = "app-v"           # vydání aplikace: značka app-v<verze>, příloha .apk
+# Záloha pro případ, že rozhraní GitHubu odmítne dotaz (omezuje jejich počet na adresu – „rate limit
+# exceeded“ – a tu může sdílet víc domácností): tatáž vydání téhož repozitáře přes běžné stránky GitHubu.
+UPDATE_PAGE = "https://github.com/petermikula-glitch/streamujtv/releases/latest"
+UPDATE_ASSET = "https://github.com/petermikula-glitch/streamujtv/releases/download/app-v%s/MojeVidea-%s.apk"
+UPDATE_NOTES = "https://raw.githubusercontent.com/petermikula-glitch/streamujtv/app-v%s/android/RELEASE_NOTES.md"
 UPDATE_EVERY = 6 * 3600        # automatická kontrola nové verze nejvýš jednou za tuto dobu
 
 _STATE = {"dir": "", "progress": "", "busy": False}
@@ -2660,6 +2665,36 @@ def _version(text):
     return tuple(int(part) for part in re.findall(r"\d+", str(text or ""))[:4])
 
 
+def _update_from_page(current):
+    """Nejnovější vydání aplikace zjištěné bez rozhraní GitHubu: stránka „nejnovější vydání“ přesměruje
+    na jeho značku (``…/releases/tag/app-v<verze>``) a adresa souboru APK se z verze složí. Vrací totéž
+    co ``update_check``, nebo ``None``, když to nejde zjistit ani takhle.
+
+    Otisk souboru se tudy zjistit nedá (``sha256`` zůstane prázdný); že jde o pravou aktualizaci, hlídá
+    při instalaci Android sám – přijme jen soubor podepsaný stejným klíčem jako nainstalovaná aplikace."""
+    headers = {"User-Agent": "MojeVidea-Android/%s" % (current or "0")}
+    try:
+        with urllib.request.urlopen(urllib.request.Request(UPDATE_PAGE, headers=headers), timeout=15) as response:
+            final = response.geturl()
+    except (OSError, ValueError):
+        return None
+    match = re.search(r"/releases/tag/%s(\d+(?:\.\d+)*)/?$" % re.escape(UPDATE_TAG), final or "")
+    if not match:
+        return None
+    version = match.group(1)
+    if _version(version) <= _version(current):
+        return {"available": False, "current": current}
+    notes = ""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(UPDATE_NOTES % version, headers=headers),
+                                    timeout=8) as response:
+            notes = response.read().decode("utf-8", "replace").strip()[:800]
+    except (OSError, ValueError):
+        pass   # bez popisu změn to jde také
+    return {"available": True, "current": current, "version": version, "url": UPDATE_ASSET % (version, version),
+            "size": 0, "notes": notes, "sha256": ""}
+
+
 def update_check(params):
     """Je na GitHubu novější verze aplikace? {"available", "version", "url", "size", "notes"}.
 
@@ -2678,6 +2713,11 @@ def update_check(params):
         if not isinstance(releases, list):
             raise ValueError("neočekávaná odpověď")
     except (OSError, ValueError) as error:
+        # rozhraní GitHubu dotaz odmítlo (nejčastěji omezení počtu dotazů): zkusit běžnou stránku vydání
+        found = None if settings.get("update_url") else _update_from_page(current)
+        if found is not None:
+            _change_settings(lambda settings: settings.update(update_checked=int(time.time())))
+            return found
         if force:
             raise ApiError("Novou verzi se nepodařilo ověřit: %s" % error)
         return {"available": False, "current": current}

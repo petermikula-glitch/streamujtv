@@ -2973,3 +2973,41 @@ def test_audio_output_is_remembered_for_the_player(api):
     assert api("subtitle_style")["audio_output"] == "stereo"
     assert api("audio_output_set", mode="nesmysl") == {"audio_output": "stereo"}   # neznámá hodnota nic nezmění
     assert api("audio_output_set", mode="auto") == {"audio_output": "auto"}
+
+
+def test_update_check_survives_the_github_rate_limit(api, monkeypatch):
+    # „HTTP Error 403: rate limit exceeded“: rozhraní GitHubu omezuje dotazy na adresu; vydání se pak
+    # zjistí z běžné stránky téhož repozitáře.
+    import urllib.error
+    asked = []
+
+    class Page(_Response):
+        def __init__(self, body, url):
+            _Response.__init__(self, body)
+            self.url = url
+
+        def geturl(self):
+            return self.url
+
+    latest = ["https://github.com/petermikula-glitch/streamujtv/releases/tag/app-v0.20.0"]
+
+    def urlopen(request, timeout=None):
+        asked.append(request.full_url)
+        if request.full_url == app_api.UPDATE_URL:
+            raise urllib.error.HTTPError(request.full_url, 403, "rate limit exceeded", {}, None)
+        if request.full_url == app_api.UPDATE_PAGE:
+            return Page(b"<html></html>", latest[0])
+        if request.full_url == app_api.UPDATE_NOTES % "0.20.0":
+            return Page("Přepínač výstupu zvuku.\n".encode("utf-8"), request.full_url)
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(app_api.urllib.request, "urlopen", urlopen)
+    found = api("update_check", current="0.19.0", force=True)
+    assert found == {"available": True, "current": "0.19.0", "version": "0.20.0", "size": 0, "sha256": "",
+                     "url": "https://github.com/petermikula-glitch/streamujtv/releases/download/app-v0.20.0/MojeVidea-0.20.0.apk",
+                     "notes": "Přepínač výstupu zvuku."}
+    assert asked == [app_api.UPDATE_URL, app_api.UPDATE_PAGE, app_api.UPDATE_NOTES % "0.20.0"]
+    assert api("update_check", current="0.20.0", force=True) == {"available": False, "current": "0.20.0"}
+    assert api("update_check", current="0.19.0") == {"available": False, "current": "0.19.0"}   # samo se hned znovu neptá
+    latest[0] = "https://github.com/petermikula-glitch/streamujtv/releases"                    # stránka nic neřekla
+    assert "nepodařilo ověřit" in api("update_check", current="0.19.0", force=True)["error"]

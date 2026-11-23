@@ -491,6 +491,12 @@ má přednost, je-li nastavená) a založí vydání, pokud pro danou verzi ješ
 Nové vydání tedy znamená zvýšit `versionCode` a `versionName` v `app/build.gradle.kts` a přepsat
 `RELEASE_NOTES.md` (text se ukáže v nabídce aktualizace).
 
+Rozhraní GitHubu omezuje počet dotazů z jedné adresy (60 za hodinu, adresu může sdílet víc domácností)
+a pak odpovídá „HTTP 403: rate limit exceeded“. Kontrola nové verze proto má zálohu (`_update_from_page`):
+stránka `…/releases/latest` téhož repozitáře přesměruje na značku nejnovějšího vydání, adresa souboru APK
+se složí z verze a popis změn se vezme z `RELEASE_NOTES.md` u té značky. Otisk souboru tudy zjistit nejde;
+pravost aktualizace hlídá Android při instalaci (stejný podpisový klíč).
+
 ## Přehrávač a formáty
 
 Přehrávač je Media3/ExoPlayer. Video dekóduje čip zařízení (H.264, HEVC, VP9, AV1 – podle toho, co
