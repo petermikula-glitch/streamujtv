@@ -95,9 +95,13 @@ Kterou dlaždici karta dostane, určuje `app_api.py` polem `icon`. Existuje-li m
 obrysová ikona `ic_tile_<název>`. Ze zápisu `ikona:barva` (např. `folder:movies`) se bere jen ikona –
 barevné odstíny kategorií tento vzhled nemá.
 
-Zatím jsou v aplikaci jen prozatímní malby (`movies`, `series`, `discover_new`, `discover_popular`,
-`discover_top`, `discover_year`), prozatímní logo, banner, ikona aplikace a pozadí; ostatní dlaždice
-mají obrysovou ikonu, dokud nedorazí úplná sada maleb.
+Hotové malby mají dlaždice kategorií (`movies`, `series`, `live`, `news`, `docs`, `nature`, `kids`,
+`sport`, `fun`, `culture`, `past`, `advice`, `spirit`, `society`, `archive`). Prozatímní jsou malby
+`discover_new`, `discover_popular`, `discover_top`, `discover_year`, logo, banner, ikona aplikace
+a pozadí; ostatní dlaždice mají obrysovou ikonu, dokud nedorazí zbytek sady.
+
+Při převodu se motiv dlaždice z podkladu vyřízne a posadí vždy na stejné místo a ve stejné velikosti
+(pravá horní část), takže nezáleží na tom, jak velký je na podkladu namalovaný.
 
 - Ilustrace mají: `live`, `series`, `movies`, `docs`, `news`, `sport`, `kids`, `fun`, `past`,
   `culture`, `advice`, `nature`, `society`, `spirit`, `archive`; dlaždice Objevuj `discover_new`,

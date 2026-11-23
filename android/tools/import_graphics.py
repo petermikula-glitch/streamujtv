@@ -44,6 +44,7 @@ SVG = "{http://www.w3.org/2000/svg}"
 
 
 SURFACE = (0xE3, 0xDB, 0xC8)   # barva listu papíru, na kterém leží dlaždice a úvodní panel
+WHITE = 248                    # od této světlosti se bod bere jako čistě bílý podklad (generované obrázky mívají 253–254)
 
 
 def ink(image):
@@ -51,7 +52,8 @@ def ink(image):
     rumělka) se zachová. Bílá zmizí úplně; šedé lavírování zůstane jako poloprůhledná čerň."""
     if image.mode == "RGBA" and image.getextrema()[3][0] < 250:
         return image   # průhledné pozadí už má
-    plain = image.convert("RGB")
+    # „skoro bílá“ podkladu by jinak zůstala jako sotva viditelný závoj přes celou dlaždici
+    plain = image.convert("RGB").point([min(255, value * 255 // WHITE) for value in range(256)] * 3)
     source = plain.tobytes()
     points = bytearray(len(source) // 3 * 4)
     for index in range(0, len(source), 3):
@@ -78,6 +80,27 @@ def wide(image, size=(480, 270)):
         crop = int(width / target)
         image = image.crop((0, (height - crop) // 2, width, (height - crop) // 2 + crop))
     return image.resize(size, Image.LANCZOS)
+
+
+def motif(image, size=(480, 270), box=(0.50, 0.08, 0.95, 0.72)):
+    """Motiv dlaždice se z podkladu vyřízne a posadí do pravé horní části (``box`` v podílech dlaždice):
+    všechny motivy jsou pak stejně velké a pod nimi i vlevo zůstává místo na název, ať je na podkladu
+    namalovaný jakkoli velký. Obrázek s průhledným pozadím se jen ořízne a zmenší."""
+    if image.mode == "RGBA" and image.getextrema()[3][0] < 250:
+        return wide(image, size)
+    plain = image.convert("RGB")
+    bounds = plain.convert("L").point([255 if value < WHITE - 3 else 0 for value in range(256)]).getbbox()
+    if not bounds:
+        return wide(image, size)
+    margin = max(plain.size) // 60     # ať se neusekne slabé lavírování na okraji motivu
+    cut = plain.crop((max(0, bounds[0] - margin), max(0, bounds[1] - margin),
+                      min(plain.width, bounds[2] + margin), min(plain.height, bounds[3] + margin)))
+    room = ((box[2] - box[0]) * size[0], (box[3] - box[1]) * size[1])
+    scale = min(room[0] / cut.width, room[1] / cut.height)
+    cut = cut.resize((max(1, int(cut.width * scale)), max(1, int(cut.height * scale))), Image.LANCZOS)
+    sheet = Image.new("RGB", size, (255, 255, 255))
+    sheet.paste(cut, (int(box[2] * size[0]) - cut.width, int(box[1] * size[1] + (room[1] - cut.height) / 2)))
+    return sheet
 
 
 def number(value):
@@ -144,14 +167,14 @@ def main(source, res):
     for name, key in TILES.items():
         path = os.path.join(source, "dlazdice", name + ".png")
         if os.path.exists(path):
-            image = ink(wide(Image.open(path)))
+            image = ink(motif(Image.open(path)))
             image.save(os.path.join(res, "drawable-nodpi", "tile_%s.webp" % key), "WEBP", lossless=True, method=6)
             done.append("tile_" + key)
     for folder, names in (("objevuj", DISCOVER), ("zanry", {name: "genre_%d" % number for name, number in GENRES.items()})):
         for name, key in names.items():
             path = os.path.join(source, folder, name + ".png")
             if os.path.exists(path):
-                image = ink(wide(Image.open(path)))
+                image = ink(motif(Image.open(path)))
                 image.save(os.path.join(res, "drawable-nodpi", "tile_%s.webp" % key), "WEBP", lossless=True, method=6)
                 done.append("tile_" + key)
     for name, key in EMPTY.items():
