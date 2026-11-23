@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Ztmavení obrázku na pozadí stránky titulu: vlevo (pod textem) silnější. -->
+<!-- Obrázek na pozadí stránky titulu prosvítá papírem jen slabě: vlevo (pod textem) nejméně. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
     <gradient
         android:angle="0"
-        android:centerColor="#E00B1220"
-        android:endColor="#A80B1220"
-        android:startColor="#F50B1220" />
+        android:centerColor="#F0D2C9B4"
+        android:endColor="#D9D2C9B4"
+        android:startColor="#F7D2C9B4" />
 </shape>

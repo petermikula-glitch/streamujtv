@@ -3,10 +3,13 @@
 
     python3 android/tools/import_graphics.py <složka s podklady> [android/app/src/main/res]
 
-Složka s podklady: ``dlazdice/``, ``objevuj/`` a ``zanry/`` (PNG 800 × 450, bez textu), ``ikony/*.svg``
-(obrysové, výřez 24 × 24, skupina s ``fill="none"`` a bílou linkou), ``prazdne-stavy/`` (PNG s průhledným
-pozadím) a ``znacka/`` (Ikona-aplikace.png, Banner-Android-TV.png, Logo.png, Pozadi.png). Chybějící
-soubory se přeskočí. Potřebuje knihovnu Pillow.
+Složka s podklady: ``dlazdice/``, ``objevuj/`` a ``zanry/`` (PNG na šířku, bez textu), ``ikony/*.svg``
+(obrysové, výřez 24 × 24, skupina s ``fill="none"`` a bílou linkou), ``profily/``, ``pruvodce/``,
+``prazdne-stavy/``, ``uvod/`` a ``znacka/`` (Ikona-aplikace.png, Banner-Android-TV.png, Logo.png,
+Pozadi.png nebo Papir.png). Chybějící soubory se přeskočí. Potřebuje knihovnu Pillow.
+
+Malby jsou tuší na čistě bílém pozadí (vzhled „tuš na papíře“): bílá se při převodu odstraní, takže
+motiv v aplikaci leží na barvě papíru. Obrázek, který už průhledné pozadí má, se nemění.
 """
 import os
 import sys
@@ -38,6 +41,43 @@ PROFILES = {"Profil-klapka": "clapper", "Profil-popcorn": "popcorn", "Profil-kor
             "Profil-kocka": "cat", "Profil-raketa": "rocket"}
 GUIDE = {"Ucet": "account", "Katalog": "catalog", "Predvolby": "prefs"}
 SVG = "{http://www.w3.org/2000/svg}"
+
+
+SURFACE = (0xE3, 0xDB, 0xC8)   # barva listu papíru, na kterém leží dlaždice a úvodní panel
+
+
+def ink(image):
+    """Tuš na bílém pozadí → tuš na průhledném: čím je bod tmavší, tím je krytější, a barva (černá,
+    rumělka) se zachová. Bílá zmizí úplně; šedé lavírování zůstane jako poloprůhledná čerň."""
+    if image.mode == "RGBA" and image.getextrema()[3][0] < 250:
+        return image   # průhledné pozadí už má
+    plain = image.convert("RGB")
+    source = plain.tobytes()
+    points = bytearray(len(source) // 3 * 4)
+    for index in range(0, len(source), 3):
+        red, green, blue = source[index], source[index + 1], source[index + 2]
+        white = min(red, green, blue)        # kolik je v bodě bílého podkladu
+        cover = 255 - white
+        if cover:                            # barva bez podkladu: (c - bílá) / krytí
+            target = index // 3 * 4
+            points[target] = (red - white) * 255 // cover
+            points[target + 1] = (green - white) * 255 // cover
+            points[target + 2] = (blue - white) * 255 // cover
+            points[target + 3] = cover
+    return Image.frombytes("RGBA", plain.size, bytes(points))
+
+
+def wide(image, size=(480, 270)):
+    """Výřez na poměr stran cíle (ze středu) a zmenšení."""
+    width, height = image.size
+    target = size[0] / float(size[1])
+    if width / float(height) > target:
+        crop = int(height * target)
+        image = image.crop(((width - crop) // 2, 0, (width - crop) // 2 + crop, height))
+    else:
+        crop = int(width / target)
+        image = image.crop((0, (height - crop) // 2, width, (height - crop) // 2 + crop))
+    return image.resize(size, Image.LANCZOS)
 
 
 def number(value):
@@ -104,20 +144,22 @@ def main(source, res):
     for name, key in TILES.items():
         path = os.path.join(source, "dlazdice", name + ".png")
         if os.path.exists(path):
-            image = Image.open(path).convert("RGB").resize((480, 270), Image.LANCZOS)
-            image.save(os.path.join(res, "drawable-nodpi", "tile_%s.webp" % key), "WEBP", quality=90, method=6)
+            image = ink(wide(Image.open(path)))
+            image.save(os.path.join(res, "drawable-nodpi", "tile_%s.webp" % key), "WEBP", lossless=True, method=6)
             done.append("tile_" + key)
     for folder, names in (("objevuj", DISCOVER), ("zanry", {name: "genre_%d" % number for name, number in GENRES.items()})):
         for name, key in names.items():
             path = os.path.join(source, folder, name + ".png")
             if os.path.exists(path):
-                image = Image.open(path).convert("RGB").resize((480, 270), Image.LANCZOS)
-                image.save(os.path.join(res, "drawable-nodpi", "tile_%s.webp" % key), "WEBP", quality=90, method=6)
+                image = ink(wide(Image.open(path)))
+                image.save(os.path.join(res, "drawable-nodpi", "tile_%s.webp" % key), "WEBP", lossless=True, method=6)
                 done.append("tile_" + key)
     for name, key in EMPTY.items():
         path = os.path.join(source, "prazdne-stavy", name + ".png")
         if os.path.exists(path):
-            image = Image.open(path).convert("RGBA").resize((480, 320), Image.LANCZOS)
+            source_image = Image.open(path)
+            square = source_image.width == source_image.height
+            image = ink(source_image.resize((360, 360) if square else (480, 320), Image.LANCZOS))
             image.save(os.path.join(res, "drawable-nodpi", key + ".webp"), "WEBP", lossless=True, method=6)
             done.append(key)
     for name, key in ICONS.items():
@@ -139,18 +181,23 @@ def main(source, res):
         for name, key in names.items():
             path = os.path.join(source, folder, name + ".png")
             if os.path.exists(path):
-                image = Image.open(path).convert("RGBA").resize((size, size), Image.LANCZOS)
-                image.save(os.path.join(res, "drawable-nodpi", prefix + key + ".webp"), "WEBP", quality=92, method=6)
+                image = ink(Image.open(path).resize((size, size), Image.LANCZOS))
+                image.save(os.path.join(res, "drawable-nodpi", prefix + key + ".webp"), "WEBP", lossless=True, method=6)
                 done.append(prefix + key)
     hero = os.path.join(source, "uvod", "Uvodni-panel.png")
     if os.path.exists(hero):
-        Image.open(hero).convert("RGB").resize((1280, 720), Image.LANCZOS).save(
-            os.path.join(res, "drawable-nodpi", "hero_default.webp"), "WEBP", quality=88, method=6)
+        # úvodní panel je neprůhledný: malba se položí na barvu listu papíru
+        painted = ink(wide(Image.open(hero), (1280, 720)))
+        sheet = Image.new("RGB", painted.size, SURFACE)
+        sheet.paste(painted, (0, 0), painted)
+        sheet.save(os.path.join(res, "drawable-nodpi", "hero_default.webp"), "WEBP", quality=90, method=6)
         done.append("hero_default")
     brand = os.path.join(source, "znacka")
-    if os.path.exists(os.path.join(brand, "Pozadi.png")):
-        Image.open(os.path.join(brand, "Pozadi.png")).convert("RGB").save(
-            os.path.join(res, "drawable-nodpi", "app_background_image.webp"), "WEBP", lossless=True, method=6)
+    paper = next((os.path.join(brand, name) for name in ("Papir.png", "Pozadi.png")
+                  if os.path.exists(os.path.join(brand, name))), None)
+    if paper:
+        wide(Image.open(paper).convert("RGB"), (1920, 1080)).save(
+            os.path.join(res, "drawable-nodpi", "app_background_image.webp"), "WEBP", quality=92, method=6)
         done.append("pozadí")
     if os.path.exists(os.path.join(brand, "Banner-Android-TV.png")):
         banner = Image.open(os.path.join(brand, "Banner-Android-TV.png")).convert("RGB")

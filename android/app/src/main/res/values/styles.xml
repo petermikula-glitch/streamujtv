@@ -1,14 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Společné barvy všech obrazovek (Leanback). -->
+    <!-- Společné barvy všech obrazovek (Leanback): světlý papír, tmavá tuš. -->
     <style name="AppTheme" parent="@style/Theme.Leanback">
         <item name="android:windowBackground">@drawable/app_background</item>
         <item name="android:colorBackground">@color/bg_solid</item>
         <item name="defaultBrandColor">@color/brand</item>
         <item name="defaultBrandColorDark">@color/panel_dark</item>
-        <item name="defaultSearchColor">@color/accent</item>
-        <item name="defaultSearchBrightColor">@color/accent_bright</item>
-        <item name="defaultSearchIconColor">@color/on_accent</item>
+        <item name="defaultSearchColor">@color/surface</item>
+        <item name="defaultSearchBrightColor">@color/surface_focused</item>
+        <item name="defaultSearchIconColor">@color/ink</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:textColorHint">@color/text_secondary</item>
+        <item name="android:editTextColor">@color/text_primary</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorControlNormal">@color/text_secondary</item>
+        <item name="android:colorControlActivated">@color/accent</item>
+        <item name="android:alertDialogTheme">@style/AppDialog</item>
     </style>
 
     <style name="AppTheme.Browse" parent="@style/Theme.Leanback.Browse">
@@ -16,15 +24,23 @@
         <item name="android:colorBackground">@color/bg_solid</item>
         <item name="defaultBrandColor">@color/brand</item>
         <item name="defaultBrandColorDark">@color/panel_dark</item>
-        <item name="defaultSearchColor">@color/accent</item>
-        <item name="defaultSearchBrightColor">@color/accent_bright</item>
-        <item name="defaultSearchIconColor">@color/on_accent</item>
+        <item name="defaultSearchColor">@color/surface</item>
+        <item name="defaultSearchBrightColor">@color/surface_focused</item>
+        <item name="defaultSearchIconColor">@color/ink</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:alertDialogTheme">@style/AppDialog</item>
     </style>
 
     <style name="AppTheme.Grid" parent="@style/Theme.Leanback.VerticalGrid">
         <item name="android:windowBackground">@drawable/app_background</item>
         <item name="android:colorBackground">@color/bg_solid</item>
         <item name="defaultBrandColor">@color/brand</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:alertDialogTheme">@style/AppDialog</item>
     </style>
 
     <style name="AppTheme.GuidedStep" parent="@style/Theme.Leanback.GuidedStep">
@@ -33,10 +49,48 @@
         <item name="guidedStepBackground">@color/bg_solid</item>
         <item name="guidedActionsBackground">@color/panel</item>
         <item name="guidedActionsBackgroundDark">@color/panel_dark</item>
+        <item name="guidanceTitleStyle">@style/Guidance.Title</item>
+        <item name="guidanceDescriptionStyle">@style/Guidance.Description</item>
+        <item name="guidanceBreadcrumbStyle">@style/Guidance.Breadcrumb</item>
+        <item name="guidedActionItemChevronStyle">@style/Guidance.Chevron</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:textColorHint">@color/text_secondary</item>
+        <item name="android:editTextColor">@color/text_primary</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorControlNormal">@color/text_secondary</item>
+        <item name="android:colorControlActivated">@color/accent</item>
+        <item name="android:alertDialogTheme">@style/AppDialog</item>
+    </style>
+
+    <!-- Texty průvodce a nastavení: knihovna je má napevno světlé. -->
+    <style name="Guidance.Title" parent="Widget.Leanback.GuidanceTitleStyle">
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <style name="Guidance.Description" parent="Widget.Leanback.GuidanceDescriptionStyle">
+        <item name="android:textColor">@color/text_secondary</item>
+    </style>
+
+    <style name="Guidance.Breadcrumb" parent="Widget.Leanback.GuidanceBreadcrumbStyle">
+        <item name="android:textColor">@color/text_secondary</item>
+    </style>
+
+    <style name="Guidance.Chevron" parent="Widget.Leanback.GuidedActionItemChevronStyle">
+        <item name="android:tint">@color/text_secondary</item>
+    </style>
+
+    <!-- Okna s volbami a hlášeními: světlá, s rumělkovým zvýrazněním. -->
+    <style name="AppDialog" parent="@android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorBackground">@color/surface_focused</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
     </style>
 
     <style name="PlayerTheme" parent="@style/Theme.Leanback">
         <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:alertDialogTheme">@style/AppDialog</item>
     </style>
 
     <!-- tlačítka na stránce titulu -->
@@ -45,6 +99,7 @@
         <item name="android:textColor">@color/button_text</item>
         <item name="android:textSize">16sp</item>
         <item name="android:textAllCaps">false</item>
+        <item name="android:fontFamily">sans-serif-light</item>
         <item name="android:paddingStart">20dp</item>
         <item name="android:paddingEnd">20dp</item>
         <item name="android:paddingTop">8dp</item>

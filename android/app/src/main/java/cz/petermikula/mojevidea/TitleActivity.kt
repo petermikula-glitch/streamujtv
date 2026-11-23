@@ -145,6 +145,9 @@ class TitleActivity : FragmentActivity() {
             glide.load(it).timeout(15_000).centerCrop().transition(com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(160))
                 .into(findViewById<ImageView>(R.id.title_poster))
         }
+        // obrázek na pozadí jen jako šedá lavírovaná tuš pod papírem, ne barevná plocha
+        findViewById<ImageView>(R.id.title_backdrop).colorFilter = android.graphics.ColorMatrixColorFilter(
+            android.graphics.ColorMatrix().apply { setSaturation(0f) })
         detail.optString("backdrop").takeIf { it.isNotEmpty() }?.let {
             glide.load(it).timeout(15_000).centerCrop().transition(com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(300))
                 .into(findViewById<ImageView>(R.id.title_backdrop))

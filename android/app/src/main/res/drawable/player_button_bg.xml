@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Kulaté tlačítko v horní liště přehrávače: vybrané je jantarové. -->
+<!-- Kulaté tlačítko v horní liště přehrávače: vybrané je rumělkové. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape android:shape="oval"><solid android:color="@color/accent" /></shape>

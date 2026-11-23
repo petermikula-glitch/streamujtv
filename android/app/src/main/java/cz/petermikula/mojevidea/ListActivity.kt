@@ -234,8 +234,8 @@ class ListFragment : VerticalGridSupportFragment() {
             val density = resources.displayMetrics.density
             status = TextView(requireContext()).apply {
                 textSize = 14f
-                setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
-                setBackgroundColor(0xCC0B1220.toInt())
+                setTextColor(ContextCompat.getColor(context, R.color.chip_text))
+                setBackgroundColor(ContextCompat.getColor(context, R.color.chip_bg))
                 setPadding((16 * density).toInt(), (6 * density).toInt(), (16 * density).toInt(), (6 * density).toInt())
             }
             root.addView(status, FrameLayout.LayoutParams(

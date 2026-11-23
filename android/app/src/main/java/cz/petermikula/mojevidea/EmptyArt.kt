@@ -16,6 +16,8 @@ object EmptyArt {
         val art = if (id != 0) ContextCompat.getDrawable(context, id) else null
         val density = context.resources.displayMetrics.density
         art?.let {
+            // ilustrace prázdných stavů se kreslí jednou barvou tuše, ať jsou jakékoli
+            it.mutate().setTint(ContextCompat.getColor(context, R.color.text_secondary))
             val height = (150 * density).toInt()
             it.setBounds(0, 0, height * it.intrinsicWidth / max(1, it.intrinsicHeight), height)
         }

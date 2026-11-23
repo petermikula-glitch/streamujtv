@@ -15,16 +15,17 @@ class CardOverlay(
     accent: Int,
     private val badges: List<String> = emptyList(),
 ) : Drawable() {
-    private val chip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE60B1220.toInt() }
+    // štítek jako tah tuše: tmavý s písmem v barvě papíru
+    private val chip = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE61D1B18.toInt() }
     private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFFFFFFF.toInt()
+        color = 0xFFF0E9D9.toInt()
         textSize = 11 * density
-        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
     }
 
-    private val track = Paint().apply { color = 0xB3000000.toInt() }
+    private val track = Paint().apply { color = 0x991D1B18.toInt() }
     private val bar = Paint().apply { color = accent }
-    private val disc = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD90B1220.toInt() }
+    private val disc = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6F0E9D9.toInt() }
     private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = accent
         style = Paint.Style.STROKE
@@ -41,12 +42,12 @@ class CardOverlay(
         for (badge in badges) {
             val width = label.measureText(badge) + 10 * density
             if (left + width > area.right - 30 * density) break  // místo vpravo patří značce zhlédnutí
-            canvas.drawRoundRect(left, top, left + width, top + height, 3 * density, 3 * density, chip)
+            canvas.drawRoundRect(left, top, left + width, top + height, 2 * density, 2 * density, chip)
             canvas.drawText(badge, left + 5 * density, top + height - 5 * density, label)
             left += width + 4 * density
         }
         if (progress > 0) {
-            val height = 4 * density
+            val height = 3 * density
             val top = area.bottom - height
             canvas.drawRect(area.left.toFloat(), top, area.right.toFloat(), area.bottom.toFloat(), track)
             val end = area.left + area.width() * progress.coerceIn(0, 100) / 100f

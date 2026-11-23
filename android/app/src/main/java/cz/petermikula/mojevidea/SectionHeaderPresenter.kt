@@ -11,7 +11,7 @@ import androidx.leanback.widget.Row
 import androidx.leanback.widget.RowHeaderPresenter
 
 /**
- * Položka postranní nabídky s ikonou sekce (`ic_<název>`, zlatá jako ostatní obrysové ikony).
+ * Položka postranní nabídky s ikonou sekce (`ic_<název>`, tuší jako text).
  * Název ikony k položce dodává hlavní obrazovka; položka bez ikony ukáže jen text.
  */
 class SectionHeaderPresenter(private val iconOf: (Long) -> String) : RowHeaderPresenter() {
@@ -36,7 +36,7 @@ class SectionHeaderPresenter(private val iconOf: (Long) -> String) : RowHeaderPr
             icon.visibility = View.GONE
         } else {
             icon.setImageDrawable(ContextCompat.getDrawable(context, id)?.mutate()?.apply {
-                setTint(ContextCompat.getColor(context, R.color.accent))
+                setTint(ContextCompat.getColor(context, R.color.ink))
             })
             icon.visibility = View.VISIBLE
         }

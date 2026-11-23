@@ -58,6 +58,7 @@ class MainFragment : BrowseSupportFragment(), RowsHost {
         title = getString(R.string.app_name)
         badgeDrawable = androidx.core.content.ContextCompat.getDrawable(requireContext(), R.drawable.logo)
         headersState = HEADERS_ENABLED
+        brandColor = 0x00D2C9B4  // nabídka nemá vlastní plochu: leží na stejném papíře jako obsah
         isHeadersTransitionOnBackEnabled = true
         mainFragmentRegistry.registerFragment(PageRow::class.java, object : FragmentFactory<SectionFragment>() {
             override fun createFragment(row: Any?): SectionFragment =
@@ -89,7 +90,7 @@ class MainFragment : BrowseSupportFragment(), RowsHost {
             visibility = android.view.View.GONE
             background = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(0xF20B1220.toInt(), 0xE60B1220.toInt(), 0x000B1220),
+                intArrayOf(0xF2D2C9B4.toInt(), 0xE6D2C9B4.toInt(), 0x00D2C9B4),
             )
         }
         (view as? android.view.ViewGroup)?.addView(strip, android.widget.FrameLayout.LayoutParams(

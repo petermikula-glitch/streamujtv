@@ -14,12 +14,14 @@ import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
 
 /**
- * Pozadí obrazovky podle vybrané karty: její obrázek, silně ztmavený, aby karty a texty zůstaly čitelné.
+ * Pozadí obrazovky podle vybrané karty: její obrázek prosvítá papírem jen slabě (jako lavírovaná tuš),
+ * aby karty a texty zůstaly čitelné.
  * Mění se s krátkým zpožděním, takže rychlé projíždění karet nic nenačítá.
  */
 class Backdrop(private val activity: FragmentActivity) {
     private companion object {
         const val DELAY_MS = 500L
+        const val ENABLED = false
     }
 
     private val manager = BackgroundManager.getInstance(activity)
@@ -34,7 +36,9 @@ class Backdrop(private val activity: FragmentActivity) {
     }
 
     fun show(image: String) {
-        val url = if (image.startsWith("res:")) "" else image  // obrázek z aplikace (avatar) pozadím není
+        // Papírový vzhled má pozadí klidné: obrázek vybrané karty by ho přebarvoval. Třída zůstává,
+        // kdyby se pozadí podle karty mělo vrátit (stačí vrátit adresu obrázku).
+        val url = if (ENABLED && !image.startsWith("res:")) image else ""
         if (url == wanted) return
         wanted = url
         handler.removeCallbacksAndMessages(null)
@@ -59,7 +63,7 @@ class Backdrop(private val activity: FragmentActivity) {
                 val picture = bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return
                 val scrim = GradientDrawable(
                     GradientDrawable.Orientation.TOP_BOTTOM,
-                    intArrayOf(0xB80B1220.toInt(), 0xE60B1220.toInt(), 0xF505080F.toInt()),
+                    intArrayOf(0xD9D9D0BB.toInt(), 0xEBD2C9B4.toInt(), 0xF5C9BFA8.toInt()),
                 )
                 manager.drawable = LayerDrawable(arrayOf(BitmapDrawable(activity.resources, picture), scrim))
             }

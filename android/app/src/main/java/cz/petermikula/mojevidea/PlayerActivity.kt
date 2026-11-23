@@ -132,7 +132,7 @@ class PlayerActivity : FragmentActivity() {
         restartButton = findViewById(R.id.player_restart)
         audioButton = findViewById(R.id.player_audio)
         subtitleButton = findViewById(R.id.player_subtitles)
-        val tint = ContextCompat.getColorStateList(this, R.color.button_text)
+        val tint = ContextCompat.getColorStateList(this, R.color.player_button_text)
         for (button in listOf(restartButton, audioButton, subtitleButton)) ImageViewCompat.setImageTintList(button, tint)
         restartButton.setOnClickListener { player?.seekTo(0) }
         audioButton.setOnClickListener { chooseTrack(C.TRACK_TYPE_AUDIO) }

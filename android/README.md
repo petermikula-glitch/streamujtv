@@ -61,9 +61,14 @@ gradle assembleDebug -PsigningKeystore=/cesta/klic.keystore -PsigningPassword=�
 
 ## Vzhled a vlastní grafika
 
-Barvy jsou v `res/values/colors.xml` (tmavě modré pozadí, jantarový akcent), motivy obrazovek
-v `res/values/styles.xml`. Karty bez obrázku (kategorie, nástroje) kreslí `TileDrawable`, pozadí
-obrazovky se mění podle vybrané karty (`Backdrop`).
+Vzhled je tušová malba na tlumeném rýžovém papíře: světlé pozadí, tmavá tuš, rumělkový akcent
+(pečeť, rámeček vybrané karty). Barvy jsou v `res/values/colors.xml` – včetně barev knihovny Leanback,
+která jinak počítá s tmavým vzhledem (`lb_…`) –, motivy obrazovek v `res/values/styles.xml`. Karty bez
+obrázku (kategorie, nástroje) kreslí `TileDrawable` jako list papíru s motivem. Pozadí je klidné a podle
+vybrané karty se nemění (`Backdrop.ENABLED`). Přehrávač zůstává tmavý (`player_…`).
+
+Malby se dodávají jako černá tuš (nejvýš s jednou rumělkovou plochou) na čistě bílém pozadí;
+`tools/import_graphics.py` bílou odstraní, takže motiv v aplikaci leží na barvě papíru.
 
 Grafiku lze vyměnit bez zásahu do kódu – stačí soubor se správným názvem:
 
@@ -73,19 +78,23 @@ Grafiku lze vyměnit bez zásahu do kódu – stačí soubor se správným názv
 | Banner v nabídce Android TV | `res/drawable-xhdpi/banner.png`, `drawable-xxxhdpi` | 320 × 180 a 640 × 360 px |
 | Logo na hlavní obrazovce | `res/drawable-nodpi/logo.png` | průhledné, výška 160 px |
 | Pozadí obrazovek | `res/drawable-nodpi/app_background_image.webp` | 1920 × 1080 px |
-| Ilustrace dlaždice | `res/drawable-nodpi/tile_<název>.webp` | 480 × 270 px, bez textu, motiv vpravo |
-| Ikona dlaždice | `res/drawable/ic_tile_<název>.xml` | obrysová, bílá, výřez 24 × 24 |
-| Ikona sekce v postranní nabídce | `res/drawable/ic_section_<název>.xml` | obrysová, bílá, výřez 24 × 24 |
+| Malba na dlaždici | `res/drawable-nodpi/tile_<název>.webp` | 480 × 270 px, tuš na průhledném pozadí, bez textu, motiv vpravo |
+| Ikona dlaždice | `res/drawable/ic_tile_<název>.xml` | obrysová, výřez 24 × 24 (barví se tuší) |
+| Ikona sekce v postranní nabídce | `res/drawable/ic_section_<název>.xml` | obrysová, výřez 24 × 24 (barví se tuší) |
 | Ilustrace prázdné obrazovky | `res/drawable-nodpi/empty_<název>.webp` | 480 × 320 px, průhledné pozadí |
 | Ikona přehrávače | `res/drawable/ic_player_<název>.xml` | obrysová, bílá, výřez 24 × 24 |
 | Avatar profilu | `res/drawable-nodpi/avatar_<název>.webp` | 256 × 256 px, průhledné pozadí |
 | Ilustrace průvodce | `res/drawable-nodpi/guide_<název>.webp` | 400 × 400 px, průhledné pozadí |
 | Výchozí pozadí úvodního panelu | `res/drawable-nodpi/hero_default.webp` | 1280 × 720 px, motiv vpravo |
 
-Kterou dlaždici karta dostane, určuje `app_api.py` polem `icon`. Existuje-li ilustrace
-`tile_<název>`, vyplní dlaždici a název se vykreslí přes její ztmavený okraj; jinak se kreslí tmavě
-modrý přechod se zlatou obrysovou ikonou `ic_tile_<název>`. Zápis `ikona:barva` (např.
-`folder:movies`) vezme ikonu jedné položky a odstín druhé – tak vypadají podkategorie.
+Kterou dlaždici karta dostane, určuje `app_api.py` polem `icon`. Existuje-li malba
+`tile_<název>`, položí se na papír dlaždice (název je vlevo dole); jinak se vpravo nahoře nakreslí
+obrysová ikona `ic_tile_<název>`. Ze zápisu `ikona:barva` (např. `folder:movies`) se bere jen ikona –
+barevné odstíny kategorií tento vzhled nemá.
+
+Zatím jsou v aplikaci jen prozatímní malby (`movies`, `series`, `discover_new`, `discover_popular`,
+`discover_top`, `discover_year`), prozatímní logo a pozadí; ostatní dlaždice mají obrysovou ikonu,
+dokud nedorazí úplná sada maleb.
 
 - Ilustrace mají: `live`, `series`, `movies`, `docs`, `news`, `sport`, `kids`, `fun`, `past`,
   `culture`, `advice`, `nature`, `society`, `spirit`, `archive`; dlaždice Objevuj `discover_new`,
