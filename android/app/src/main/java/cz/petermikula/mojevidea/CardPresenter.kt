@@ -16,7 +16,7 @@ import com.bumptech.glide.Glide
  */
 class CardPresenter(
     var poster: Boolean = false,
-    /** Velká dlaždice mřížky (sekce Filmy a Seriály): tři vedle sebe přes obrazovku, jen obrázek s názvem. */
+    /** Velká dlaždice mřížky (sekce Objevuj, složky Filmy a Seriály): tři vedle sebe přes obrazovku, jen obrázek s názvem. */
     private val large: Boolean = false,
     private val onMenu: ((Card) -> Unit)? = null,
 ) : Presenter() {

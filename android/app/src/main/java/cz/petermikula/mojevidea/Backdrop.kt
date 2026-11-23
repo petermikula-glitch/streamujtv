@@ -33,7 +33,8 @@ class Backdrop(private val activity: FragmentActivity) {
         manager.isAutoReleaseOnStop = false  // po návratu z přehrávače zůstane pozadí na místě
     }
 
-    fun show(url: String) {
+    fun show(image: String) {
+        val url = if (image.startsWith("res:")) "" else image  // obrázek z aplikace (avatar) pozadím není
         if (url == wanted) return
         wanted = url
         handler.removeCallbacksAndMessages(null)

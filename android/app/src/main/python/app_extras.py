@@ -134,11 +134,26 @@ def profile_avatars(params):
     cards = []
     for avatar, label in AVATARS:
         if params.get("new"):
-            target = api._target("command", "profile_add", {"avatar": avatar})
+            # nový profil: po výběru obrázku se aplikace zeptá na jméno (předvyplní název obrázku)
+            target = api._target("input", "profile_add", {"avatar": avatar, "value": _free_name(data, label),
+                                                         "hint": "Jméno nového profilu"})
         else:
             target = api._target("command", "profile_avatar", {"id": params.get("id") or "", "avatar": avatar})
         cards.append(api._card(label, target, "Už ho někdo má" if avatar in used else "", "res:avatar_" + avatar))
     return {"items": cards, "next": None}
+
+
+def _free_name(data, base):
+    """Jméno, které ještě žádný profil nemá (Sova, Sova 2, …)."""
+    names = {item["name"] for item in data["profiles"]}
+    name, number = base, 2
+    while name in names:
+        name, number = "%s %d" % (base, number), number + 1
+    return name
+
+
+def _name(text):
+    return " ".join(str(text or "").split())[:24]
 
 
 def profile_add(params):
@@ -147,17 +162,12 @@ def profile_add(params):
         data = _load()
         if len(data["profiles"]) >= len(AVATARS):
             raise api.ApiError("Víc profilů přidat nejde.")
-        names = {item["name"] for item in data["profiles"]}
-        name = base = dict(AVATARS)[avatar]
-        number = 2
-        while name in names:
-            name, number = "%s %d" % (base, number), number + 1
+        name = _name(params.get("text")) or _free_name(data, dict(AVATARS)[avatar])
         taken = {item["id"] for item in data["profiles"]}
         profile_id = next("p%d" % index for index in range(1, 100) if "p%d" % index not in taken)
         data["profiles"].append({"id": profile_id, "name": name, "avatar": avatar})
         _save(data)
-    return {"message": "Profil „%s“ je připravený. Jméno změníte podržením OK na jeho kartě." % name,
-            "close": True}
+    return {"message": "", "toast": "Profil „%s“ je připravený." % name, "close": True}
 
 
 def _find(data, profile_id):
@@ -168,14 +178,17 @@ def _find(data, profile_id):
 
 
 def profile_rename(params):
-    name = " ".join(str(params.get("text") or "").split())[:24]
+    name = _name(params.get("text"))
     if not name:
         raise api.ApiError("Jméno profilu nemůže být prázdné.")
     with _LOCK:
         data = _load()
-        _find(data, params.get("id"))["name"] = name
+        profile = _find(data, params.get("id"))
+        if profile["name"] == name:
+            return {"message": ""}   # beze změny
+        profile["name"] = name
         _save(data)
-    return {"message": ""}
+    return {"message": "", "toast": "Profil se teď jmenuje „%s“." % name}
 
 
 def profile_avatar(params):
@@ -244,19 +257,16 @@ def _remaining(point):
 
 def hero(lib, state, section):
     """Velký panel v čele sekce: naposledy rozkoukané video, nebo nic."""
-    if section == "ivysilani":
-        rows = lib.ivys_progress(1)
-        if not rows:
-            return None
+    rows = lib.ivys_progress(1)
+    videos = lib.history_videos(in_progress=True, limit=1, include_search=True) if section != "ivysilani" else []
+    # Rozkoukané: naposledy přehrané nedokoukané video, ať je z Přehraj.to, nebo z iVysílání
+    if rows and (section == "ivysilani" or not videos
+                 or (rows[0]["last_played"] or 0) > (videos[0].get("last_played") or 0)):
         row = rows[0]
         point = (row["position"], row["total"])
-        title = "%s · %s" % (row["show_title"], row["title"]) if row["show_title"] and row["title"] else \
-            row["title"] or row["show_title"]
-        return {"title": title, "subtitle": " · ".join(part for part in ("iVysílání", _remaining(point)) if part),
+        return {"title": api._ivys_label(row), "subtitle": " · ".join(part for part in ("iVysílání", _remaining(point)) if part),
                 "image": row["image"] or "", "progress": api._percent(point), "label": "Pokračovat",
                 "target": api._target("play", "ivys_play", {"idec": row["idec"], "resume": True})}
-    # sekce Rozkoukané: naposledy přehrané nedokoukané video, ať je to film nebo díl
-    videos = lib.history_videos(in_progress=True, limit=1, include_search=True)
     if not videos:
         return None
     video = videos[0]
@@ -291,9 +301,7 @@ def watch_next(params):
                           "episode": video["kind"] == "episode", "played": int(video.get("last_played") or 0),
                           "call": "play", "params": {"vid": video["id"]}})
         for row in lib.ivys_progress(4):
-            title = "%s · %s" % (row["show_title"], row["title"]) if row["show_title"] and row["title"] else \
-                row["title"] or row["show_title"]
-            items.append({"id": api.IVYS + row["idec"], "title": title, "image": row["image"] or "",
+            items.append({"id": api.IVYS + row["idec"], "title": api._ivys_label(row), "image": row["image"] or "",
                           "position": int(row["position"]), "duration": int(row["total"]), "episode": True,
                           "played": int(row["last_played"] or 0),
                           "call": "ivys_play", "params": {"idec": row["idec"]}})

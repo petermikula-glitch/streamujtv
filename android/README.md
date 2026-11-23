@@ -105,19 +105,31 @@ z obrysových SVG udělá vektorové obrázky Androidu (`rect` a `circle` převe
 
 ## Sekce hlavní obrazovky
 
-Postranní nabídka má šest sekcí; každá je stránka s vlastními řadami (`home` v `app_api.py` vrací
-`sections` → `rows` → karty, v aplikaci `MainFragment` a `SectionFragment`):
+Postranní nabídka má pět sekcí; každá je stránka s vlastními řadami (`home` v `app_api.py` vrací
+`sections` → `rows` → karty, v aplikaci `MainFragment` a `SectionFragment`). Po spuštění se otevře
+první sekce, ve které něco je (`start`: Oblíbené, jinak Rozkoukané, jinak Objevuj):
 
-- **Filmy** – mřížka velkých dlaždic, tři vedle sebe (řady s příznakem `tiles`, další řada mřížky
-  nemá nadpis): Objevuj filmy (6 dlaždic) a Moje filmy (Stažené filmy, Filmy z mého účtu, Hledat);
-  pod ní nově přidané filmy z účtu.
-- **Seriály** – stejná mřížka: Objevuj seriály a Moje seriály (Stažené díly, Seriály z mého účtu, Hledat).
-- **Oblíbené** – řady Filmy, Seriály a Pořady z iVysílání.
-- **Rozkoukané** – nahoře panel s naposledy rozkoukaným videem, řady Filmy, Seriály, Další díly
-  a iVysílání a dlaždice Naposledy přehrané. Video se sem zařadí po deseti sekundách přehrávání
-  (`IN_PROGRESS_AFTER` v `app_api.py`; doplněk pro Kodi počítá až od jedné minuty).
+- **Oblíbené** – řady Filmy a Seriály; v každé jsou tituly z Přehraj.to i oblíbené pořady z iVysílání
+  (ty mají v popisku „iVysílání“).
+- **Rozkoukané** – nahoře panel s naposledy rozkoukaným videem, řady Filmy a Seriály (obě služby
+  pohromadě, naposledy přehrané první), Další díly a dlaždice Naposledy přehrané. Video se sem zařadí
+  po deseti sekundách přehrávání (`IN_PROGRESS_AFTER` v `app_api.py`; doplněk pro Kodi počítá až od
+  jedné minuty).
+- **Objevuj** – velké dlaždice Filmy, Seriály a Hledat a pod nimi řady právě populárních filmů
+  a seriálů. Ty mají v datech místo karet `call` a aplikace si je donačte sama až po zobrazení sekce,
+  aby hlavní obrazovka nečekala na síť (bez klíče TMDB chybí).
+  Dlaždice Filmy a Seriály otevírají vlastní obrazovku (cíl typu `page`, akce `discover_home`,
+  `PageActivity`): mřížka velkých dlaždic, tři vedle sebe (řady s příznakem `tiles`, další řada mřížky
+  nemá nadpis) – Objevuj filmy (6 dlaždic) a Moje filmy (Stažené filmy, Filmy z mého účtu, Hledat),
+  pod ní nově přidané filmy z účtu; u seriálů obdobně.
 - **iVysílání** – živé kanály, rozkoukané pořady, Moje pořady a kategorie; nic jiného.
 - **Nástroje** – hledání, stahování, synchronizace, metadata, nastavení, předvolby, profily, diagnostika.
+
+Film a seriál z iVysílání se rozlišuje podle druhu pořadu, který si aplikace zapamatuje při jeho
+otevření nebo přidání do oblíbených (`ivys_kind:<pořad>`); u neznámého pořadu se v Rozkoukaných
+odhadne podle názvů (díl má vedle názvu pořadu i svůj vlastní). Co není film, je v řadě Seriály.
+
+V záhlaví vedle tlačítka hledání je aktivní profil (obrázek a jméno); kliknutím se otevře výběr profilu.
 
 **Objevuj** (`app_discover.py`): Přehraj.to nemá katalog podle roku ani žánru, jen hledání podle názvu
 souboru. Seznamy titulů proto dodává TMDB (novinky, populární, nejlépe hodnocené, podle roku, podle
@@ -127,7 +139,8 @@ otevření titulu, ne u celého seznamu.
 
 **Oblíbené** jsou jen v aplikaci (`favorites.json`): film či seriál z katalogu, nebo titul z Objevuj.
 Mají vlastní sekci v postranní nabídce, filmy a seriály každé svou řadu.
-Přidávají se z nabídky karty (podržení OK).
+Přidávají se z nabídky karty (podržení OK); pořad z iVysílání kartou „Přidat do oblíbených“ ve výpisu
+jeho dílů (ukládá se v tabulce `ivys_favorites` a je vidět i v iVysílání jako Moje pořady).
 
 **Stránka titulu** (`TitleActivity`, data z `discover_title`): údaje z TMDB, tlačítka a řady karet;
 pod verzemi řady Celá série, Podobné tituly a Hrají. Hodnocení ČSFD se dotahuje zvlášť (`title_csfd`).
@@ -165,7 +178,9 @@ Když se postranní nabídka sbalí, zůstane vlevo úzká lišta ikon sekcí.
 a předvolby přehrávání. Tabulky katalogu se nemění (sdílí je doplněk pro Kodi): osobní stav patří
 vždy aktivnímu profilu a při přepnutí se uloží do `profile_<id>.json` a nahradí stavem druhého
 profilu. Katalog, stažené soubory a přihlášení jsou společné. Při víc profilech se aplikace po startu
-zeptá, kdo se dívá.
+zeptá, kdo se dívá. Přepíná se kliknutím na profil v záhlaví hlavní obrazovky nebo dlaždicí
+v Nástrojích; nový profil se po výběru obrázku zeptá na jméno. Jméno se ukládá i potvrzením na
+klávesnici televize (cíl typu `input`, `Navigator.askText`).
 
 **Pokračovat na domovské obrazovce televize** (`WatchNext.kt`, akce `watch_next`): rozkoukaná videa
 aktivního profilu se zapisují do řady „Pokračovat ve sledování“ Android TV. Odkaz otevírá

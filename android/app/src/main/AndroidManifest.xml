@@ -37,6 +37,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".ListActivity" android:theme="@style/AppTheme.Grid" />
+        <activity android:name=".PageActivity" />
         <activity android:name=".TitleActivity" />
         <activity android:name=".SearchActivity" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".SettingsActivity" android:theme="@style/AppTheme.GuidedStep" />

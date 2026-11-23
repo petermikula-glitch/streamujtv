@@ -212,7 +212,8 @@ def favorite_cards(lib, state, limit=None, kind=None):
 def favorites(params):
     kind = params.get("kind") if params.get("kind") in ("movie", "tv") else None
     with api._library() as lib:
-        cards = favorite_cards(lib, api._state(lib), kind=kind)
+        # tituly z Přehraj.to a za nimi oblíbené pořady z iVysílání
+        cards = favorite_cards(lib, api._state(lib), kind=kind) + api.ivys_favorite_cards(lib, kind)
     title = {"movie": "Oblíbené filmy", "tv": "Oblíbené seriály"}.get(kind, "Oblíbené")
     return {"title": title, "items": cards, "next": None, "empty_art": "favorites",
             "empty": "Zatím nemáte nic oblíbeného.\n\nPodržte tlačítko OK na filmu nebo seriálu "
@@ -306,6 +307,25 @@ def discover(params):
         cards.insert(0, api._card("Filtr", {"type": "filter", "call": "discover_filters", "params": base},
                                   _filter_summary(base) or "Žánr, období, hodnocení, řazení", icon="settings:search"))
     return {"items": cards, "next": following, "empty": "V tomto výběru TMDB nic nenabízí."}
+
+
+def discover_row(params):
+    """Řada titulů na hlavní obrazovce (sekce Objevuj): prvních pár položek seznamu a karta „Zobrazit vše“.
+
+    Aplikace si ji donačítá sama po zobrazení sekce; bez připojení řada prostě chybí.
+    """
+    kind = _kind(params)
+    items, _pages = _list_items(params)
+    items = [item for item in items if isinstance(item, dict) and item.get("id")][:api.HOME_ROW]
+    with api._library() as lib:
+        state = api._state(lib)
+        state["available"] = _availability(lib, kind, [item["id"] for item in items])
+    cards = [_item_card(item, kind, state) for item in items]
+    if cards:
+        name = "%s – populární" % _plural(kind)
+        cards.append(api._card("Zobrazit vše", api._target("list", "discover", dict(params), name),
+                               "A filtr podle žánru, období a hodnocení", icon="all"))
+    return {"items": cards}
 
 
 RATINGS = (("", "Vše"), ("60", "60 % a víc"), ("70", "70 % a víc"), ("80", "80 % a víc"))
@@ -1249,5 +1269,5 @@ ACTIONS = {
     "play_next": play_next, "title_csfd": title_csfd, "favorites_check": favorites_check,
     "discover_download_season": discover_download_season, "discover_filters": discover_filters,
     "discover_person": discover_person, "discover_episode_play": discover_episode_play,
-    "discover_movie_play": discover_movie_play,
+    "discover_movie_play": discover_movie_play, "discover_row": discover_row,
 }

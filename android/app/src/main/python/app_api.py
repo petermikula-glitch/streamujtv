@@ -6,6 +6,8 @@ Aplikace volá jedinou funkci ``call(akce, parametry_json)`` a dostane JSON:
 O tom, kam která položka vede, rozhoduje tento modul – každá karta nese ``target``:
 
 * ``{"type": "list", "call": akce, "params": {…}, "title": …}`` – otevřít výpis,
+* ``{"type": "page", "call": akce, "params": {…}, "title": …}`` – otevřít obrazovku s řadami karet
+  (akce vrací ``{"title", "rows"}`` jako sekce hlavní obrazovky),
 * ``{"type": "play", "call": akce, "params": {…}}`` – přehrát,
 * ``{"type": "command", "call": akce, "params": {…}}`` – provést a zobrazit zprávu,
 * ``{"type": "settings"}`` / ``{"type": "search"}`` – obrazovky aplikace.
@@ -399,33 +401,85 @@ def _in_progress(lib, state, limit=HOME_ROW):
     return [_video_card(video, metas.get(video["meta_key"]), state) for video in videos]
 
 
+def _ivys_label(row):
+    """Název rozkoukaného videa z iVysílání: „pořad · díl“, u filmu jen název."""
+    if row["show_title"] and row["title"] and row["show_title"] != row["title"]:
+        return "%s · %s" % (row["show_title"], row["title"])
+    return row["title"] or row["show_title"]
+
+
+def _ivys_progress_card(row):
+    point = (row["position"], row["total"])
+    return _card(_ivys_label(row), _target("play", "ivys_play", {"idec": row["idec"]}), "iVysílání", row["image"],
+                 _percent(point), wide=True)
+
+
 def _ivys_in_progress(lib, limit=HOME_ROW):
     """Rozkoukané pořady z iVysílání."""
-    cards = []
-    for row in lib.ivys_progress(limit):
-        point = (row["position"], row["total"])
-        label = "%s · %s" % (row["show_title"], row["title"]) if row["show_title"] and row["title"] else \
-            row["title"] or row["show_title"]
-        cards.append(_card(label, _target("play", "ivys_play", {"idec": row["idec"]}), "iVysílání", row["image"],
-                           _percent(point), wide=True))
-    return cards
+    return [_ivys_progress_card(row) for row in lib.ivys_progress(limit)]
+
+
+IVYS_KIND = "ivys_kind:"   # zapamatovaný druh pořadu z iVysílání: movie (jediné video), nebo series
+
+
+def _ivys_remember_kind(lib, show_id, kind):
+    """Zapamatuje, jestli je pořad film: podle toho se řadí v Oblíbených a Rozkoukaných."""
+    value = "movie" if kind == "movie" else "series"
+    if show_id and kind and lib.get_kv(IVYS_KIND + show_id) != value:
+        lib.set_kv(IVYS_KIND + show_id, value)
+
+
+def _ivys_is_film(lib, show_id, title="", show_title=""):
+    """Je pořad z iVysílání film? Zapamatovaný druh, jinak údaj z mezipaměti, jinak odhad podle názvů
+    (díl má vedle názvu pořadu i svůj vlastní). Bez dotazu na síť – používá to hlavní obrazovka."""
+    kind = lib.get_kv(IVYS_KIND + show_id) if show_id else None
+    if not kind and show_id:
+        cached = lib.cache_get("app:ivys:show:" + show_id)
+        kind = cached.get("type") if isinstance(cached, dict) else None
+    if kind:
+        return kind == "movie"
+    return bool(title or show_title) and (not title or not show_title or title == show_title)
+
+
+def _ivys_favorite_card(item, film):
+    """Oblíbený pořad z iVysílání v sekci Oblíbené: film se rovnou přehraje, pořad otevře své díly."""
+    if film:
+        target = _target("play", "ivys_play", {"show": item["show_id"]})
+    else:
+        target = _target("list", "ivys_show", {"id": item["show_id"]}, item["title"])
+    menu = [{"title": "Přehrát" if film else "Otevřít", "target": target},
+            {"title": "Odebrat z oblíbených",
+             "target": _target("command", "ivys_favorite", {"id": item["show_id"], "remove": True})}]
+    return _card(item["title"], target, "iVysílání", item["poster"] or item["image"], wide=not item["poster"],
+                 icon="favorites", menu=menu)
+
+
+def ivys_favorite_cards(lib, kind=None, limit=None):
+    """Oblíbené pořady z iVysílání; ``kind`` (``movie`` / ``tv``) vybere jen filmy, nebo jen pořady s díly."""
+    items = [(item, _ivys_is_film(lib, item["show_id"])) for item in lib.ivys_favorites()]
+    cards = [_ivys_favorite_card(item, film) for item, film in items
+             if kind is None or film == (kind == "movie")]
+    return cards[:limit] if limit else cards
 
 
 def home(params):
     """Hlavní obrazovka: sekce postranní nabídky, každá se svými řadami karet.
 
-    ``{"sections": [{"id", "title", "rows": [{"title", "items"}]}], "pending"}``. Sekce: Filmy, Seriály,
-    Oblíbené, Rozkoukané (vše z Přehraj.to), iVysílání a Nástroje.
+    ``{"sections": [{"id", "title", "rows": [{"title", "items"}]}], "start", "pending"}``. Sekce: Oblíbené
+    a Rozkoukané (filmy a seriály z Přehraj.to i z iVysílání pohromadě), Objevuj (složky Filmy a Seriály),
+    iVysílání a Nástroje. ``start`` je sekce, kterou aplikace po spuštění otevře: první, ve které něco je.
     """
     settings = _settings()
     with _library() as lib:
         state = _state(lib)
-        own = {"movies": _movie_rows(lib, state, settings), "series": _show_rows(lib, state),
-               "favorites": _favorite_rows(lib, state), "progress": _progress_rows(lib, state)}
-        television = _ivysilani_rows(lib)
-        # velký panel „Pokračovat“ má sekce Rozkoukané (a iVysílání); Filmy a Seriály jsou mřížka dlaždic
-        heroes = {name: app_extras.hero(lib, state, name) for name in ("progress", "ivysilani")}
         empty = not lib.count_videos(visible_only=True)
+        own = {"favorites": _favorite_rows(lib, state), "progress": _progress_rows(lib, state),
+               "discover": _discover_rows(empty and not settings.get("username"))}
+        # prázdná sekce má jen nápovědu: po spuštění se otevře první, ve které něco je
+        filled = [name for name in ("favorites", "progress") if not own[name][0].get("hint")]
+        television = _ivysilani_rows(lib)
+        # velký panel „Pokračovat“ mají sekce Rozkoukané a iVysílání
+        heroes = {name: app_extras.hero(lib, state, name) for name in ("progress", "ivysilani")}
     profile = app_extras.current()
     last = settings.get("last_sync")
     tools = [{"title": "Nástroje", "items": [
@@ -447,16 +501,16 @@ def home(params):
               icon="settings:history"),
     ]}]
     # "pending": ve frontě něco čeká – aplikace po startu znovu spustí službu stahování
-    sections = [{"id": "movies", "title": "Filmy", "icon": "section_movies", "rows": own["movies"]},
-                {"id": "series", "title": "Seriály", "icon": "section_series", "rows": own["series"]},
-                {"id": "favorites", "title": "Oblíbené", "icon": "section_favorites", "rows": own["favorites"]},
+    sections = [{"id": "favorites", "title": "Oblíbené", "icon": "section_favorites", "rows": own["favorites"]},
                 {"id": "progress", "title": "Rozkoukané", "icon": "section_progress", "rows": own["progress"]},
+                {"id": "discover", "title": "Objevuj", "icon": "section_discover", "rows": own["discover"]},
                 {"id": "ivysilani", "title": "iVysílání", "icon": "section_ivysilani", "rows": television},
                 {"id": "tools", "title": "Nástroje", "icon": "section_tools", "rows": tools}]
     for section in sections:
         if heroes.get(section["id"]):
             section["hero"] = heroes[section["id"]]   # velký panel s naposledy rozkoukaným videem
     return {"sections": sections,
+            "start": [section["id"] for section in sections].index((filled + ["discover"])[0]),
             "profile": {"name": profile["name"], "avatar": profile["avatar"], "count": profile["count"]},
             # první spuštění bez účtu a katalogu: aplikace nabídne průvodce
             "welcome": bool(empty and not settings.get("username") and not settings.get("onboarded")),
@@ -468,7 +522,39 @@ def _hint(title, text, icon, target=None):
     return [_card(title, target or _target("refresh"), text, icon=icon)]
 
 
-TILES_PER_ROW = 3   # velké dlaždice sekcí Filmy a Seriály: tři vedle sebe přes celou šířku
+def _discover_rows(newcomer):
+    """Sekce Objevuj: složky Filmy a Seriály (každá otevře svou obrazovku dlaždic) a hledání; pod nimi
+    řady právě populárních titulů, které si aplikace donačte sama (``call``), aby hlavní obrazovka
+    nečekala na síť."""
+    rows = []
+    if newcomer:
+        rows.append({"title": "Začínáme", "items": [
+            _card("Přihlásit se k Přehraj.to", _target("settings"), "E-mail a heslo, pak Synchronizovat",
+                  icon="login")]})
+    rows += _tile_rows("Objevuj", [
+        _card("Filmy", _target("page", "discover_home", {"kind": "movie"}, "Filmy"),
+              "Novinky, žánry, stažené a moje filmy", icon="movies"),
+        _card("Seriály", _target("page", "discover_home", {"kind": "tv"}, "Seriály"),
+              "Novinky, žánry, stažené díly a moje seriály", icon="series"),
+        _card("Hledat", _target("search"), "Film, seriál, herec nebo režisér", icon="search"),
+    ])
+    if _tmdb().enabled:
+        for kind, title in (("movie", "Právě populární filmy"), ("tv", "Právě populární seriály")):
+            rows.append({"title": title, "items": [], "poster": True, "call": "discover_row",
+                         "params": {"kind": kind, "category": "popular"}})
+    return rows
+
+
+def discover_home(params):
+    """Obrazovka složky Filmy / Seriály ze sekce Objevuj: ``{"title", "rows"}`` jako sekce hlavní obrazovky."""
+    series = params.get("kind") == "tv"
+    with _library() as lib:
+        state = _state(lib)
+        rows = _show_rows(lib, state) if series else _movie_rows(lib, state)
+    return {"title": "Seriály" if series else "Filmy", "rows": rows}
+
+
+TILES_PER_ROW = 3   # velké dlaždice (sekce Objevuj, složky Filmy a Seriály): tři vedle sebe přes celou šířku
 
 
 def _tile_rows(title, tiles):
@@ -487,15 +573,9 @@ def _counted(title, count):
     return "%s (%d)" % (title, count) if count else title
 
 
-def _movie_rows(lib, state, settings):
-    """Sekce Filmy: mřížka dlaždic (objevování, stažené, vlastní filmy, hledání) a nově přidané filmy z účtu."""
-    rows = []
-    total = lib.count_videos(visible_only=True)
-    if not total and not settings.get("username"):
-        rows.append({"title": "Začínáme", "items": [
-            _card("Přihlásit se k Přehraj.to", _target("settings"), "E-mail a heslo, pak Synchronizovat",
-                  icon="login")]})
-    rows += _tile_rows("Objevuj filmy", app_discover.home_tiles("movie"))
+def _movie_rows(lib, state):
+    """Složka Filmy: mřížka dlaždic (objevování, stažené, vlastní filmy, hledání) a nově přidané filmy z účtu."""
+    rows = _tile_rows("Objevuj filmy", app_discover.home_tiles("movie"))
     rows += _tile_rows("Moje filmy", [
         _card(_counted("Stažené filmy", _saved_count(lib, state, False)),
               _target("list", "downloads", {"kind": "movie"}, "Stažené filmy"), "Hrají i bez internetu", icon="download"),
@@ -511,7 +591,7 @@ def _movie_rows(lib, state, settings):
 
 
 def _show_rows(lib, state):
-    """Sekce Seriály: mřížka dlaždic (objevování, stažené díly, vlastní seriály, hledání) a seriály z účtu."""
+    """Složka Seriály: mřížka dlaždic (objevování, stažené díly, vlastní seriály, hledání) a seriály z účtu."""
     rows = _tile_rows("Objevuj seriály", app_discover.home_tiles("tv"))
     shows = lib.shows(order="added", limit=HOME_ROW)
     rows += _tile_rows("Moje seriály", [
@@ -527,46 +607,43 @@ def _show_rows(lib, state):
 
 
 def _favorite_rows(lib, state):
-    """Sekce Oblíbené: filmy, seriály a pořady z iVysílání."""
+    """Sekce Oblíbené: filmy a seriály, v každé řadě tituly z Přehraj.to i pořady z iVysílání."""
     rows = []
     for kind, name in (("movie", "Filmy"), ("tv", "Seriály")):
         count = len([entry for entry in state["favorites"].values() if (entry.get("kind") == "tv") == (kind == "tv")])
-        cards = app_discover.favorite_cards(lib, state, HOME_ROW, kind)
-        if count > HOME_ROW:
+        television = ivys_favorite_cards(lib, kind)
+        cards = app_discover.favorite_cards(lib, state, HOME_ROW, kind) + television[:HOME_ROW]
+        if count > HOME_ROW or len(television) > HOME_ROW:
             cards.append(_card("Všechny", _target("list", "favorites", {"kind": kind}, "Oblíbené – " + name.lower()),
-                               "%d položek" % count, icon="favorites"))
+                               "%d položek" % (count + len(television)), icon="favorites"))
         if cards:
             rows.append({"title": name, "items": cards})
-    programmes = [_card(item["title"], _target("list", "ivys_show", {"id": item["show_id"]}, item["title"]), "",
-                        item["image"] or item["poster"], wide=True, icon="favorites")
-                  for item in lib.ivys_favorites()[:HOME_ROW]]
-    if programmes:
-        rows.append({"title": "Pořady z iVysílání", "items": programmes})
     if not rows:
-        rows.append({"title": "Oblíbené", "items": _hint(
+        rows.append({"title": "Oblíbené", "hint": True, "items": _hint(
             "Zatím nic", "Podržte OK na filmu nebo seriálu a zvolte Přidat do oblíbených", "favorites",
             _target("list", "favorites", {}, "Oblíbené"))})
     return rows
 
 
 def _progress_rows(lib, state):
-    """Sekce Rozkoukané: nedokoukané filmy, díly seriálů a pořady z iVysílání."""
+    """Sekce Rozkoukané: nedokoukané filmy a díly seriálů, z Přehraj.to i z iVysílání pohromadě."""
     rows = []
     videos = lib.history_videos(in_progress=True, limit=2 * HOME_ROW, include_search=True)
     metas = lib.get_metas(video["meta_key"] for video in videos)
+    television = lib.ivys_progress(2 * HOME_ROW)
     for name, episodes in (("Filmy", False), ("Seriály", True)):
-        cards = [_video_card(video, metas.get(video["meta_key"]), state) for video in videos
-                 if (video["kind"] == "episode") == episodes][:HOME_ROW]
-        if cards:
-            rows.append({"title": name, "items": cards})
+        found = [(video["last_played"] or 0, _video_card(video, metas.get(video["meta_key"]), state))
+                 for video in videos if (video["kind"] == "episode") == episodes]
+        found += [(row["last_played"] or 0, _ivys_progress_card(row)) for row in television
+                  if _ivys_is_film(lib, row["show_id"], row["title"], row["show_title"]) != episodes]
+        found.sort(key=lambda entry: -entry[0])   # naposledy přehrané první, ať jsou odkudkoli
+        if found:
+            rows.append({"title": name, "items": [card for _played, card in found[:HOME_ROW]]})
     following = app_discover.next_up_cards(lib, state)
     if following:
         rows.append({"title": "Další díly", "items": following})
-    television = _ivys_in_progress(lib)
-    if television:
-        rows.append({"title": "iVysílání", "items": television})
     if not rows:
-        rows.append({"title": "Rozkoukané", "items": _hint(
+        rows.append({"title": "Rozkoukané", "hint": True, "items": _hint(
             "Nic rozkoukaného", "Sem se uloží film nebo díl, který nedokoukáte", "history",
             _target("list", "played", {}, "Naposledy přehrané"))})
     if lib.history_videos(limit=1, include_search=True):
@@ -1231,9 +1308,10 @@ def ivys_show(params):
     season = params.get("season") or ""
     with _library() as lib:
         lib.ivys_favorite_seen(show_id, programme["episode_count"])
+        _ivys_remember_kind(lib, show_id, programme.get("type"))
         state = _ivys_state(lib)
     favorite = show_id in state["favorites"]
-    toggle = _card("Odebrat z Mých pořadů" if favorite else "Přidat do Mých pořadů",
+    toggle = _card("Odebrat z oblíbených" if favorite else "Přidat do oblíbených",
                    _target("command", "ivys_favorite", {"id": show_id, "remove": favorite}), icon="favorites")
     if programme["seasons"] and not season:
         cards = [_card(item["title"] or programme["title"],
@@ -1282,12 +1360,13 @@ def ivys_favorite(params):
     if params.get("remove"):
         with _library() as lib:
             lib.ivys_favorite_remove(show_id)
-        return {"message": "Odebráno z Mých pořadů."}
+        return {"message": "Odebráno z oblíbených."}
     programme = _ivys_call(lambda: _cached("ivys:show:" + show_id, TTL["show"], lambda: _ivys().show(show_id)))
     with _library() as lib:
         lib.ivys_favorite_add(show_id, programme["title"], programme["image"], programme["poster"],
                               programme["episode_count"])
-    return {"message": "Přidáno do Mých pořadů."}
+        _ivys_remember_kind(lib, show_id, programme.get("type"))
+    return {"message": "Přidáno do oblíbených. Najdete je v sekci Oblíbené i v iVysílání."}
 
 
 def ivys_play(params):
@@ -1299,6 +1378,8 @@ def ivys_play(params):
     idec = str(params.get("idec") or "") or _ivys_call(lambda: client.show(str(params.get("show") or "")))["idec"]
     stream = _ivys_stream(client, idec, inspect=bool(params.get("inspect")))
     with _library() as lib:
+        if params.get("show") and not params.get("idec"):
+            _ivys_remember_kind(lib, stream["show_id"], "movie")   # přehrání celého pořadu jedním videem: film
         lib.ivys_touch(idec, stream["show_id"], stream["episode_title"] or stream["title"], stream["show_title"],
                        stream["image"])
         point = lib.ivys_states()[0].get(idec)
@@ -1665,7 +1746,8 @@ ACTIONS.update({
     "downloads": downloads, "download_add": download_add, "download_next": download_next,
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,
     "download_remove": download_remove, "update_check": update_check,
-    "home": home, "movies": movies, "shows": shows, "show": show, "played": played, "search": search,
+    "home": home, "discover_home": discover_home, "movies": movies, "shows": shows, "show": show, "played": played,
+    "search": search,
     "prehrajto_search": prehrajto_search, "search_history": search_history, "play_failed": play_failed,
     "play": play, "progress_save": progress_save, "link_failed": link_failed,
     "settings_get": settings_get, "settings_set": settings_set, "account_status": account_status,

@@ -51,7 +51,10 @@ def _titles(items):
 def _section(api, name):
     """Řady jedné sekce hlavní obrazovky: {název řady: karty}. Mřížka dlaždic je víc řad pod jedním
     nadpisem (další jsou bez nadpisu) – tady se spojí do jedné."""
-    section = next(item for item in api("home")["sections"] if item["id"] == name)
+    if name in ("movies", "series"):   # složky sekce Objevuj mají vlastní obrazovku
+        section = api("discover_home", kind="tv" if name == "series" else "movie")
+    else:
+        section = next(item for item in api("home")["sections"] if item["id"] == name)
     rows, last = {}, ""
     for row in section["rows"]:
         last = row["title"] or last
@@ -60,20 +63,28 @@ def _section(api, name):
 
 
 def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
-    sections = api("home")["sections"]
+    home = api("home")
+    sections = home["sections"]
     assert [(section["id"], section["title"]) for section in sections] == [
-        ("movies", "Filmy"), ("series", "Seriály"), ("favorites", "Oblíbené"), ("progress", "Rozkoukané"),
+        ("favorites", "Oblíbené"), ("progress", "Rozkoukané"), ("discover", "Objevuj"),
         ("ivysilani", "iVysílání"), ("tools", "Nástroje")]
-    films, series = _section(api, "movies"), _section(api, "series")
-    assert list(films) == ["Začínáme", "Objevuj filmy", "Moje filmy"]
+    assert home["start"] == 2                              # nic oblíbeného ani rozkoukaného: začíná se v Objevuj
+    discover = _section(api, "discover")                   # dvě složky a hledání; přihlášení, dokud účet chybí
+    assert list(discover) == ["Začínáme", "Objevuj"] and _titles(discover["Objevuj"]) == ["Filmy", "Seriály", "Hledat"]
+    assert discover["Začínáme"][0]["target"] == {"type": "settings"}
+    assert discover["Objevuj"][0]["target"] == {"type": "page", "call": "discover_home", "params": {"kind": "movie"},
+                                                "title": "Filmy"}
+    assert discover["Objevuj"][1]["target"]["params"] == {"kind": "tv"} and sections[2]["rows"][1]["tiles"] is True
+    assert api("discover_home", kind="tv")["title"] == "Seriály"
+    films, series = _section(api, "movies"), _section(api, "series")     # obsah složek: mřížky dlaždic jako dřív
+    assert list(films) == ["Objevuj filmy", "Moje filmy"]
     assert list(series) == ["Objevuj seriály", "Moje seriály"]
-    grid = [row for row in api("home")["sections"][0]["rows"] if row.get("tiles")]   # velké dlaždice po třech
+    grid = [row for row in api("discover_home", kind="movie")["rows"] if row.get("tiles")]   # velké dlaždice po třech
     assert [(row["title"], len(row["items"])) for row in grid] == [("Objevuj filmy", 3), ("", 3), ("Moje filmy", 3)]
     assert _titles(films["Moje filmy"]) == ["Stažené filmy", "Filmy z mého účtu", "Hledat"]
     assert films["Moje filmy"][0]["target"] == {"type": "list", "call": "downloads", "params": {"kind": "movie"},
                                                 "title": "Stažené filmy", "poster": True}
     assert _titles(series["Moje seriály"]) == ["Stažené díly", "Seriály z mého účtu", "Hledat"]
-    assert films["Začínáme"][0]["target"] == {"type": "settings"}
     assert _titles(films["Objevuj filmy"]) == ["Novinky", "Populární", "Nejlépe hodnocené", "Podle roku",
                                                 "Podle žánru", "Československé"]
     assert series["Objevuj seriály"][3]["target"] == {"type": "list", "call": "discover_years",
@@ -303,11 +314,11 @@ def test_ivysilani_browsing_playback_and_my_shows(api):
     assert len(listing["items"]) == 80 and listing["next"]["params"] == {"cid": "3958", "offset": 80}
 
     seasons = api("ivys_show", id="12")
-    assert _titles(seasons["items"]) == ["I. řada", "Filmy o seriálu", "Všechny díly", "Přidat do Mých pořadů"]
+    assert _titles(seasons["items"]) == ["I. řada", "Filmy o seriálu", "Všechny díly", "Přidat do oblíbených"]
     episodes = api("ivys_show", id="12", season="season:1")
     assert len(episodes["items"]) == 41 and episodes["next"]["params"]["offset"] == 40
-    assert api("ivys_favorite", id="12") == {"message": "Přidáno do Mých pořadů."}
-    assert _titles(api("ivys_show", id="12")["items"])[-1] == "Odebrat z Mých pořadů"
+    assert api("ivys_favorite", id="12")["message"].startswith("Přidáno do oblíbených.")
+    assert _titles(api("ivys_show", id="12")["items"])[-1] == "Odebrat z oblíbených"
     with app_api._library() as lib:
         lib.ivys_favorite_seen("12", 120)
     assert api("ivys_favorites")["items"][0]["subtitle"] == "nové díly: 3"
@@ -318,9 +329,9 @@ def test_ivysilani_browsing_playback_and_my_shows(api):
     assert stream["title"] == "Na plovárně · Terry Pratchett"
     api("progress_save", track=stream["track"], position=400, total=1326)
     assert api("ivys_play", idec="211522160100014")["position"] == 400
-    progress = _section(api, "ivysilani")["Rozkoukané"]                   # rozkoukané z iVysílání jen tady
-    assert "Filmy" not in _section(api, "progress") and "Seriály" not in _section(api, "progress")
+    progress = _section(api, "ivysilani")["Rozkoukané"]
     assert progress[0]["title"] == "Na plovárně · Terry Pratchett" and progress[0]["progress"] == 30
+    assert _section(api, "progress")["Seriály"] == progress               # a stejná karta i ve společných Rozkoukaných
     live_stream = api("ivys_play", channel="CH_24", timeshift=True)
     assert live_stream["live"] and live_stream["url"].endswith("token=shift") and live_stream["track"] == ""
     assert api("ivys_play", idec="999")["error"].startswith("ČT bohužel nemá práva")
@@ -1130,16 +1141,21 @@ def test_profiles_keep_progress_favourites_and_preferences_apart(api, monkeypatc
     assert listed["items"][0]["subtitle"] == "Právě se dívá" and listed["items"][0]["image"] == "res:avatar_clapper"
     avatars = api("profile_avatars", new=1)["items"]
     assert _titles(avatars) == ["Klapka", "Popcorn", "Koruna", "Sova", "Kočka", "Raketa"]
-    assert avatars[0]["subtitle"] == "Už ho někdo má" and avatars[3]["target"]["params"] == {"avatar": "owl"}
-    added = api(avatars[3]["target"]["call"], **avatars[3]["target"]["params"])
-    assert "Sova" in added["message"] and added["close"] is True
+    assert avatars[0]["subtitle"] == "Už ho někdo má"
+    assert avatars[3]["target"] == {"type": "input", "call": "profile_add", "params": {   # po obrázku se zeptá na jméno
+        "avatar": "owl", "value": "Sova", "hint": "Jméno nového profilu"}}
+    added = api("profile_add", avatar="owl", text="")                       # bez jména dostane název obrázku
+    assert added == {"message": "", "toast": "Profil „Sova“ je připravený.", "close": True}
+    assert api("profile_avatars", new=1)["items"][3]["target"]["params"]["value"] == "Sova 2"
     owl = api("profiles")["items"][1]
     assert (owl["title"], owl["subtitle"], owl["image"]) == ("Sova", "Přepnout", "res:avatar_owl")
     assert [item["title"] for item in owl["menu"]] == ["Přejmenovat", "Změnit obrázek", "Smazat profil"]
     rename = owl["menu"][0]["target"]
     assert rename["type"] == "input" and rename["params"]["value"] == "Sova"
-    api(rename["call"], id=rename["params"]["id"], text="  Jana  ")
+    assert api(rename["call"], id=rename["params"]["id"], text="  Jana  ") == {
+        "message": "", "toast": "Profil se teď jmenuje „Jana“."}
     assert "prázdné" in api(rename["call"], id=rename["params"]["id"], text=" ")["error"]
+    assert api(rename["call"], id=rename["params"]["id"], text="Jana") == {"message": ""}   # stejné jméno: nic
 
     switched = api(owl["target"]["call"], **owl["target"]["params"])        # druhý profil začíná načisto
     assert switched == {"message": "", "close": True, "toast": "Dívá se: Jana"}
@@ -1182,14 +1198,12 @@ def test_hero_and_watch_next_follow_the_last_unfinished_video(api):
         lib.ivys_touch("777", "9", "Díl 3", "Vyprávěj", "https://img/v.jpg", now=3000)
         lib.ivys_record_play("777", 600, 3000, now=3000)
     sections = {section["id"]: section for section in api("home")["sections"]}
-    assert "hero" not in sections["movies"] and "hero" not in sections["series"]   # tam je mřížka dlaždic
-    hero = sections["progress"]["hero"]                                      # naposledy přehrané nedokoukané video
-    assert (hero["title"], hero["label"], hero["progress"]) == ("Archa 1×01", "Pokračovat", 25)
-    assert hero["subtitle"] == "CZ dabing · zbývá 15 min" and hero["image"] == ""
-    assert hero["target"] == {"type": "play", "call": "play", "params": {"vid": "11:archa:%016x" % 11, "resume": True}}
+    assert "hero" not in sections["discover"] and "hero" not in sections["tools"]   # tam jsou dlaždice
     television = sections["ivysilani"]["hero"]
     assert (television["title"], television["subtitle"]) == ("Vyprávěj · Díl 3", "iVysílání · zbývá 40 min")
-    assert television["image"] == "https://img/v.jpg" and "hero" not in sections["tools"]
+    assert television["image"] == "https://img/v.jpg"
+    assert television["target"] == {"type": "play", "call": "ivys_play", "params": {"idec": "777", "resume": True}}
+    assert sections["progress"]["hero"] == television      # Rozkoukané: naposledy přehrané, ať je odkudkoli
 
     items = api("watch_next")["items"]                                       # pro domovskou obrazovku televize
     assert [(item["id"], item["title"], item["call"]) for item in items] == [
@@ -1198,6 +1212,13 @@ def test_hero_and_watch_next_follow_the_last_unfinished_video(api):
     assert (items[2]["position"], items[2]["duration"], items[2]["image"], items[2]["episode"]) == (
         1500, 6000, "https://img/f.jpg", False)
     assert items[0]["params"] == {"idec": "777"} and items[1]["episode"] is True
+
+    with app_api._library() as lib:
+        lib.record_play("11:archa:%016x" % 11, 300, 1200, now=4000)         # naposledy díl z Přehraj.to
+    hero = {section["id"]: section for section in api("home")["sections"]}["progress"]["hero"]
+    assert (hero["title"], hero["label"], hero["progress"]) == ("Archa 1×01", "Pokračovat", 25)
+    assert hero["subtitle"] == "CZ dabing · zbývá 15 min" and hero["image"] == ""
+    assert hero["target"] == {"type": "play", "call": "play", "params": {"vid": "11:archa:%016x" % 11, "resume": True}}
 
 
 def test_audio_and_subtitle_choice_is_remembered_per_series(api, monkeypatch):
@@ -1500,10 +1521,64 @@ def test_briefly_played_video_is_remembered_as_unfinished(api, monkeypatch):
     api("settings_set", username="a@b.cz", password="heslo")
     monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/v.mp4", {}))
     assert api("play", vid=REF)["position"] == 25                            # a přehrávání naváže, kde skončilo
-    assert api("home")["sections"][3]["hero"]["title"] == "Archa 1×01"
+    assert api("home")["sections"][1]["hero"]["title"] == "Archa 1×01"
     assert [item["position"] for item in api("watch_next")["items"]] == [40, 25]
     with app_api._library() as lib:
         lib.ivys_touch("777", "9", "Díl 3", "Vyprávěj", "")
-        lib.ivys_record_play("777", 30, 3000)
-    assert _titles(_section(api, "progress")["iVysílání"]) == ["Vyprávěj · Díl 3"]
+        lib.ivys_record_play("777", 30, 3000, now=4102444800)                # přehráno jako poslední
+        lib.ivys_touch("888", "10", "Krakonošovo tajemství", "Krakonošovo tajemství", "")
+        lib.ivys_record_play("888", 30, 3000)
+    rows = _section(api, "progress")                                         # iVysílání ve stejných řadách
+    assert _titles(rows["Seriály"]) == ["Vyprávěj · Díl 3", "Archa 1x01"]
+    assert _titles(rows["Filmy"]) == ["Pelíšky", "Krakonošovo tajemství"]    # pořad bez dílů je film
+    assert rows["Filmy"][1]["subtitle"] == "iVysílání" and "iVysílání" not in rows
 
+
+
+def test_favourites_and_start_section_cover_both_sources(api, monkeypatch):
+    _fill(2)
+    assert api("home")["start"] == 2                                         # nic oblíbeného: začíná se v Objevuj
+    film = api("movies")["items"][1]
+    toggle = next(item for item in film["menu"] if item["title"] == "Přidat do oblíbených")
+    api(toggle["target"]["call"], **toggle["target"]["params"])
+    api("ivys_favorite", id="12")                                            # pořad s díly z iVysílání
+    with app_api._library() as lib:
+        lib.ivys_favorite_add("11", "Krakonošovo tajemství", "https://img/k.jpg", "https://img/kp.jpg")
+        app_api._ivys_remember_kind(lib, "11", "movie")                      # film z iVysílání
+    assert api("home")["start"] == 0                                         # Oblíbené už mají obsah
+    rows = _section(api, "favorites")
+    assert list(rows) == ["Filmy", "Seriály"]                                # obě služby ve stejných řadách
+    assert _titles(rows["Filmy"]) == ["Pelíšky", "Krakonošovo tajemství"]
+    television = rows["Filmy"][1]
+    assert television["subtitle"] == "iVysílání" and television["image"] == "https://img/kp.jpg"
+    assert television["wide"] is False                                       # plakát, jako ostatní filmy v řadě
+    assert television["target"] == {"type": "play", "call": "ivys_play", "params": {"show": "11"}}
+    assert _titles(television["menu"]) == ["Přehrát", "Odebrat z oblíbených"]
+    programme = rows["Seriály"][0]
+    assert programme["target"]["call"] == "ivys_show" and programme["target"]["params"] == {"id": "12"}
+    assert _titles(api("favorites", kind="movie")["items"]) == ["Pelíšky", "Krakonošovo tajemství"]
+    assert len(api("favorites", kind="tv")["items"]) == 1 and len(api("favorites")["items"]) == 3
+    remove = television["menu"][1]["target"]
+    assert api(remove["call"], **remove["params"]) == {"message": "Odebráno z oblíbených."}
+    assert _titles(_section(api, "favorites")["Filmy"]) == ["Pelíšky"]
+    assert "Moje pořady" in _section(api, "ivysilani")                       # a v iVysílání zůstávají taky
+
+    api("progress_save", track=REF, position=600, total=6000, started=True)
+    assert api("home")["start"] == 0                                         # pořadí sekcí rozhoduje: Oblíbené
+
+
+def test_discover_section_loads_popular_rows_on_demand(api, monkeypatch):
+    assert [row["title"] for row in api("home")["sections"][2]["rows"]] == ["Začínáme", "Objevuj"]   # bez klíče TMDB
+    api("settings_set", tmdb_key="k" * 32)
+    lazy = [row for row in api("home")["sections"][2]["rows"] if row.get("call")]
+    assert [(row["title"], row["params"], row["poster"], row["items"]) for row in lazy] == [
+        ("Právě populární filmy", {"kind": "movie", "category": "popular"}, True, []),
+        ("Právě populární seriály", {"kind": "tv", "category": "popular"}, True, [])]
+    films = [{"id": n, "title": "Film %d" % n, "release_date": "2024-01-01", "poster_path": "/p%d.jpg" % n}
+             for n in range(1, 31)]
+    _fake_tmdb(monkeypatch, {"/movie/popular": {"results": films, "total_pages": 3}})
+    row = api(lazy[0]["call"], **lazy[0]["params"])["items"]
+    assert len(row) == 21 and row[0]["title"] == "Film 1" and row[0]["target"]["type"] == "title"
+    assert row[-1]["title"] == "Zobrazit vše" and row[-1]["target"] == {
+        "type": "list", "call": "discover", "params": {"kind": "movie", "category": "popular"},
+        "title": "Filmy – populární", "poster": True}

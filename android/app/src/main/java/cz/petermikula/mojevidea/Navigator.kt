@@ -38,6 +38,13 @@ object Navigator {
                     .putExtra(EXTRA_TITLE, target.title.ifEmpty { title })
                     .putExtra(EXTRA_POSTER, target.poster)
             )
+            // obrazovka s řadami dlaždic a karet (složky Filmy a Seriály ze sekce Objevuj)
+            "page" -> activity.startActivity(
+                Intent(activity, PageActivity::class.java)
+                    .putExtra(EXTRA_CALL, target.call)
+                    .putExtra(EXTRA_PARAMS, target.params.toString())
+                    .putExtra(EXTRA_TITLE, target.title.ifEmpty { title })
+            )
             "title" -> activity.startActivity(
                 Intent(activity, TitleActivity::class.java)
                     .putExtra(EXTRA_CALL, target.call)
@@ -108,23 +115,47 @@ object Navigator {
         }
     }
 
-    /** Krátký text od uživatele (jméno profilu); odešle se příkazu jako `text`. */
+    /**
+     * Krátký text od uživatele (jméno profilu); odešle se příkazu jako `text`.
+     *
+     * Potvrzení na klávesnici televize text rovnou uloží. Bez toho klávesnice nabízí „Další“, výběr
+     * skočí na tlačítko Zrušit a napsané jméno se zahodí. Pole začíná prázdné a dosavadní hodnotu
+     * (`value`) ukazuje jen šedě: nové jméno se píše rovnou, bez mazání starého po písmenech, a prázdné
+     * pole znamená „nechat, jak je“.
+     */
     private fun askText(activity: FragmentActivity, title: String, target: Target, onChanged: () -> Unit) {
         val input = android.widget.EditText(activity).apply {
-            setText(target.params.optString("value"))
-            hint = target.params.optString("hint")
+            hint = target.params.optString("value").ifEmpty { target.params.optString("hint") }
             setSingleLine()
-            setSelection(text.length)
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
         }
-        AlertDialog.Builder(activity)
-            .setTitle(target.params.optString("hint").ifEmpty { title })
-            .setView(input)
-            .setPositiveButton("Uložit") { _, _ ->
-                val params = org.json.JSONObject(target.params.toString()).put("text", input.text.toString())
+        var saved = false
+        val save = {
+            if (!saved) {
+                saved = true
+                val text = input.text.toString().ifBlank { target.params.optString("value") }
+                val params = org.json.JSONObject(target.params.toString()).put("text", text)
                 runCommand(activity, title, Target("command", target.call, params, ""), onChanged)
             }
+        }
+        val dialog = AlertDialog.Builder(activity)
+            .setTitle(target.params.optString("hint").ifEmpty { title })
+            .setView(input)
+            .setPositiveButton("Uložit") { _, _ -> save() }
             .setNegativeButton("Zrušit", null)
-            .show()
+            .create()
+        input.setOnEditorActionListener { _, action, event ->
+            val enter = event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER &&
+                event.action == android.view.KeyEvent.ACTION_DOWN
+            if (action == android.view.inputmethod.EditorInfo.IME_ACTION_DONE || enter) {
+                dialog.dismiss()
+                save()
+                true
+            } else {
+                false
+            }
+        }
+        dialog.show()
     }
 
     /** Dlouhá operace (synchronizace, metadata): okno s průběhem, na konci výsledek. */

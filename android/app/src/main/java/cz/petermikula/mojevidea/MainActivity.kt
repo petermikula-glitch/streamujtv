@@ -30,13 +30,15 @@ class MainActivity : FragmentActivity() {
 }
 
 /**
- * Hlavní obrazovka: postranní nabídka se sekcemi (Přehraj.to, iVysílání, Nástroje). Každá sekce je
- * stránka s vlastními řadami karet. Obsah i názvy sekcí dodává logika v Pythonu (akce `home`).
+ * Hlavní obrazovka: postranní nabídka se sekcemi (Oblíbené, Rozkoukané, Objevuj, iVysílání, Nástroje).
+ * Každá sekce je stránka s vlastními řadami karet. Obsah i názvy sekcí dodává logika v Pythonu
+ * (akce `home`). Vedle tlačítka hledání je aktivní profil; kliknutím se přepíná.
  */
-class MainFragment : BrowseSupportFragment() {
+class MainFragment : BrowseSupportFragment(), RowsHost {
     private class Section(val title: String, val icon: String, val rows: JSONArray, val hero: org.json.JSONObject?)
 
     private var rail: android.widget.LinearLayout? = null
+    private var profile: android.widget.LinearLayout? = null
 
     private val pages = ArrayObjectAdapter(ListRowPresenter())
     private var sections = emptyList<Section>()
@@ -88,11 +90,128 @@ class MainFragment : BrowseSupportFragment() {
         (view as? android.view.ViewGroup)?.addView(strip, android.widget.FrameLayout.LayoutParams(
             (52 * density).toInt(), android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.Gravity.START))
         rail = strip
+        addProfile()
     }
 
     override fun onDestroyView() {
+        (titleView as? android.view.ViewGroup)?.viewTreeObserver?.removeOnPreDrawListener(profileSync)
         rail = null
+        profile = null
         super.onDestroyView()
+    }
+
+    /**
+     * Aktivní profil (obrázek a jméno) v záhlaví vedle tlačítka hledání; kliknutí otevře výběr profilu.
+     * Záhlaví předává šipky rovnou obsahu, proto si přechod mezi hledáním a profilem řeší obě tlačítka sama.
+     */
+    private fun addProfile() {
+        val bar = titleView as? android.view.ViewGroup ?: return
+        val context = requireContext()
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        val idle = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = 22 * density
+            setColor(0x00000000)
+        }
+        val focused = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = 22 * density
+            setColor(androidx.core.content.ContextCompat.getColor(context, R.color.surface_focused))
+            setStroke(dp(2), androidx.core.content.ContextCompat.getColor(context, R.color.accent))
+        }
+        val chip = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            isFocusable = true
+            isFocusableInTouchMode = true
+            visibility = android.view.View.GONE  // dokud nedorazí jméno profilu
+            setPadding(dp(4), dp(4), dp(14), dp(4))
+            background = android.graphics.drawable.StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_focused), focused)
+                addState(intArrayOf(), idle)
+            }
+            contentDescription = "Profil"
+        }
+        val avatar = android.widget.ImageView(context).apply {
+            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                    outline.setOval(0, 0, view.width, view.height)
+                }
+            }
+            clipToOutline = true
+        }
+        val name = android.widget.TextView(context).apply {
+            setTextColor(androidx.core.content.ContextCompat.getColor(context, R.color.text_primary))
+            textSize = 16f
+            typeface = android.graphics.Typeface.create("sans-serif-condensed", android.graphics.Typeface.NORMAL)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            maxWidth = dp(150)
+        }
+        chip.addView(avatar, android.widget.LinearLayout.LayoutParams(dp(36), dp(36)))
+        chip.addView(name, android.widget.LinearLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { marginStart = dp(8) })
+        chip.setOnFocusChangeListener { view, has ->
+            view.animate().scaleX(if (has) 1.06f else 1f).scaleY(if (has) 1.06f else 1f).setDuration(120).start()
+        }
+        chip.setOnClickListener {
+            startActivity(Intent(requireContext(), ListActivity::class.java)
+                .putExtra(Navigator.EXTRA_CALL, "profiles")
+                .putExtra(Navigator.EXTRA_TITLE, "Kdo se dívá?")
+                .putExtra(Navigator.EXTRA_POSTER, true))
+        }
+        // první v pořadí: šipka nahoru z obsahu tak dál míří na hledání, ne na profil
+        bar.addView(chip, 0, android.widget.FrameLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL,
+        ).apply { marginStart = dp(64) })
+        val orb = titleViewAdapter?.searchAffordanceView
+        orb?.setOnKeyListener { _, code, event ->
+            val right = code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT && chip.visibility == android.view.View.VISIBLE
+            if (right && event.action == android.view.KeyEvent.ACTION_DOWN) chip.requestFocus()
+            right
+        }
+        chip.setOnKeyListener { _, code, event ->
+            val left = code == android.view.KeyEvent.KEYCODE_DPAD_LEFT && orb != null
+            if (left && event.action == android.view.KeyEvent.ACTION_DOWN) orb?.requestFocus()
+            left
+        }
+        profile = chip
+        // Knihovna tlačítko hledání skrývá, když je v nabídce vybraná nižší sekce (nabídka pak vyjede
+        // na jeho místo). Profil se řídí jím, jinak by nabídku překrýval.
+        bar.viewTreeObserver.addOnPreDrawListener(profileSync)
+    }
+
+    private val profileSync = android.view.ViewTreeObserver.OnPreDrawListener {
+        val chip = profile
+        val orb = titleViewAdapter?.searchAffordanceView
+        if (chip != null && orb != null && profileNamed) {
+            val wanted = if (orb.visibility == android.view.View.VISIBLE) android.view.View.VISIBLE
+            else android.view.View.INVISIBLE
+            if (chip.visibility != wanted) {
+                // profil se zrovna skrývá i s výběrem: ten patří tlačítku hledání, ne ztracenému prvku
+                if (wanted != android.view.View.VISIBLE && chip.hasFocus()) orb.requestFocus()
+                chip.visibility = wanted
+            }
+        }
+        true
+    }
+    private var profileNamed = false
+
+    private fun showProfile(data: org.json.JSONObject?) {
+        val chip = profile ?: return
+        val context = context ?: return
+        val name = data?.optString("name").orEmpty()
+        if (name.isEmpty()) return
+        (chip.getChildAt(1) as? android.widget.TextView)?.text = name
+        val id = resources.getIdentifier("avatar_" + data?.optString("avatar"), "drawable", context.packageName)
+        (chip.getChildAt(0) as? android.widget.ImageView)?.setImageResource(if (id != 0) id else R.drawable.avatar_clapper)
+        chip.contentDescription = "Profil: $name"
+        profileNamed = true
+        val orb = titleViewAdapter?.searchAffordanceView
+        chip.visibility = if (orb == null || orb.visibility == android.view.View.VISIBLE) android.view.View.VISIBLE
+        else android.view.View.INVISIBLE
     }
 
     /** Lišta ikon sekcí; vybraná sekce je zlatá, ostatní tlumené. */
@@ -121,7 +240,7 @@ class MainFragment : BrowseSupportFragment() {
     }
 
     /** Pozadí podle vybrané karty (volají stránky sekcí). */
-    fun showBackdrop(image: String) {
+    override fun showBackdrop(image: String) {
         backdrop?.show(image)
     }
 
@@ -146,13 +265,11 @@ class MainFragment : BrowseSupportFragment() {
         load()  // po návratu z přehrávače nebo nastavení se mění Rozkoukané i katalog
     }
 
-    /** Řady sekce pro její stránku. */
-    fun rowsOf(index: Int): JSONArray? = sections.getOrNull(index)?.rows
+    override fun rowsOf(index: Int): JSONArray? = sections.getOrNull(index)?.rows
 
-    /** Úvodní panel sekce (naposledy rozkoukané video), pokud nějaký má. */
-    fun heroOf(index: Int): org.json.JSONObject? = sections.getOrNull(index)?.hero
+    override fun heroOf(index: Int): org.json.JSONObject? = sections.getOrNull(index)?.hero
 
-    fun load() {
+    override fun load() {
         if (!loadedOnce && pages.size() == 0) {
             // než dorazí obsah: obrysy karet
             val waiting = ArrayObjectAdapter(CardPresenter())
@@ -172,6 +289,7 @@ class MainFragment : BrowseSupportFragment() {
             val raw = data.toString()
             if (loadedOnce && raw == shown) return@call  // beze změny: výběr i pozice zůstanou
             shown = raw
+            showProfile(data.optJSONObject("profile"))
             val list = data.optJSONArray("sections")
             val fresh = (0 until (list?.length() ?: 0)).mapNotNull { index ->
                 list!!.optJSONObject(index)?.let {
@@ -183,11 +301,14 @@ class MainFragment : BrowseSupportFragment() {
             sections = fresh
             if (sameMenu) {
                 // stejné sekce: stránky si jen vymění změněné karty, výběr zůstane na místě
-                childFragmentManager.fragments.filterIsInstance<SectionFragment>().forEach { it.refresh() }
+                childFragmentManager.fragments.filterIsInstance<SectionFragment>().forEach { it.refresh(reload = true) }
             } else {
                 pages.setItems(fresh.mapIndexed { index, section ->
                     PageRow(HeaderItem(index.toLong(), section.title))
                 }, null)
+                // po spuštění rovnou sekce, ve které něco je (Oblíbené, jinak Rozkoukané, jinak Objevuj)
+                val start = data.optInt("start")
+                if (!loadedOnce && start in 1 until fresh.size) setSelectedPosition(start, false)
             }
             WatchNext.sync(requireContext())  // řada „Pokračovat ve sledování“ na domovské obrazovce televize
             if (!loadedOnce) {
@@ -248,14 +369,25 @@ class MainFragment : BrowseSupportFragment() {
     }
 }
 
-/** Stránka jedné sekce: její řady karet. Data si bere z hlavní obrazovky. */
+/**
+ * Stránka s řadami karet: sekce hlavní obrazovky, nebo obrazovka složky. Data si bere od hostitele.
+ *
+ * Řada s `call` (právě populární tituly) se donačítá až tady, aby hlavní obrazovka nečekala na síť:
+ * do té doby ukazuje naposledy načtené karty, jinak obrysy; když se načíst nepodaří, nabídne to zkusit znovu.
+ */
 class SectionFragment : RowsSupportFragment() {
     companion object {
         private const val INDEX = "index"
         private const val HERO = "\u0000hero"  // označení řady s úvodním panelem
 
+        /** Naposledy načtené karty donačítaných řad: při návratu do sekce jsou vidět hned. */
+        private val remembered = HashMap<String, List<Card>>()
+
         fun create(index: Int) = SectionFragment().apply { arguments = Bundle().apply { putInt(INDEX, index) } }
     }
+
+    private val fetched = HashMap<String, List<Card>>()  // výsledky donačítaných řad (prázdný = nepovedlo se)
+    private val pending = HashSet<String>()
 
     private val rows = ArrayObjectAdapter(ClassPresenterSelector().apply {
         // úvodní panel: bez zvětšení při výběru (je přes celou šířku) a bez nadpisu řady
@@ -268,7 +400,30 @@ class SectionFragment : RowsSupportFragment() {
     private var shapes = emptyList<Boolean>()
     private var grids = emptyList<Boolean>()
 
-    private fun host() = parentFragment as? MainFragment
+    private fun host(): RowsHost? = parentFragment as? RowsHost ?: activity as? RowsHost
+
+    /** Po příkazu z nabídky karty (oblíbené, stažení): obsah hostitele i donačítané řady znovu. */
+    private fun changed() {
+        host()?.load()
+        refresh(reload = true)
+    }
+
+    private fun fetch(key: String, call: String, params: org.json.JSONObject) {
+        if (!pending.add(key)) return
+        Api.call(call, params) { result ->
+            pending.remove(key)
+            val cards = Card.list(result.data?.optJSONArray("items"))
+            fetched[key] = cards
+            if (cards.isNotEmpty()) remembered[key] = cards
+            if (isAdded) refresh()
+        }
+    }
+
+    override fun onViewCreated(view: android.view.View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        // na vlastní obrazovce (složka) začínají řady pod jejím názvem; v sekci je zarovnává hlavní obrazovka
+        host()?.topOffset()?.takeIf { it > 0 }?.let { setAlignment(it) }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -276,23 +431,27 @@ class SectionFragment : RowsSupportFragment() {
         // Stránka sekce si kliknutí a výběr obsluhuje sama: hlavní obrazovka své posluchače
         // předává jen obyčejným řadám, ne stránkám.
         onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
-            (item as? Card)?.let { Navigator.open(requireActivity(), it) { host()?.load() } }
+            (item as? Card)?.let { Navigator.open(requireActivity(), it) { changed() } }
         }
-        onItemViewSelectedListener = OnItemViewSelectedListener { _, item, _, _ ->
+        onItemViewSelectedListener = OnItemViewSelectedListener { _, item, _, row ->
             host()?.showBackdrop((item as? Card)?.image.orEmpty())
+            host()?.onRowSelected(rows.indexOf(row))
         }
         refresh()
     }
 
-    fun refresh() {
+    fun refresh(reload: Boolean = false) {
         val list = host()?.rowsOf(requireArguments().getInt(INDEX)) ?: return
+        if (reload) fetched.clear()
         val names = ArrayList<String>()
         val items = ArrayList<List<Card>>()
         val tiles = ArrayList<Boolean>()  // mřížka velkých dlaždic
+        val posters = ArrayList<Boolean>()  // plakáty na výšku
         host()?.heroOf(requireArguments().getInt(INDEX))?.let { hero ->
             // úvodní panel je první řada; nápis tlačítka nese karta ve štítku
             names.add(HERO)
             tiles.add(false)
+            posters.add(false)
             items.add(listOf(Card.from(org.json.JSONObject(hero.toString())
                 .put("badges", JSONArray().put(hero.optString("label"))).put("wide", true))))
         }
@@ -300,9 +459,27 @@ class SectionFragment : RowsSupportFragment() {
             val row = list.optJSONObject(index) ?: continue
             names.add(row.optString("title"))
             tiles.add(row.optBoolean("tiles"))
-            items.add(Card.list(row.optJSONArray("items")))
+            val call = row.optString("call")
+            if (call.isEmpty()) {
+                val cards = Card.list(row.optJSONArray("items"))
+                items.add(cards)
+                posters.add(CardPresenter.posterShape(cards))
+                continue
+            }
+            // donačítaná řada: tvar karet je daný předem, aby se řada při načtení nepřestavovala
+            val params = row.optJSONObject("params") ?: org.json.JSONObject()
+            val key = "$call|$params"
+            if (key !in fetched) fetch(key, call, params)
+            val known = fetched[key]?.takeIf { it.isNotEmpty() } ?: remembered[key]
+            items.add(when {
+                known != null -> known
+                key in fetched -> listOf(Card.from(org.json.JSONObject()
+                    .put("title", "Nepodařilo se načíst").put("subtitle", "Zkusit znovu").put("icon", "sync")
+                    .put("target", org.json.JSONObject().put("type", "refresh"))))
+                else -> Card.skeletons(6)
+            })
+            posters.add(row.optBoolean("poster"))
         }
-        val posters = items.map { CardPresenter.posterShape(it) }
         if (names == titles && posters == shapes && tiles == grids && rows.size() == names.size) {
             // stejné řady: vyměnit jen změněné karty, ať výběr neuskočí na začátek
             for (index in names.indices) {
@@ -316,7 +493,7 @@ class SectionFragment : RowsSupportFragment() {
                     return@map HeroRow(cards)
                 }
                 val cards = ArrayObjectAdapter(CardPresenter(posters[index], tiles[index]) { card ->
-                    Navigator.menu(requireActivity(), card) { host()?.load() }
+                    Navigator.menu(requireActivity(), card) { changed() }
                 })
                 cards.addAll(0, items[index])
                 // další řada téže mřížky nemá nadpis: bez něj na sebe řady těsně navazují
