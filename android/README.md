@@ -105,13 +105,16 @@ z obrysových SVG udělá vektorové obrázky Androidu (`rect` a `circle` převe
 
 ## Sekce hlavní obrazovky
 
-Postranní nabídka má tři sekce; každá je stránka s vlastními řadami (`home` v `app_api.py` vrací
+Postranní nabídka má šest sekcí; každá je stránka s vlastními řadami (`home` v `app_api.py` vrací
 `sections` → `rows` → karty, v aplikaci `MainFragment` a `SectionFragment`):
 
-- **Přehraj.to** – Rozkoukané, Další díly, Oblíbené, Objevuj filmy, Objevuj seriály, Stažené na disku
-  a Moje videa (to, co je nahrané na účtu).
+- **Filmy** – Objevuj filmy, Stažené filmy a vlastní filmy z účtu (nově přidané, podle názvu,
+  hodnocení a roku); nahoře panel s rozkoukaným filmem.
+- **Seriály** – Další díly, Objevuj seriály, Stažené díly a vlastní seriály; nahoře panel s rozkoukaným dílem.
+- **Oblíbené** – řady Filmy, Seriály a Pořady z iVysílání.
+- **Rozkoukané** – řady Filmy, Seriály a iVysílání a dlaždice Naposledy přehrané.
 - **iVysílání** – živé kanály, rozkoukané pořady, Moje pořady a kategorie; nic jiného.
-- **Nástroje** – hledání, stahování, synchronizace, metadata, nastavení.
+- **Nástroje** – hledání, stahování, synchronizace, metadata, nastavení, předvolby, profily, diagnostika.
 
 **Objevuj** (`app_discover.py`): Přehraj.to nemá katalog podle roku ani žánru, jen hledání podle názvu
 souboru. Seznamy titulů proto dodává TMDB (novinky, populární, nejlépe hodnocené, podle roku, podle
@@ -120,7 +123,7 @@ jeho verze; u seriálu přes řady a díly. Potřebuje klíč TMDB v Nastavení.
 otevření titulu, ne u celého seznamu.
 
 **Oblíbené** jsou jen v aplikaci (`favorites.json`): film či seriál z katalogu, nebo titul z Objevuj.
-Na hlavní obrazovce mají filmy a seriály každé svou řadu.
+Mají vlastní sekci v postranní nabídce, filmy a seriály každé svou řadu.
 Přidávají se z nabídky karty (podržení OK).
 
 **Stránka titulu** (`TitleActivity`, data z `discover_title`): údaje z TMDB, tlačítka a řady karet;
@@ -177,9 +180,14 @@ klíče TMDB a iVysílání a posledních pár chyb (`errors.json`; zapisuje je 
 z Objevuj „Stáhnout celou řadu“ (`discover_download_season`, jedno hledání na díl). V Nastavení jde
 zapnout mazání staženého souboru po dokoukání.
 
-**Hlídání oblíbených** (`favorites_check`): film z Objevuj, který na Přehraj.to nebyl, se po startu
-aplikace občas znovu vyhledá (nejvýš jednou za 12 hodin, pár titulů); když se objeví, karta dostane
-štítek „Nově na Přehraj.to“.
+**Hlídání oblíbených** (`favorites_check`): oblíbený film z Objevuj, který na Přehraj.to nemá verzi
+v preferovaném jazyce a kvalitě (`meets_preferences`), se znovu vyhledává – po startu aplikace a při
+návratech na hlavní obrazovku, nejvýš jednou za 3 hodiny a pár titulů najednou. Když se taková verze
+objeví, aplikace ukáže okno s upozorněním a karta dostane štítek „Nově na Přehraj.to“. Na pozadí,
+když aplikace neběží, se nehledá.
+
+**Stažená verze má přednost**: mezi verzemi titulu je stažený soubor první (štítek „Na disku“)
+a tlačítko Přehrát hraje z disku; platí to i tehdy, když hledání na Přehraj.to zrovna nejde.
 
 **Průvodce prvním spuštěním** (`WelcomeActivity`): účet, klíč TMDB a předvolby; nabídne se jen jednou.
 
@@ -194,8 +202,11 @@ prohledává také.
 **Dostupnost** titulů z Objevuj se neověřuje hromadně sama: dlaždice „Ověřit dostupnost“ projde jednu
 stránku seznamu (jedno hledání na film) a výsledek se týden pamatuje jako štítek na kartě.
 
-**Hledání**: řada titulů z TMDB (plakáty), naposledy hledané výrazy a hlasové zadání přes systémové
-rozpoznávání řeči (kde ho zařízení má).
+**Hledání** (`search`): všechny zdroje se ptají najednou. Výsledky jdou v pořadí vlastní katalog,
+Filmy a Seriály z TMDB, Herci a režiséři, soubory na Přehraj.to (stejný titul jako jedna karta)
+a iVysílání. Titul, který je mezi soubory vrácenými z Přehraj.to, má štítek „Přehraj.to“ a je v řadě
+první. Film jde z nabídky karty pustit rovnou („Přehrát hned“). K tomu naposledy hledané výrazy
+a hlasové zadání přes systémové rozpoznávání řeči (kde ho zařízení má).
 
 ## Chráněné pořady iVysílání
 
