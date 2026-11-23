@@ -1865,11 +1865,8 @@ def update_check(params):
     if best is None or _version(best[0]) <= _version(current):
         return {"available": False, "current": current}
     version, asset, release = best
-    # GitHub u přílohy uvádí její otisk; aplikace si podle něj stažený soubor před instalací ověří
-    digest = str(asset.get("digest") or "")
     return {"available": True, "current": current, "version": version, "url": asset["browser_download_url"],
-            "size": int(asset.get("size") or 0), "notes": str(release.get("body") or "").strip()[:800],
-            "sha256": digest[7:].lower() if digest.startswith("sha256:") and len(digest) == 71 else ""}
+            "size": int(asset.get("size") or 0), "notes": str(release.get("body") or "").strip()[:800]}
 
 
 # ---------------------------------------------------------------------------
