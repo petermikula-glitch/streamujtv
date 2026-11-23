@@ -38,6 +38,11 @@ PAGE = 60               # položek katalogu na stránku výpisu
 HOME_ROW = 20           # položek v řadě na hlavní obrazovce
 LINK_PREFIX = "link:"   # zapamatované adresy souborů (jako v doplňku)
 IVYS = "ivys:"          # označení pořadu z iVysílání při ukládání pozice
+# Oficiální aplikace iVysílání (pro Android TV a pro telefony) a stránka pořadu na webu ČT: chráněné
+# pořady, které aplikace sama nepřehraje, se jim předávají. Balíčky musí být i v AndroidManifest.xml
+# (<queries>), jinak je systém aplikaci neukáže.
+IVYS_APPS = ("cz.ceskatelevize.ivysilani.tvapp", "cz.motion.ivysilani")
+IVYS_WEB = "https://www.ceskatelevize.cz/porady/%s/"
 TTL = {"menu": 24 * 3600, "category": 3600, "show": 3600, "episodes": 900, "search": 600, "live": 60}
 
 DOWNLOADS = "downloads.json"   # evidence souborů stažených na disk (jen v aplikaci)
@@ -981,14 +986,19 @@ def prehrajto_search(params):
 # Přehrávání
 # ---------------------------------------------------------------------------
 
-def _link_get(lib, vid):
+def _link_get(lib, vid, quality=None):
+    """Zapamatovaná adresa souboru, dokud platí. S ``quality`` jen ta, která vznikla se stejnou
+    předvolbou kvality – po změně předvolby se varianta souboru vybírá znovu."""
     try:
         cached = json.loads(lib.get_kv(LINK_PREFIX + vid) or "{}")
     except ValueError:
         return None
-    if isinstance(cached, dict) and cached.get("url") and time.time() - cached.get("ts", 0) < provider.LINK_TTL:
-        return cached
-    return None
+    if not (isinstance(cached, dict) and cached.get("url")
+            and time.time() - cached.get("ts", 0) < provider.LINK_TTL):
+        return None
+    if quality and cached.get("quality") and cached["quality"] != quality:
+        return None
+    return cached
 
 
 def _playable_video(lib, params):
@@ -1056,9 +1066,10 @@ def _subtitle_lang(label):
 
 def _stream_link(vid, fresh=False):
     """Adresa nejlepší verze souboru a titulky; zapamatovaná adresa se použije, dokud platí."""
+    prefs = _prefs()
     if not fresh:
         with _library() as lib:
-            cached = _link_get(lib, vid)
+            cached = _link_get(lib, vid, prefs["quality"])
         if cached:
             return cached["url"], cached.get("subtitles") or {}
     client = _client()
@@ -1066,7 +1077,7 @@ def _stream_link(vid, fresh=False):
         streams, _message = client.get_streams(vid)
         if not streams:
             raise provider.VideoUnavailableError("Video nemá žádný přehratelný soubor")
-        stream = _pick_stream(streams, _prefs())
+        stream = _pick_stream(streams, prefs)
         url = client.resolve(stream["url"])
         subtitles = stream.get("subtitles") or {}
     except provider.LoginError:
@@ -1078,7 +1089,8 @@ def _stream_link(vid, fresh=False):
     except provider.ProviderError as error:
         raise ApiError("Přehraj.to: %s" % error)
     with _library() as lib:
-        lib.set_kv(LINK_PREFIX + vid, json.dumps({"url": url, "subtitles": subtitles, "ts": int(time.time())}))
+        lib.set_kv(LINK_PREFIX + vid, json.dumps({"url": url, "subtitles": subtitles, "ts": int(time.time()),
+                                                  "quality": prefs["quality"]}))
     return url, subtitles
 
 
@@ -1476,12 +1488,27 @@ def ivys_play(params):
         point = lib.ivys_states()[0].get(idec)
         tracks = app_extras.tracks(lib, IVYS + stream["show_id"] if stream["show_id"] else "")
     title = " · ".join(part for part in (stream["show_title"], stream["episode_title"]) if part) or stream["title"]
-    return {"url": stream["url"], "headers": {}, "subtitles": stream["subtitles"],
-            "position": point[0] if point and not params.get("restart") else 0, "title": title,
-            "track": IVYS + idec, "live": False, "hls": not stream.get("dash"), "dash": bool(stream.get("dash")),
-            "drm": stream.get("drm"), "tracks": tracks,
-            # chráněný pořad: když se nepřehraje, přehrávač ukáže, co rozhraní vrátilo (jen názvy polí)
-            "diagnostic": (stream.get("shape") or "") if stream.get("dash") else ""}
+    result = {"url": stream["url"], "headers": {}, "subtitles": stream["subtitles"],
+              "position": point[0] if point and not params.get("restart") else 0, "title": title,
+              "track": IVYS + idec, "live": False, "hls": not stream.get("dash"), "dash": bool(stream.get("dash")),
+              "drm": stream.get("drm"), "tracks": tracks,
+              # chráněný pořad: když se nepřehraje, přehrávač ukáže, co rozhraní vrátilo (jen názvy polí)
+              "diagnostic": (stream.get("shape") or "") if stream.get("dash") else ""}
+    if stream.get("dash") and not (stream.get("drm") or {}).get("license"):
+        # Chráněný pořad bez adresy licence aplikace přehrát neumí: předá ho oficiální aplikaci ČT,
+        # je-li v zařízení (rozhodne přehrávač; jinak zkusí přehrát sám a ukáže, proč to nejde).
+        result["external"] = _ivys_official(stream["show_id"], idec, title)
+    return result
+
+
+def _ivys_official(show_id, idec, title):
+    """Předání pořadu oficiální aplikaci iVysílání: její balíčky a veřejná adresa pořadu na webu ČT.
+
+    Adresa je běžná stránka pořadu (``/porady/<pořad>/<díl>/``, web ČT si ji sám doplní o název);
+    aplikace ČT ji otevře, pokud se k takovým odkazům hlásí, jinak se aspoň spustí."""
+    path = "/".join(part for part in (str(show_id or ""), str(idec or "")) if part.isdigit())
+    return {"name": "iVysílání ČT", "packages": list(IVYS_APPS), "title": title,
+            "url": IVYS_WEB % path if show_id and str(show_id).isdigit() else ""}
 
 
 def _ivys_stream(client, idec, inspect=False):

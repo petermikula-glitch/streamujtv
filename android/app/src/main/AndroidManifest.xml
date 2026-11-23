@@ -19,6 +19,13 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
+    <!-- Oficiální aplikace iVysílání ČT: chráněné pořady se předávají jí (IVYS_APPS v app_api.py).
+         Bez tohoto zápisu by ji systém aplikaci neukázal. -->
+    <queries>
+        <package android:name="cz.ceskatelevize.ivysilani.tvapp" />
+        <package android:name="cz.motion.ivysilani" />
+    </queries>
+
     <application
         android:name=".App"
         android:allowBackup="false"

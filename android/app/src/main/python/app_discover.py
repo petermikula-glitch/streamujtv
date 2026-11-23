@@ -1357,6 +1357,16 @@ def _catalogue_next_episode(lib, video, state):
     return following, _episode_label(lib, following)
 
 
+def _missing_between(video, following):
+    """Díl, který mezi dokoukaným a nabízeným chybí: ``(řada, díl)``, nebo None, když na sebe navazují.
+
+    Navazuje díl s číslem o jedna vyšším a první díl další řady (kolik dílů řada má, katalog neví)."""
+    position, later = (video["season"], video["episode"]), (following["season"], following["episode"])
+    if later == (position[0], position[1] + 1) or later == (position[0] + 1, 1):
+        return None
+    return position[0], position[1] + 1
+
+
 def _episode_label(lib, video, position=None):
     season, episode = position or (video["season"], video["episode"])
     meta = lib.get_meta(video["meta_key"]) or {}
@@ -1450,10 +1460,20 @@ def play_next(params):
                 return {"next": _tmdb_next_episode(lib, choice, state)}
             if video and video["kind"] == "episode" and video["episode"]:
                 found = _catalogue_next_episode(lib, video, state)
-                if found:
+                gap = _missing_between(video, found[0]) if found else None
+                if found and not gap:
                     return {"next": _next_item("Další díl", found[1],
                                                api._target("play", "play", {"vid": found[0]["id"]}), auto=True)}
-                return {"next": _searched_next_episode(lib, video, state)}
+                # Bezprostředně následující díl v katalogu není: nejdřív ho zkusit najít na Přehraj.to.
+                try:
+                    searched = _searched_next_episode(lib, video, state)
+                except api.ApiError:
+                    searched = None
+                if searched or not found:
+                    return {"next": searched}
+                # Katalog má až pozdější díl: nabídnout ho, ale nespouštět sám a říct, který chybí.
+                return {"next": _next_item("Další díl v katalogu", "%s · díl %d×%02d chybí" % ((found[1],) + gap),
+                                           api._target("play", "play", {"vid": found[0]["id"]}))}
             tmdb_id = choice[len("movie:"):] if choice.startswith("movie:") else ""
             if not tmdb_id and video and api._tmdb().enabled:
                 meta = lib.get_meta(video["meta_key"]) or {}
@@ -1483,7 +1503,9 @@ def next_up_cards(lib, state, limit=10):
         if found and found[0]["id"] not in state["watched"] and not state["resume"].get(found[0]["id"]):
             meta = lib.get_meta(video["meta_key"])
             card = api._video_card(found[0], meta, state)
-            card["subtitle"] = " · ".join(part for part in ("Další díl", card["subtitle"]) if part)
+            gap = _missing_between(video, found[0])
+            note = "Další v katalogu, %d×%02d chybí" % gap if gap else "Další díl"
+            card["subtitle"] = " · ".join(part for part in (note, card["subtitle"]) if part)
             card["menu"] = (card.get("menu") or []) + [{"title": "Nenabízet další díly", "target": api._target(
                 "command", "next_up_hide", {"key": video["meta_key"]})}]
             cards.append(card)

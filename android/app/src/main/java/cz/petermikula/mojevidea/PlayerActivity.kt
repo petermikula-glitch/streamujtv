@@ -10,6 +10,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.ImageButton
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.core.widget.ImageViewCompat
 import androidx.media3.common.TrackSelectionOverride
@@ -62,6 +63,7 @@ class PlayerActivity : FragmentActivity() {
     private var live = false
     private var local = false
     private var diagnostic = ""
+    private var externalName = ""   // oficiální aplikace, která by chráněný pořad přehrála, ale v zařízení není
     private var started = false
     private var retried = false
     private var visible = false          // obrazovka je vidět (mezi onStart a onStop)
@@ -173,10 +175,33 @@ class PlayerActivity : FragmentActivity() {
             val data = result.data
             if (data == null) {
                 fail(result.error ?: "Video se nepodařilo spustit.")
-            } else {
+            } else if (!handOver(data)) {
                 play(data)
             }
         }
+    }
+
+    /**
+     * Chráněný pořad, který aplikace nepřehraje (`external` v odpovědi logiky): otevře se rovnou
+     * v oficiální aplikaci, je-li v zařízení. Vrací true, když se předání povedlo.
+     */
+    private fun handOver(stream: JSONObject): Boolean {
+        val external = stream.optJSONObject("external") ?: return false
+        val name = external.optString("name")
+        when (OfficialApp.open(this, external)) {
+            OfficialApp.Result.OPENED_TITLE ->
+                Toast.makeText(this, "Chráněný pořad – otevírám v aplikaci $name.", Toast.LENGTH_LONG).show()
+            OfficialApp.Result.OPENED_APP ->
+                Toast.makeText(this, "Chráněný pořad – v aplikaci $name vyhledejte: ${external.optString("title")}",
+                    Toast.LENGTH_LONG).show()
+            OfficialApp.Result.MISSING -> {
+                // bez oficiální aplikace se přehrání zkusí zde; případná chyba poradí, co nainstalovat
+                externalName = name
+                return false
+            }
+        }
+        finish()
+        return true
     }
 
     override fun onStart() {
@@ -627,11 +652,14 @@ class PlayerActivity : FragmentActivity() {
         // nejhlubší příčina říká nejvíc; obalující výjimky jen opakují její text
         val cause = chain.lastOrNull()?.let { "${it.javaClass.simpleName}: ${it.message.orEmpty().take(120)}" }.orEmpty()
         val detail = if (diagnostic.isEmpty()) "" else "\n\nDiagnostika: $cause\n${diagnostic.take(600)}"
+        // chráněný pořad by přehrála oficiální aplikace: poradit, ať si ji uživatel nainstaluje
+        val advice = if (externalName.isEmpty()) "" else
+            "\n\nNainstalujte si z Google Play aplikaci $externalName – chráněné pořady se pak otevřou rovnou v ní."
         if (chain.any { it.message.orEmpty().contains("No license URL") }) {
             return "Česká televize k tomuto pořadu neposlala adresu licenčního serveru – není v odpovědi " +
-                "rozhraní ani v popisu streamu. Bez ní aplikace chráněný pořad přehrát neumí.$detail"
+                "rozhraní ani v popisu streamu. Bez ní aplikace chráněný pořad přehrát neumí.$advice$detail"
         }
-        return "$text\n(${error.errorCodeName})$detail"
+        return "$text\n(${error.errorCodeName})$advice$detail"
     }
 
     private fun fail(text: String) {

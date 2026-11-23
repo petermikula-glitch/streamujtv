@@ -268,6 +268,16 @@ def test_playback_resolves_remembers_link_and_tracks_progress(api, monkeypatch):
     api("link_failed", track=REF)                       # přehrávač adresu odmítl → příště se načte znovu
     api("play", vid=REF)
     assert len(clients) == 2
+
+    # Změna předvolené kvality: zapamatovaná adresa vznikla s jinou předvolbou, varianta se vybere znovu.
+    api("settings_set", prefer_quality="720")
+    api("play", vid=REF)
+    assert len(clients) == 3
+    api("play", vid=REF)
+    assert len(clients) == 3                            # se stejnou předvolbou zase ze zapamatované adresy
+    with app_api._library() as lib:
+        assert json.loads(lib.get_kv(app_api.LINK_PREFIX + REF))["quality"] == "720"
+    api("settings_set", prefer_quality="best")
     assert "není" in api("play", vid="9:x:00000000000000ff")["error"]
 
 
@@ -972,6 +982,36 @@ def test_next_episode_from_the_catalogue_follows_a_finished_one(api):
     assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": second}
 
 
+def test_next_episode_never_silently_skips_a_missing_one(api, monkeypatch):
+    """Katalog má 2. a 4. díl: po druhém se nejdřív hledá třetí; čtvrtý se sám nespustí."""
+    _fill(2)
+    second, fourth = ["%d:archa:%016x" % (10 + n, 10 + n) for n in (2, 4)]
+    with app_api._library() as lib:
+        lib.upsert_video(fourth, "Archa.S01E04.CZ", "account", nameparser.parse("Archa.S01E04.CZ"))
+    asked = _catalogue_search(monkeypatch, {})
+    following = api("play_next", track=second)["next"]
+    assert asked and all("S01E03" in query or "1x03" in query.lower() for query, _page in asked)   # hledal se třetí díl
+    assert following == {"title": "Další díl v katalogu", "subtitle": "Archa 1×04 · díl 1×03 chybí", "auto": False,
+                         "target": {"type": "play", "call": "play", "params": {"vid": fourth}}}
+
+    # třetí díl se na Přehraj.to najde: nabídne se ten a spustí se sám jako obvykle
+    found = _web(77, "Archa S01E03 CZ dabing", 2400, "700 MB")
+    queries = {query: [found] for query, _page in asked}
+    _catalogue_search(monkeypatch, queries)
+    following = api("play_next", track=second)["next"]
+    assert (following["title"], following["subtitle"], following["auto"]) == ("Další díl", "Archa 1×03", True)
+    assert following["target"]["params"]["vid"] == found["id"]
+
+    # první díl další řady na poslední díl v katalogu navazuje (kolik dílů řada má, katalog neví)
+    with app_api._library() as lib:
+        raw = "Archa.S02E01.CZ"
+        lib.upsert_video("30:archa:%016x" % 30, raw, "account", nameparser.parse(raw))
+    _catalogue_search(monkeypatch, {})
+    crossing = api("play_next", track=fourth)["next"]
+    assert (crossing["title"], crossing["subtitle"], crossing["auto"]) == ("Další díl", "Archa 2×01", True)
+
+
+
 def test_next_episode_of_a_discovered_series_is_searched(api, monkeypatch):
     api("settings_set", tmdb_key="k" * 32)
     asked = _catalogue_search(monkeypatch, {
@@ -1150,6 +1190,46 @@ def test_protected_ivysilani_programme_uses_device_widevine(api, monkeypatch):
     result = api("ivys_play", idec="123")
     assert (result["dash"], result["hls"], result["drm"]) == (True, False, {"license": ""})
     assert result["diagnostic"] == "{streams[{url}]}; adresa: token, streamType, drmOnly=true"
+
+
+def test_protected_programme_without_licence_is_handed_to_the_official_app(api, monkeypatch):
+    class Client:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def vod(self, idec, drm=False):
+            if not drm and self.stream.get("dash"):
+                raise ivysilani.NotPlayable("Tento pořad nelze v doplňku přehrát (chráněný obsah).")
+            return self.stream
+
+    stream = {"url": "https://cdn/get/?streamType=dash", "subtitles": [], "duration": 3000, "title": "Díl",
+              "show_title": "Zahraniční seriál", "episode_title": "Díl 2", "show_id": "10195164142", "image": "",
+              "dash": True, "drm": None, "shape": ""}
+    monkeypatch.setattr(app_api, "_ivys", lambda timeout=None: Client(stream))
+    result = api("ivys_play", idec="208522161400002")
+    # ČT licenci neposlala: přehrávač dostane, komu pořad předat – balíčky oficiální aplikace a stránku dílu
+    assert result["external"] == {
+        "name": "iVysílání ČT", "title": "Zahraniční seriál · Díl 2",
+        "packages": ["cz.ceskatelevize.ivysilani.tvapp", "cz.motion.ivysilani"],
+        "url": "https://www.ceskatelevize.cz/porady/10195164142/208522161400002/"}
+    assert result["dash"] and result["url"]          # bez oficiální aplikace se přehrání zkusí jako dosud
+
+    # pořad bez známého čísla pořadu: aplikace se jen spustí, žádná vymyšlená adresa
+    monkeypatch.setattr(app_api, "_ivys", lambda timeout=None: Client(dict(stream, show_id="")))
+    assert api("ivys_play", idec="208522161400002")["external"]["url"] == ""
+
+    # s adresou licence od ČT se hraje v aplikaci, stejně jako nechráněný pořad
+    licensed = dict(stream, drm={"license": "https://licence.example/wv"})
+    monkeypatch.setattr(app_api, "_ivys", lambda timeout=None: Client(licensed))
+    assert "external" not in api("ivys_play", idec="208522161400002")
+    plain = dict(stream, dash=False, url="https://cdn/master.m3u8")
+    monkeypatch.setattr(app_api, "_ivys", lambda timeout=None: Client(plain))
+    assert "external" not in api("ivys_play", idec="208522161400002")
+
+    # balíčky, na které se aplikace ptá, musí být zapsané i v manifestu
+    manifest = open(os.path.join(os.path.dirname(__file__), "..", "android", "app", "src", "main",
+                                 "AndroidManifest.xml"), encoding="utf-8").read()
+    assert all('<package android:name="%s" />' % name in manifest for name in app_api.IVYS_APPS)
 
 
 def test_profiles_keep_progress_favourites_and_preferences_apart(api, monkeypatch):

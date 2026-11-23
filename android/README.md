@@ -95,14 +95,20 @@ Kterou dlaždici karta dostane, určuje `app_api.py` polem `icon`. Existuje-li m
 obrysová ikona `ic_tile_<název>`. Ze zápisu `ikona:barva` (např. `folder:movies`) se bere jen ikona –
 barevné odstíny kategorií tento vzhled nemá.
 
-Hotové malby mají dlaždice kategorií (`movies`, `series`, `live`, `news`, `docs`, `nature`, `kids`,
-`sport`, `fun`, `culture`, `past`, `advice`, `spirit`, `society`, `archive`) a všech 19 filmových žánrů
-(`genre_<číslo>`). Prozatímní jsou malby
-`discover_new`, `discover_popular`, `discover_top`, `discover_year`, logo, banner, ikona aplikace
-a pozadí; ostatní dlaždice mají obrysovou ikonu, dokud nedorazí zbytek sady.
+Malby má celá sada: dlaždice kategorií, řad Objevuj a všech 19 filmových žánrů, avatary profilů,
+obrázky průvodce a prázdných obrazovek, úvodní panel a kresba papíru na pozadí. Dlaždice bez malby
+(nástroje, složky) mají obrysovou ikonu.
 
 Při převodu se motiv dlaždice z podkladu vyřízne a posadí vždy na stejné místo a ve stejné velikosti
 (pravá horní část), takže nezáleží na tom, jak velký je na podkladu namalovaný.
+Červené plochy maleb se sjednotí na rumělku vzhledu a z obrázku papíru se bere jen kresba vláken –
+barvu pozadí určuje vzhled.
+
+Ikonu aplikace, banner a logo skládá `tools/make_brand.py` ze znaku (`znacka/Znak.png`) a názvu:
+
+```bash
+python3 android/tools/make_brand.py <podklady>/znacka/Znak.png <Roboto-Light.ttf> "Promítárna"
+```
 
 - Ilustrace mají: `live`, `series`, `movies`, `docs`, `news`, `sport`, `kids`, `fun`, `past`,
   `culture`, `advice`, `nature`, `society`, `spirit`, `archive`; dlaždice Objevuj `discover_new`,
@@ -204,6 +210,10 @@ z Objevuj podle TMDB, včetně přechodu do další řady) – a po deseti sekun
 zastaví přechod na Zavřít. U filmu je to další film stejné série podle TMDB (kolekce, pořadí podle
 data uvedení): hraje z katalogu nebo z Přehraj.to, a když tam není, nabídne se stránka titulu. Film se
 sám nespouští. Když nic dalšího není nebo to nejde zjistit, přehrávač se zavře jako dřív.
+Díl se nikdy nepřeskočí potichu: chybí-li v katalogu bezprostředně následující díl, hledá se nejdřív
+na Přehraj.to, a teprve když tam není, nabídne se pozdější díl z katalogu – s poznámkou, který chybí,
+a bez samočinného spuštění. Zapamatovaná adresa souboru platí jen pro předvolbu kvality, se kterou
+vznikla; po změně předvolby se varianta vybere znovu.
 Řada **Další díly** na hlavní obrazovce: po dokoukaném dílu z katalogu ten následující a seriály
 z Objevuj, které se naposledy přehrávaly (vedou na stránku seriálu s tlačítkem Pokračovat). Seriál jde
 z řady odebrat („Nenabízet další díly“ v nabídce karty); vrátí se, jakmile se z něj zase něco pustí.
@@ -294,6 +304,17 @@ stream vydá, ale adresu licenčního serveru neposílá: odpověď rozhraní m�
 a manifest nese u ochrany jen `cenc(@default_KID)` a `widevine(pssh)`. Zbývala by jen adresa
 a přístupový údaj opsané z oficiálního přehrávače, což pravidla projektu vylučují. Při chybě přehrávač ukáže, co
 manifest o ochraně říká a která pole odpověď má (jen názvy, žádné hodnoty).
+
+**Předání oficiální aplikaci ČT.** Chráněný pořad, ke kterému ČT neposlala adresu licence, se proto
+nepřehrává zde, ale otevře se rovnou v oficiální aplikaci iVysílání, je-li v zařízení
+(`cz.ceskatelevize.ivysilani.tvapp` pro Android TV, případně `cz.motion.ivysilani`). Logika k odpovědi
+`ivys_play` přidá `external` – balíčky aplikace a veřejnou adresu dílu na webu ČT
+(`https://www.ceskatelevize.cz/porady/<pořad>/<díl>/`); `OfficialApp.kt` adresu předá aktivitě
+oficiální aplikace, která se k takovým odkazům sama hlásí, a když žádná není, aplikaci aspoň spustí
+a napíše, co v ní vyhledat. Bez oficiální aplikace se přehrání zkusí jako dřív a chybová zpráva poradí
+ji nainstalovat. Balíčky musí být zapsané i v `AndroidManifest.xml` (`<queries>`).
+Ověřeno jen se zástupnou aplikací v emulátoru: jestli oficiální aplikace odkaz na díl sama otevře
+a spustí, ukáže až zkouška na zařízení.
 
 ## Stahování na disk
 
