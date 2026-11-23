@@ -229,6 +229,14 @@ výrazně kratší než film (délka z TMDB) jde do řady „Ukázky a neúplné
 které se nepodařilo přehrát, až na konec, opakovaně nahraný stejný soubor se slučuje. Verzi, kterou si
 uživatel pustil sám, si aplikace u titulu pamatuje a nabídne ji příště první.
 
+**Výstup zvuku** (`StereoAudio.kt`, volba v dialogu Zvuková stopa, nastavení `audio_output`): běžně přehrávač
+předá prostorový zvuk (Dolby, DTS, 5.1 PCM) televizi nebo soundbaru. Když to za televizí nehraje dobře – hukot,
+řeč zaniká – a jiná zvuková stopa nepomůže, protože bývá zakódovaná stejně, jde přepnout na „Stereo“: zvuk pak
+vždy dekóduje aplikace (`StereoRenderersFactory` staví výstup jen pro PCM, nic se nepředává) a prostorový
+převede na dva kanály (`ChannelMixingAudioProcessor`: střed s řečí do obou stran, zadní tišeji, basový kanál
+se vynechá). Přepnutí sestaví přehrávač znovu na stejném místě; volba platí pro celé zařízení. Tlačítko zvuku
+je proto vidět i u videa s jedinou stopou.
+
 **Po dokoukání** (`play_next` v `app_discover.py`, panel v `PlayerActivity`): přehrávač se zeptá, co
 dál. U dílu seriálu je to další díl – z vlastního katalogu, jinak vyhledaný na Přehraj.to (u seriálu
 z Objevuj podle TMDB, včetně přechodu do další řady) – a po deseti sekundách se spustí sám; odpočet

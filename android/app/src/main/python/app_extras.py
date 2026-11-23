@@ -407,9 +407,22 @@ def subtitle_style(params):
     background = settings.get("subtitle_background")
     background = background if background in dict(SUBTITLE_BACKGROUNDS) else "solid"
     return {"size": size, "background": background,
+            # výstup zvuku patří k přehrávači stejně jako vzhled titulků: načítá se jedním dotazem
+            "audio_output": settings.get("audio_output") if settings.get("audio_output") in AUDIO_OUTPUTS else "auto",
             "scale": next(scale for name, _title, scale in SUBTITLE_SIZES if name == size),
             "sizes": [{"id": name, "title": title, "scale": scale} for name, title, scale in SUBTITLE_SIZES],
             "backgrounds": [{"id": name, "title": title} for name, title in SUBTITLE_BACKGROUNDS]}
+
+
+AUDIO_OUTPUTS = ("auto", "stereo")   # auto: prostorový zvuk se předá televizi; stereo: převede ho aplikace
+
+
+def audio_output_set(params):
+    """Výstup zvuku přehrávače (platí pro celé zařízení, ne pro profil: jde o to, co je za televizí)."""
+    mode = params.get("mode")
+    if mode in AUDIO_OUTPUTS:
+        api._change_settings(lambda settings: settings.update(audio_output=mode))
+    return {"audio_output": subtitle_style({})["audio_output"]}
 
 
 def subtitle_style_set(params):
@@ -505,4 +518,5 @@ ACTIONS = {
     "profile_rename": profile_rename, "profile_avatar": profile_avatar, "profile_delete": profile_delete,
     "profile_switch": profile_switch, "watch_next": watch_next, "track_prefs": track_prefs,
     "download_season": download_season, "subtitle_style": subtitle_style, "subtitle_style_set": subtitle_style_set,
+    "audio_output_set": audio_output_set,
 }

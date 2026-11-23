@@ -89,6 +89,8 @@ class PlayerActivity : FragmentActivity() {
     private lateinit var restartButton: ImageButton
     private var tracksKey = ""       // pod čím se pamatuje zvuk a titulky (seriál, film)
     private var audioChoice = ""
+    private var audioMode = "auto"        // výstup zvuku: auto (prostorový zvuk se předává) | stereo (převádí aplikace)
+    private var appliedAudioMode = ""     // s jakým výstupem je sestavený přehrávač, který právě hraje
     private var subtitleChoice = ""
     private var userChangedTracks = false
     private var seenAudio = ""       // co skutečně hrálo při poslední změně stop
@@ -164,7 +166,13 @@ class PlayerActivity : FragmentActivity() {
         call = intent.getStringExtra(Navigator.EXTRA_CALL).orEmpty()
         params = JSONObject(intent.getStringExtra(Navigator.EXTRA_PARAMS) ?: "{}")
         Api.call("subtitle_style") { result ->
-            if (!isFinishing && !isDestroyed) result.data?.let { applySubtitleStyle(it) }
+            if (isFinishing || isDestroyed) return@call
+            result.data?.let { style ->
+                applySubtitleStyle(style)
+                audioMode = style.optString("audio_output").ifEmpty { "auto" }
+                // přehrávač už mezitím hraje s jiným výstupem zvuku: sestavit ho znovu na stejném místě
+                if (player != null && audioMode != appliedAudioMode) rebuild()
+            }
         }
         resolve()
     }
@@ -308,7 +316,9 @@ class PlayerActivity : FragmentActivity() {
         release()
         playerView.useController = true
         // Dekodéry zařízení mají přednost; softwarové (FFmpeg) nastoupí jen u zvuku, který zařízení neumí.
-        val renderers = DefaultRenderersFactory(this)
+        // Výstup „Stereo“: zvuk vždy dekóduje aplikace a prostorový převede na dva kanály (viz StereoAudio.kt).
+        appliedAudioMode = audioMode
+        val renderers = (if (audioMode == "stereo") StereoRenderersFactory(this) else DefaultRenderersFactory(this))
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
         val exo = ExoPlayer.Builder(this, renderers)
@@ -380,7 +390,8 @@ class PlayerActivity : FragmentActivity() {
             override fun onTracksChanged(tracks: Tracks) {
                 if (player !== exo) return
                 // rychlé volby jen tam, kde je z čeho vybírat
-                audioButton.visibility = if (groups(C.TRACK_TYPE_AUDIO).size > 1) View.VISIBLE else View.GONE
+                // zvuk: i u jediné stopy, kvůli volbě výstupu (prostorový zvuk / stereo)
+                audioButton.visibility = if (groups(C.TRACK_TYPE_AUDIO).isNotEmpty()) View.VISIBLE else View.GONE
                 subtitleButton.visibility = if (groups(C.TRACK_TYPE_TEXT).isNotEmpty()) View.VISIBLE else View.GONE
                 val (audio, subtitles) = selectedTracks()
                 if (userChangedTracks) {
@@ -513,8 +524,14 @@ class PlayerActivity : FragmentActivity() {
         val names = (if (text) listOf("Vypnuto") else emptyList()) + available.map { label(it) }
         val current = available.indexOfFirst { it.isSelected }.let { if (text) it + 1 else it }
         AlertDialog.Builder(this)
-            .setTitle(if (text) "Titulky" else "Zvuková stopa")
-            .apply { if (text) setNeutralButton("Velikost a pozadí") { _, _ -> chooseSubtitleStyle() } }
+            .setTitle(if (text) "Titulky" else if (audioMode == "stereo") "Zvuková stopa · výstup: stereo"
+                      else "Zvuková stopa · výstup: prostorový zvuk")
+            .apply {
+                if (text) setNeutralButton("Velikost a pozadí") { _, _ -> chooseSubtitleStyle() }
+                else setNeutralButton(if (audioMode == "stereo") "Vrátit prostorový zvuk" else "Přepnout na stereo") { _, _ ->
+                    switchAudioOutput()
+                }
+            }
             .setSingleChoiceItems(Dialogs.choices(this, names), current) { dialog, which ->
                 val builder = exo.trackSelectionParameters.buildUpon()
                 if (text && which == 0) {
@@ -530,6 +547,25 @@ class PlayerActivity : FragmentActivity() {
                 dialog.dismiss()
             }
             .showStyled()
+    }
+
+    /**
+     * Přepne výstup zvuku mezi prostorovým (předá se televizi nebo soundbaru) a stereem (převede ho
+     * aplikace) a přehrávání naváže na stejném místě. Volba se pamatuje pro všechna videa.
+     */
+    private fun switchAudioOutput() {
+        audioMode = if (audioMode == "stereo") "auto" else "stereo"
+        Api.send("audio_output_set", JSONObject().put("mode", audioMode))
+        Toast.makeText(this, if (audioMode == "stereo") "Zvuk: stereo – prostorový zvuk převádí aplikace"
+                             else "Zvuk: prostorový – předává se televizi", Toast.LENGTH_LONG).show()
+        rebuild()
+    }
+
+    /** Sestaví přehrávač znovu (jiný výstup zvuku) a pokračuje tam, kde se hrálo. */
+    private fun rebuild() {
+        val stream = lastStream ?: return
+        val position = player?.currentPosition ?: 0L
+        begin(stream, if (live) 0L else position)
     }
 
     /** Vzhled titulků podle profilu: velikost jako násobek výchozí, pozadí černé, poloprůhledné, nebo jen obrys. */

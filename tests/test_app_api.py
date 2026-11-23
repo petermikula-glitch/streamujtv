@@ -2965,3 +2965,11 @@ def test_titles_the_site_itself_offers_join_the_list(api, monkeypatch):
     assert index.harvest(force=True)["error"] == "HTTP 503"
     assert "nepodařilo se: HTTP 503" in index.harvest_text()
     assert sorted(_titles(api("discover_fresh")["items"])) == ["Archa", "Duna"]
+
+
+def test_audio_output_is_remembered_for_the_player(api):
+    assert api("subtitle_style")["audio_output"] == "auto"                    # výchozí: prostorový zvuk se předává
+    assert api("audio_output_set", mode="stereo") == {"audio_output": "stereo"}
+    assert api("subtitle_style")["audio_output"] == "stereo"
+    assert api("audio_output_set", mode="nesmysl") == {"audio_output": "stereo"}   # neznámá hodnota nic nezmění
+    assert api("audio_output_set", mode="auto") == {"audio_output": "auto"}
