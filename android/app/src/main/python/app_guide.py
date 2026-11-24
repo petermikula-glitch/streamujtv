@@ -62,7 +62,7 @@ V iVysílání – když je titul i tam.
 Upoutávka – přehraje se v aplikaci a po skončení se vrátí sem.
 Více o filmu – celý popis, režie, obsazení.
 Do oblíbených – přidá titul do sekce Oblíbené.
-Další – Hledat ručně a Jazyk a kvalita.
+Další – Hledat ručně a Jazyk a kvalita u tohoto filmu (nebo seriálu): nastavení jen pro tento titul.
 
 Pod tlačítky je řada „Verze na Přehraj.to“: každá karta je jeden soubor s jazykem, kvalitou, velikostí \
 a délkou. Kterou pustíte, tu si aplikace u titulu zapamatuje.
@@ -90,7 +90,7 @@ Rozkoukané video se zeptá, jestli navázat, nebo začít znovu. Po dokoukání
 a po deseti sekundách se pustí sám; přechodem na Zavřít odpočet zastavíte."""),
 
     ("Jazyk a kvalita", "Dabing, titulky, 4K", "settings:movies", """\
-Dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích (a tlačítko Další na stránce titulu) nastavuje tři věci:
+Dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích nastavuje pro celou aplikaci tři věci:
 
 Jazyk – Český nebo slovenský dabing, Originál s titulky, nebo Je mi to jedno. Podle toho se vybírá \
 verze a řadí výpisy.
@@ -99,6 +99,11 @@ Kvalita – Nejvyšší dostupná, 1080p, 720p, nebo Úsporná (nejmenší soubo
 
 Nejnižší kvalita – co se vůbec nabízí: Bez omezení, HD a vyšší, Jen Full HD a vyšší, Jen 4K. \
 Titul, který je jen v horší kvalitě, se ve výpisech neukáže.
+
+Jen pro jeden titul: na jeho stránce tlačítko Další → „Jazyk a kvalita u tohoto filmu“ (u seriálu \
+platí pro všechny díly). Tytéž tři věci se uloží jen k tomuto titulu; zbytek aplikace se dál řídí \
+Nástroji. Tlačítko Další pak nese poznámku „vlastní nastavení“ a volba „Podle nastavení aplikace“ \
+vrátí titul zpět.
 
 Přehraj.to ve výpisu označuje soubory jen slovem „HD“, ať jde o 720p nebo 4K. Skutečnou kvalitu \
 aplikace pozná až ze stránky videa nebo při přehrání, a pak ji ukazuje přesně."""),

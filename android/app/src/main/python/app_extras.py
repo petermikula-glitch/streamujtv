@@ -18,7 +18,7 @@ PROFILES = "profiles.json"
 AVATARS = (("clapper", "Klapka"), ("popcorn", "Popcorn"), ("crown", "Koruna"), ("owl", "Sova"), ("cat", "Kočka"),
            ("rocket", "Raketa"))
 TABLES = ("history", "watched_marks", "progress_hidden", "ivys_history", "ivys_favorites")
-KV_PREFIXES = ("choice:", "last_season:", "recent_series", "tracks:")
+KV_PREFIXES = ("choice:", "last_season:", "recent_series", "tracks:", "tprefs:")
 # osobní položky nastavení: předvolby, naposledy hledané a čas posledního hlídání oblíbených
 SETTINGS = ("prefer_language", "prefer_quality", "min_quality", "min_quality_chosen", "search_history", "favorites_checked",
             "subtitle_size", "subtitle_background")

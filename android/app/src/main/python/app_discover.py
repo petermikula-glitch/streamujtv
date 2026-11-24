@@ -187,19 +187,24 @@ def favorites_check(params):
     if not params.get("force") and now - int(api._settings().get("favorites_checked") or 0) < FAVORITES_EVERY:
         return {"found": []}
     api._change_settings(lambda settings: settings.update(favorites_checked=now))
+    movies = [entry for entry in load_favorites().values()
+              if not entry.get("key") and entry.get("kind") == "movie" and entry.get("tmdb_id")]
     with api._library() as lib:
         state = api._state(lib)
-    prefs, mark = state["prefs"], _prefs_mark(state["prefs"])
+        # film může mít jazyk a kvalitu nastavené po svém: hlídá se verze podle nich
+        states = {entry["id"]: api._title_state(lib, state, "movie:%s" % entry["tmdb_id"]) for entry in movies}
     # čekají tituly bez verze podle (současných) předvoleb; nejdéle neověřené první
-    waiting = sorted((entry for entry in load_favorites().values()
-                      if not entry.get("key") and entry.get("kind") == "movie" and entry.get("tmdb_id")
-                      and not (entry.get("match") == 1 and entry.get("match_prefs") == mark)),
+    waiting = sorted((entry for entry in movies
+                      if not (entry.get("match") == 1
+                              and entry.get("match_prefs") == _prefs_mark(states[entry["id"]]["prefs"]))),
                      key=lambda entry: entry.get("checked") or 0)[:FAVORITES_BATCH]
     found = []
     for entry in waiting:
+        own = states[entry["id"]]
+        prefs, mark = own["prefs"], _prefs_mark(own["prefs"])
         try:
             versions = _find_versions([entry.get("title") or "", entry.get("orig") or ""],
-                                      int(entry.get("year") or 0), None, state, pages=1, thorough=False)
+                                      int(entry.get("year") or 0), None, own, pages=1, thorough=False)
         except api.ApiError:
             break  # hledání teď nejde; zkusí se příště
         good = [version for version in versions if not version["short"]]
@@ -220,8 +225,9 @@ def favorites_check(params):
                                    state, favorite=current)
                 found.append({"title": current.get("title") or "", "detail": detail, "target": card["target"]})
             _save_favorites(items)
-        _remember_availability("movie", entry["tmdb_id"], len(good), year=int(entry.get("year") or 0),
-                               extra=_summary(good))
+        if "minimum" not in own["own"]:   # seznam dostupných titulů se řídí nastavením aplikace
+            _remember_availability("movie", entry["tmdb_id"], len(good), year=int(entry.get("year") or 0),
+                                   extra=_summary(good))
     return {"found": found}
 
 
@@ -1655,8 +1661,10 @@ def title_csfd(params):
 
 
 NOT_FOUND = "Na Přehraj.to jsem tento film nenašel. Zkuste hledat ručně pod jiným názvem."
-LOW_QUALITY = ("Na Přehraj.to je tento film jen v nižší kvalitě než %s (nalezeno: %d). Nižší kvalitu "
-               "povolíte tlačítkem Jazyk a kvalita → Nejnižší kvalita.")
+LOW_QUALITY = "Na Přehraj.to je tento film jen v nižší kvalitě než %s (nalezeno: %d). "
+LOW_QUALITY_OWN = "Nižší kvalitu jen pro něj povolíte tlačítkem Další → Jazyk a kvalita u tohoto filmu → Nejnižší kvalita."
+LOW_QUALITY_APP = "Nižší kvalitu povolíte tlačítkem Jazyk a kvalita → Nejnižší kvalita."
+OWN_PREFS = "Jazyk a kvalita u tohoto %s"   # položka pod „Další“ na stránce titulu
 
 
 def _title_television(kind, params):
@@ -1720,7 +1728,8 @@ def _title_page(params, kind):
     """Stránka titulu bez iVysílání a zda má tlačítko, které rovnou přehrává."""
     title = params.get("title") or ""
     with api._library() as lib:
-        state = api._state(lib)
+        # jazyk a kvalita můžou být u titulu nastavené jinak než v aplikaci (Další → Jazyk a kvalita)
+        state = api._title_state(lib, api._state(lib), "%s:%s" % (kind, params.get("id") or 0))
         last = lib.get_kv("last_season:%s" % params.get("id")) if kind == "tv" else None
     favorites_state = state["favorites"]
     entry = favorites_state.get(params.get("fid") or "") or tmdb_favorite(
@@ -1731,11 +1740,18 @@ def _title_page(params, kind):
     # Tlačítek je víc, než se vejde do dvou řádků: krátký název u oblíbených a méně používané volby
     # (ruční hledání, předvolby) pod „Další“.
     favourite = "Z oblíbených" if toggle["title"].startswith("Odebrat") else "Do oblíbených"
+    more = [{"title": "Hledat ručně", "target": api._target("search", "search", {"q": title})}]
+    if params.get("id"):
+        # jen pro tento titul; nastavení celé aplikace je v Nástrojích
+        more.append({"title": OWN_PREFS % ("seriálu" if kind == "tv" else "filmu")
+                     + (" (vlastní)" if state.get("own") else ""),
+                     "target": api._target("choices", "title_prefs_choices", {"kind": kind, "id": params["id"]})})
+    else:
+        more.append({"title": "Jazyk a kvalita", "target": api._target("choices", "prefs_choices", {})})
     actions = _extra_actions(params, kind, info, detail) + [
         {"title": favourite, "subtitle": "", "target": toggle["target"]},
-        {"title": "Další", "subtitle": "", "target": {"type": "menu", "call": "", "title": "", "params": {}}, "menu": [
-            {"title": "Hledat ručně", "target": api._target("search", "search", {"q": title})},
-            {"title": "Jazyk a kvalita", "target": api._target("choices", "prefs_choices", {})}]}]
+        {"title": "Další", "subtitle": "vlastní nastavení" if state.get("own") else "",
+         "target": {"type": "menu", "call": "", "title": "", "params": {}}, "menu": more}]
     if kind == "tv" and not params.get("id"):
         # oblíbený seriál, který už v katalogu není a TMDB ho nezná: díly nejdou dohledat po řadách
         detail["plot"] = ("Tento seriál už ve vašem katalogu není. Zkuste „Hledat ručně“.\n\n"
@@ -1764,7 +1780,10 @@ def _title_page(params, kind):
         actions.insert(0, {"title": "Zkusit znovu", "subtitle": "", "target": api._target("refresh")})
         detail["plot"] = (failed + "\n\n" + detail["plot"]).strip()
     else:
-        _remember_availability("movie", params.get("id"), len(good), year=info["year"], extra=_summary(good))
+        if "minimum" not in state["own"]:
+            # Seznam dostupných titulů se řídí nastavením aplikace: co je vidět jen díky vlastní
+            # nejnižší kvalitě tohoto filmu (nebo kvůli ní vidět není), se do něj nezapisuje.
+            _remember_availability("movie", params.get("id"), len(good), year=info["year"], extra=_summary(good))
         _note_favorite(entry["id"], versions, state["prefs"])
     if failed:
         pass
@@ -1783,7 +1802,8 @@ def _title_page(params, kind):
     elif state.get("below_minimum"):
         # film na Přehraj.to je, ale jen v nižší kvalitě, než si uživatel přeje vidět
         wanted = api.MINIMUM_LABEL.get(state["prefs"]["minimum"], "")
-        detail["plot"] = (LOW_QUALITY % (wanted, state["below_minimum"]) + "\n\n" + detail["plot"]).strip()
+        advice = LOW_QUALITY_OWN if params.get("id") else LOW_QUALITY_APP
+        detail["plot"] = (LOW_QUALITY % (wanted, state["below_minimum"]) + advice + "\n\n" + detail["plot"]).strip()
     else:
         detail["plot"] = (NOT_FOUND + "\n\n" + detail["plot"]).strip()
     rest = [version for version in versions if version["short"]]
@@ -1882,7 +1902,7 @@ def discover_episode_play(params):
     season, episode = int(params.get("season") or 0), int(params.get("episode") or 0)
     tmdb_id = params.get("id") or 0
     with api._library() as lib:
-        state = api._state(lib)
+        state = api._title_state(lib, api._state(lib), "tv:%s" % tmdb_id)
         if tmdb_id:
             _remember_title(lib, "tv", params)
     choice = "tv:%s:%s:%s" % (tmdb_id, season, episode) if tmdb_id else ""
@@ -1908,7 +1928,7 @@ def discover_movie_play(params):
     """Přehraje film z Objevuj rovnou, bez otevření jeho stránky: nejlepší verzi podle předvoleb."""
     tmdb_id = params.get("id") or 0
     with api._library() as lib:
-        state = api._state(lib)
+        state = api._title_state(lib, api._state(lib), "movie:%s" % tmdb_id)
     choice = "movie:%s" % tmdb_id if tmdb_id else ""
     versions = [version for version in _find_versions(_names(params, "movie"), int(params.get("year") or 0), None, state,
                                                       choice=choice) if not version["short"]]
@@ -1953,7 +1973,7 @@ def play_other(params):
     title = {"id": tmdb_id, "title": info.get("title") or "", "orig": info.get("orig_title") or "",
              "year": info.get("year") or 0}
     with api._library() as lib:
-        state = api._state(lib)
+        state = api._title_state(lib, api._state(lib), choice)
     versions = [version for version in _find_versions(
         _names(title, kind), 0 if kind == "tv" else int(title["year"] or 0), position, state,
         runtime=0 if kind == "tv" else int(info.get("runtime") or 0), choice=choice)
@@ -1977,7 +1997,7 @@ def discover_season(params):
     tmdb_id = int(params.get("id") or 0)
     episodes = _tmdb().season_episodes(tmdb_id, season)
     with api._library() as lib:
-        state = api._state(lib)
+        state = api._title_state(lib, api._state(lib), "tv:%s" % tmdb_id)
         played = _played_episodes(lib, tmdb_id, season, episodes)
     cards = [_episode_card(params, season, number, episodes[number], state, played.get(number))
              for number in sorted(episodes, key=int)]
@@ -1996,7 +2016,7 @@ def discover_download_season(params):
         season, tmdb_id = int(params.get("season") or 0), int(params.get("id") or 0)
         episodes = _tmdb().season_episodes(tmdb_id, season)
         with api._library() as lib:
-            state = api._state(lib)
+            state = api._title_state(lib, api._state(lib), "tv:%s" % tmdb_id)
         numbers = sorted(episodes, key=int)[:SEASON_DOWNLOAD_MAX]
         added, missing, known, unknown = 0, 0, 0, 0
         for index, number in enumerate(numbers, 1):
@@ -2015,7 +2035,7 @@ def discover_download_season(params):
             entry = state["downloads"].get(vid) or {}
             if entry.get("state") in ("queued", "downloading") or api._saved(state, vid):
                 continue
-            api.download_add({"vid": vid, "web_result": good[0]["result"]})
+            api.download_add({"vid": vid, "web_result": good[0]["result"], "choice": choice})
             added += 1
             size = api._size_bytes(good[0]["result"].get("size"))
             known, unknown = known + size, unknown + (0 if size else 1)
@@ -2063,7 +2083,7 @@ def discover_episode(params):
     season, episode = int(params.get("season") or 0), int(params.get("episode") or 0)
     tmdb_id = params.get("id") or 0
     with api._library() as lib:
-        state = api._state(lib)
+        state = api._title_state(lib, api._state(lib), "tv:%s" % tmdb_id)
         if tmdb_id:
             lib.set_kv("last_season:%s" % tmdb_id, str(season))  # pro „Pokračovat“ na stránce seriálu
             _remember_title(lib, "tv", params)
@@ -2181,9 +2201,10 @@ def _next_film(lib, tmdb_id, state):
             versions = lib.videos_grouped([meta["key"]])
             if versions.get(meta["key"]):
                 return _next_item("Další film série", label, api._movie_card(meta, state, versions)["target"])
-    found = [version for version in _find_versions(names, year, None, state, choice=choice) if not version["short"]]
+    own = api._title_state(lib, state, choice)   # další film může mít jazyk a kvalitu nastavené po svém
+    found = [version for version in _find_versions(names, year, None, own, choice=choice) if not version["short"]]
     if found:
-        return _next_item("Další film série", label, _version_card(found[0], state, choice)["target"])
+        return _next_item("Další film série", label, _version_card(found[0], own, choice)["target"])
     poster = part.get("poster_path") or ""
     return _next_item("Další film série", label, api._target("title", "discover_title", {
         "kind": "movie", "id": part["id"], "title": part["title"], "year": year,
@@ -2209,7 +2230,8 @@ def play_next(params):
             state = api._state(lib)
             video = lib.find_video(track) if track else None
             if choice.startswith("tv:"):
-                return {"next": _tmdb_next_episode(lib, choice, state)}
+                # další díl se vybírá podle předvoleb seriálu, pokud nějaké vlastní má
+                return {"next": _tmdb_next_episode(lib, choice, api._title_state(lib, state, choice))}
             if video and video["kind"] == "episode" and video["episode"]:
                 found = _catalogue_next_episode(lib, video, state)
                 gap = _missing_between(video, found[0]) if found else None

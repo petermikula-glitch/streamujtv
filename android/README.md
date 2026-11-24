@@ -201,10 +201,10 @@ seriálu je stejná: první tlačítko pustí díl, na kterém se skončilo (roz
 posledním zhlédnutém, jinak první), a řady jsou díly po řadách (prvních `SEASON_ROWS` řad, další za
 kartou řady; u dlouhého seriálu jsou to řady kolem té naposledy sledované). Výběr dílu rovnou hraje
 nejlepší verzi (`discover_episode_play`); ruční výběr verze je v nabídce karty dílu. Po návratu
-z přehrávače se výběr v řadách přesune na díl, kterým se pokračuje (`focus` v datech stránky). Tlačítko „Jazyk a kvalita“ otevírá předvolby přehrávání.
+z přehrávače se výběr v řadách přesune na díl, kterým se pokračuje (`focus` v datech stránky). Položka „Jazyk a kvalita u tohoto filmu / seriálu“ (pod „Další“) nastavuje jazyk a kvalitu jen pro tento titul.
 
 Tlačítka stránky: Přehrát, Stáhnout na disk, (V iVysílání), Upoutávka, Více o filmu, Do/Z oblíbených
-a „Další“ (nabídka `menu`: Hledat ručně, Jazyk a kvalita). Když není co přehrát z Přehraj.to, nabídka
+a „Další“ (nabídka `menu`: Hledat ručně, Jazyk a kvalita u tohoto filmu / seriálu). Když není co přehrát z Přehraj.to, nabídka
 „Další“ se rozbalí do samostatných tlačítek. „Upoutávka“ (cíl typu `open` s klíčem `youtube`) je trailer
 z TMDB (`Tmdb.extras`, nejraději česky nebo slovensky). Přehraje ji aplikace sama (`TrailerActivity`: vložený
 přehrávač YouTube ve WebView, hlásí se jménem balíčku aplikace) a po skončení nebo tlačítku Zpět se vrátí na
@@ -231,11 +231,24 @@ Ostatní verze mají skutečnou kvalitu, jakmile se jednou pustí; do té doby n
 o které se jistě ví, že je horší než nejnižší povolená kvalita (bez účtu podle překódovaných verzí, s účtem
 až podle změřeného obrazu), vypadne a ověří se další (nejvýš `VERIFY_VERSIONS`).
 
-**Předvolby přehrávání** (dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích a tlačítko na stránce
-titulu – v Nastavení už nejsou, tam chyběla nejnižší kvalita; cíl typu `choices`, akce `prefs_choices`): jazyk (český nebo slovenský dabing – oba si jsou
+**Předvolby přehrávání** (dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích – jediné místo, kde se
+nastavují pro celou aplikaci; cíl typu `choices`, akce `prefs_choices`): jazyk (český nebo slovenský dabing – oba si jsou
 rovny, rozhoduje mezi nimi kvalita / originál s titulky / jedno) a kvalita
 (nejvyšší / 1080p / 720p / nejmenší soubor). Řídí pořadí verzí (`_version_rank`) i výběr varianty
 souboru při přehrání (`_pick_stream`).
+
+**Jazyk a kvalita jen pro jeden titul** (stránka titulu → Další; akce `title_prefs_choices` a
+`title_prefs_set`): tytéž tři volby (jazyk, kvalita, nejnižší kvalita), ale uložené k titulu
+(`tprefs:movie:<číslo TMDB>` / `tprefs:tv:<číslo>` – u seriálu pro všechny díly; patří profilu).
+Nastavení aplikace se tím nemění; první možnost každé skupiny „Podle nastavení aplikace“ vlastní
+volbu ruší. Dřív tlačítko na stránce titulu otevíralo předvolby celé aplikace, takže volba u jednoho
+filmu změnila všechno (a změna nejnižší kvality spustila nové ověřování seznamu). Předvolby titulu
+(`_title_state`: nastavení aplikace přebité vlastní volbou) se použijí všude, kde se pracuje s jeho
+verzemi: stránka titulu, přímé přehrání filmu a dílu, výběr verze dílu, stažení řady, jiná verze po
+chybě (`play_other`), další díl a další film série, hlídání oblíbeného filmu – a při výběru varianty
+souboru k přehrání a ke stažení (`_stream_link` pozná titul podle `art:<video>`). Vlastní nejnižší
+kvalita se nepropisuje do seznamu dostupných titulů: ten se řídí nastavením aplikace, a tak se
+u takového titulu ze stránky nezapisuje. Stránka má u tlačítka Další poznámku „vlastní nastavení“.
 
 **Čištění verzí** (`_find_versions`): hledá se více variantami názvu a dvě stránky výsledků; soubor
 výrazně kratší než film (délka z TMDB) jde do řady „Ukázky a neúplné soubory“, kino kopie a verze,

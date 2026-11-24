@@ -263,6 +263,7 @@ CAM_RE = re.compile(r"(?<![a-z0-9])(?:cam|camrip|hdcam|ts|hdts|telesync|tc|telec
 BAD_VIDEOS = "bad_videos"       # verze, které se nepodařilo přehrát
 CHOICE_PREFIX = "choice:"       # verze, kterou si uživatel u titulu sám vybral
 REAL_PREFIX = "real:"           # skutečné rozlišení souboru (stránka videa, přehrávání)
+TITLE_PREFS_PREFIX = "tprefs:"  # jazyk a kvalita nastavené jen pro jeden titul (film nebo seriál)
 ART_PREFIX = "art:"             # titul z Objevuj, ze kterého se video pustilo (kvůli obrázku na šířku)
 
 
@@ -280,6 +281,48 @@ def _prefs(settings=None):
             "minimum": minimum if minimum in dict(MINIMUM_CHOICES) else MIN_QUALITY_DEFAULT,
             # s vyplněným účtem Přehraj.to nabízí i původní soubor (jinak jen překódované verze)
             "account": bool(settings.get("username") and settings.get("password"))}
+
+
+# Co jde nastavit jen pro jeden titul: (klíč v předvolbách, název v nabídce, možnosti)
+TITLE_PREFS = (("language", "Jazyk", LANGUAGE_CHOICES), ("quality", "Kvalita", QUALITY_CHOICES),
+               ("minimum", "Nejnižší kvalita", MINIMUM_CHOICES))
+TITLE_PREFS_APP = "app"   # hodnota „podle nastavení aplikace“ (vlastní volba titulu se zruší)
+
+
+def _title_of(choice):
+    """Titul, ke kterému patří volba verze: „movie:603“ i „tv:1399:1:5“ → „movie:603“ / „tv:1399“
+    (u seriálu platí nastavení pro všechny díly); "" když to titul z TMDB není."""
+    parts = str(choice or "").split(":")
+    if len(parts) >= 2 and parts[0] in ("movie", "tv") and parts[1].isdigit() and int(parts[1]):
+        return "%s:%d" % (parts[0], int(parts[1]))
+    return ""
+
+
+def _title_own(lib, title):
+    """Co má titul nastaveno po svém, jinak než aplikace: ``{"language"?, "quality"?, "minimum"?}``."""
+    title = _title_of(title)   # u dílu („tv:1399:1:5“) platí nastavení seriálu
+    if not title:
+        return {}
+    try:
+        stored = json.loads(lib.get_kv(TITLE_PREFS_PREFIX + title) or "{}")
+    except ValueError:
+        return {}
+    if not isinstance(stored, dict):
+        return {}
+    return {key: stored[key] for key, _name, choices in TITLE_PREFS if stored.get(key) in dict(choices)}
+
+
+def _title_prefs(lib, title, prefs=None):
+    """Předvolby, které platí pro jeden titul: nastavení aplikace, přebité tím, co si uživatel
+    zvolil jen u něj (stránka titulu → Další → Jazyk a kvalita). Zbytku aplikace se to netýká."""
+    return dict(prefs or _prefs(), **_title_own(lib, title))
+
+
+def _title_state(lib, state, title):
+    """Stav pro práci s jedním titulem (hledání a řazení verzí, přehrání): jako ``_state``,
+    jen s předvolbami titulu. ``own`` říká, co má titul nastaveno po svém."""
+    own = _title_own(lib, title)
+    return dict(state, prefs=dict(state.get("prefs") or _prefs(), **own), own=own)
 
 
 def _exact_token(quality):
@@ -1351,12 +1394,12 @@ def _subtitle_lang(label):
 
 def _stream_link(vid, fresh=False):
     """Adresa nejlepší verze souboru a titulky; zapamatovaná adresa se použije, dokud platí."""
-    prefs = _prefs()
-    if not fresh:
-        with _library() as lib:
-            cached = _link_get(lib, vid, prefs["quality"])
-        if cached:
-            return cached["url"], cached.get("subtitles") or {}
+    with _library() as lib:
+        # video puštěné (nebo stahované) ze stránky titulu se řídí předvolbami toho titulu
+        prefs = _title_prefs(lib, lib.get_kv(ART_PREFIX + vid))
+        cached = None if fresh else _link_get(lib, vid, prefs["quality"])
+    if cached:
+        return cached["url"], cached.get("subtitles") or {}
     client = _client()
     try:
         streams, _message = client.get_streams(vid)
@@ -1496,6 +1539,61 @@ def prefs_choices(params):
                        "options": [{"title": name, "current": value == current, "params": {key: value}}
                                    for value, name in choices]})
     return {"title": "Čemu dát přednost na Přehraj.to", "filters": groups, "reset": None, "apply": "settings_set"}
+
+
+def title_prefs_choices(params):
+    """Jazyk a kvalita jen pro jeden titul (``kind`` + ``id`` z TMDB) – stejná nabídka jako
+    ``prefs_choices``, ale volba se uloží k titulu a zbytku aplikace se nedotkne. První možnost každé
+    skupiny je „Podle nastavení aplikace“: vrátí titul k tomu, co je nastaveno v Nástrojích."""
+    kind, tmdb_id = params.get("kind") or "movie", params.get("id") or 0
+    title = _title_of("%s:%s" % (kind, tmdb_id))
+    if not title:
+        raise ApiError("U tohoto titulu vlastní nastavení nejde uložit. Jazyk a kvalitu pro celou aplikaci "
+                       "nastavíte v Nástrojích.")
+    central = _prefs()
+    with _library() as lib:
+        own = _title_own(lib, title)
+    groups = []
+    for key, name, choices in TITLE_PREFS:
+        labels = dict(choices)
+        app = labels[central[key]].split(" (")[0]   # bez výčtu rozlišení v závorce: řádek má být krátký
+        options = [{"title": "Podle nastavení aplikace (%s)" % app, "current": key not in own,
+                    "params": {"kind": kind, "id": tmdb_id, key: TITLE_PREFS_APP}}]
+        options += [{"title": label, "current": own.get(key) == value,
+                     "params": {"kind": kind, "id": tmdb_id, key: value}} for value, label in choices]
+        groups.append({"title": name, "value": labels[own[key]] if key in own else "podle aplikace (%s)" % app,
+                       "options": options})
+    what = "tento seriál" if kind == "tv" else "tento film"
+    return {"title": "Jazyk a kvalita jen pro %s" % what, "filters": groups, "reset": None,
+            "apply": "title_prefs_set"}
+
+
+def title_prefs_set(params):
+    """Uloží (nebo zruší) volbu jazyka a kvality u jednoho titulu. Nastavení aplikace se nemění."""
+    kind, tmdb_id = params.get("kind") or "movie", params.get("id") or 0
+    title = _title_of("%s:%s" % (kind, tmdb_id))
+    if not title:
+        raise ApiError("U tohoto titulu vlastní nastavení nejde uložit.")
+    with _library() as lib, lib.conn:
+        own = _title_own(lib, title)
+        before = dict(own)
+        for key, _name, choices in TITLE_PREFS:
+            value = params.get(key)
+            if value is None:
+                continue
+            if value == TITLE_PREFS_APP:
+                own.pop(key, None)
+            elif str(value) in dict(choices):
+                own[key] = str(value)
+        if own:
+            lib.set_kv(TITLE_PREFS_PREFIX + title, json.dumps(own, sort_keys=True))
+        else:
+            lib.conn.execute("DELETE FROM settings_kv WHERE k=?", (TITLE_PREFS_PREFIX + title,))
+        if own != before and kind == "movie":
+            # Verze, kterou si uživatel u filmu dřív vybral ručně, by zůstala první a tlačítko Přehrát
+            # by se nezměnilo. U dílů seriálu volba zůstává: nese stav zhlédnutí dílu.
+            lib.conn.execute("DELETE FROM settings_kv WHERE k=?", (CHOICE_PREFIX + title,))
+    return {"own": own}
 
 
 def settings_set(params):
@@ -2451,6 +2549,9 @@ def download_add(params):
     with _library() as lib:
         video = _playable_video(lib, params)
         meta = lib.get_meta(video["meta_key"]) or {}
+        if _title_of(params.get("choice")):
+            # stahuje se ze stránky titulu: varianta souboru se vybere podle jeho předvoleb
+            lib.set_kv(ART_PREFIX + video["id"], str(params["choice"]))
     vid = video["id"]
     with _DOWNLOADS_LOCK:
         items = _downloads()
@@ -2923,4 +3024,4 @@ def call(action, params_json="{}"):
 
 
 _register(diagnostics=diagnostics, log_error=log_error, catalog_filters=catalog_filters,
-          prefs_choices=prefs_choices)
+          prefs_choices=prefs_choices, title_prefs_choices=title_prefs_choices, title_prefs_set=title_prefs_set)

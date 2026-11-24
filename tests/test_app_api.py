@@ -735,9 +735,10 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
     assert about["target"]["params"]["text"] == (
         "1999 · 86 % · 1 h 56 min · Komedie, Drama\n\nRodinná komedie.\n\nŽánr: Komedie, Drama")
     # méně používané volby jsou pod „Další“, aby se tlačítka vešla do dvou řádků
-    assert more["title"] == "Další" and _titles(more["menu"]) == ["Hledat ručně", "Jazyk a kvalita"]
+    assert more["title"] == "Další" and _titles(more["menu"]) == ["Hledat ručně", "Jazyk a kvalita u tohoto filmu"]
     manual, prefs = more["menu"]
-    assert prefs["target"] == {"type": "choices", "call": "prefs_choices", "params": {}}
+    # jen pro tento film: nastavení celé aplikace je v Nástrojích
+    assert prefs["target"] == {"type": "choices", "call": "title_prefs_choices", "params": {"kind": "movie", "id": 11}}
     assert (play["title"], play["subtitle"]) == ("Přehrát", "CZ dabing · 1080p") and play["target"] == best["target"]
     assert favourite["title"] == "Do oblíbených"
     assert manual["target"] == {"type": "search", "call": "search", "params": {"q": "Pelíšky"}}
@@ -769,7 +770,7 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
 
     nothing = api("discover_title", kind="movie", id=5, title="Neznámý film", year=2001)
     assert nothing["rows"] == [] and [action["title"] for action in nothing["actions"]] == [
-        "Do oblíbených", "Hledat ručně", "Jazyk a kvalita"]                 # není co přehrát: volby jsou rovnou vidět
+        "Do oblíbených", "Hledat ručně", "Jazyk a kvalita u tohoto filmu"]  # není co přehrát: volby jsou rovnou vidět
     assert "nenašel" in nothing["detail"]["plot"]
     assert asked[-2:] == [("Neznámý film 2001", 1), ("Neznámý film", 1)]     # zkusí i bez roku
 
@@ -783,7 +784,7 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
     assert "Rodinná komedie." in failed["detail"]["plot"] and failed["rows"] == []
     assert [(action["title"], action["target"]["type"]) for action in failed["actions"]] == [
         ("Zkusit znovu", "refresh"), ("Více o filmu", "info"), ("Z oblíbených", "command"), ("Hledat ručně", "search"),
-        ("Jazyk a kvalita", "choices")]
+        ("Jazyk a kvalita u tohoto filmu", "choices")]
 
 
 def test_title_page_offers_the_series_similar_titles_cast_and_csfd(api, monkeypatch):
@@ -2212,6 +2213,160 @@ def test_playback_preferences_are_offered_as_choices(api):
     assert "Originál s titulky" in _tool(api, "Jazyk a kvalita")["subtitle"]
 
 
+FILM2 = {"kind": "movie", "id": 12, "title": "Kolja", "year": 1996, "poster": "", "orig": "Kolja"}
+FILM2_DETAIL = dict(FILM_DETAIL, id=12, title="Kolja", original_title="Kolja", release_date="1996-05-15")
+
+
+def test_language_and_quality_can_be_set_for_one_title_only(api, monkeypatch):
+    """Volba jazyka a kvality na stránce titulu platí jen pro ten titul. Dřív otevírala nastavení celé
+    aplikace: kdo si u jednoho filmu vybral titulky, změnil pořadí verzí všude."""
+    api("settings_set", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL, "/movie/12": FILM2_DETAIL})
+    hour = 3600
+    _catalogue_search(monkeypatch, {
+        "Pelíšky 1999": [_web(31, "Pelisky 1999 EN 720p", 2 * hour, "1 GB"), _web(32, "Pelisky.1999.CZ.1080p", 2 * hour, "4 GB"),
+                         _web(38, "Pelisky 1999 CZ tit 2160p", 2 * hour, "9 GB")],
+        "Kolja 1996": [_web(51, "Kolja 1996 EN 720p", 2 * hour, "1 GB"), _web(52, "Kolja.1996.CZ.1080p", 2 * hour, "4 GB"),
+                       _web(58, "Kolja 1996 CZ tit 2160p", 2 * hour, "9 GB")]})
+    before = api("settings_get")
+    page = api("discover_title", **FILM)
+    more = page["actions"][-1]
+    assert (more["title"], more["subtitle"]) == ("Další", "")
+    offered = api(more["menu"][1]["target"]["call"], **more["menu"][1]["target"]["params"])
+    assert offered["title"] == "Jazyk a kvalita jen pro tento film" and offered["apply"] == "title_prefs_set"
+    # dokud u titulu nic zvoleno není, řídí se nastavením aplikace – a nabídka říká jakým
+    assert [(group["title"], group["value"]) for group in offered["filters"]] == [
+        ("Jazyk", "podle aplikace (Český nebo slovenský dabing)"), ("Kvalita", "podle aplikace (Nejvyšší dostupná)"),
+        ("Nejnižší kvalita", "podle aplikace (Bez omezení)")]
+    language = offered["filters"][0]["options"]
+    assert [(option["title"], option["current"]) for option in language] == [
+        ("Podle nastavení aplikace (Český nebo slovenský dabing)", True), ("Český nebo slovenský dabing", False),
+        ("Originál s titulky", False), ("Je mi to jedno", False)]
+    assert language[2]["params"] == {"kind": "movie", "id": 11, "language": "subs"}
+
+    api(offered["apply"], **language[2]["params"])                           # u Pelíšků originál s titulky
+    assert api("settings_get") == before                                     # nastavení aplikace se nezměnilo
+    assert api("prefs_choices")["filters"][0]["value"] == "Český nebo slovenský dabing"
+    changed = api("discover_title", **FILM)
+    assert _titles(changed["rows"][0]["items"]) == ["CZ titulky · 2160p", "EN · 720p", "CZ dabing · 1080p"]
+    assert changed["actions"][0]["subtitle"] == "CZ titulky · 2160p"
+    # stránka dává najevo, že titul má vlastní nastavení
+    assert changed["actions"][-1]["subtitle"] == "vlastní nastavení"
+    assert changed["actions"][-1]["menu"][1]["title"] == "Jazyk a kvalita u tohoto filmu (vlastní)"
+    again = api("title_prefs_choices", kind="movie", id=11)["filters"][0]
+    assert again["value"] == "Originál s titulky" and [option["current"] for option in again["options"]] == [
+        False, False, True, False]
+    # jiný film se řídí dál nastavením aplikace
+    other = api("discover_title", **FILM2)
+    assert _titles(other["rows"][0]["items"]) == ["CZ dabing · 1080p", "CZ titulky · 2160p", "EN · 720p"]
+    assert other["actions"][-1]["subtitle"] == "" and other["actions"][0]["subtitle"] == "CZ dabing · 1080p"
+    # i přímé přehrání filmu (bez otevření stránky) bere verzi podle jeho nastavení
+    played = []
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: (played.append(vid), ("https://cdn.x/v.mp4", {}))[1])
+    api("discover_movie_play", **FILM)
+    api("discover_movie_play", **FILM2)
+    assert [int(vid.split(":")[0]) for vid in played] == [38, 52]
+
+    # nastavení celé aplikace dál platí pro všechno, co vlastní volbu nemá
+    api("settings_set", prefer_language="any", prefer_quality="small")
+    assert _titles(api("discover_title", **FILM2)["rows"][0]["items"])[0] == "EN · 720p"
+    # u Pelíšků platí jejich jazyk (titulky) a z aplikace jen to, co vlastního nemají (úsporná kvalita)
+    assert _titles(api("discover_title", **FILM)["rows"][0]["items"])[0] == "CZ titulky · 2160p"
+    api("settings_set", prefer_language="dub", prefer_quality="best")
+
+    api("title_prefs_set", kind="movie", id=11, language="app")              # zpět k nastavení aplikace
+    back = api("discover_title", **FILM)
+    assert _titles(back["rows"][0]["items"])[0] == "CZ dabing · 1080p" and back["actions"][-1]["subtitle"] == ""
+    with app_api._library() as lib:
+        assert lib.get_kv(app_api.TITLE_PREFS_PREFIX + "movie:11") is None   # nic po něm nezůstane
+    assert "tprefs:".startswith(app_api.app_extras.KV_PREFIXES)              # volba patří profilu, jako ostatní předvolby
+    with pytest.raises(app_api.ApiError):
+        app_api.title_prefs_choices({"kind": "movie", "id": 0})              # titul bez čísla TMDB vlastní volbu nemá
+
+
+def test_title_quality_decides_which_file_variant_plays(api, monkeypatch):
+    """Kvalita zvolená jen pro titul rozhoduje i o tom, která varianta souboru se pustí a stáhne."""
+    api("settings_set", tmdb_key="k" * 32, username="u@example.com", password="x")
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL, "/movie/12": FILM2_DETAIL})
+    hour = 3600
+    _catalogue_search(monkeypatch, {"Pelíšky 1999": [_web(41, "Pelisky 1999 CZ 1080p", 2 * hour, "6 GB")],
+                                    "Kolja 1996": [_web(61, "Kolja 1996 CZ 1080p", 2 * hour, "6 GB")]})
+    _stream_pages(monkeypatch, {41: [1080, 720], 61: [1080, 720]})
+    api("title_prefs_set", kind="movie", id=11, quality="720")
+    assert api("discover_movie_play", **FILM)["url"] == "https://cdn.x/720.mp4"
+    assert api("discover_movie_play", **FILM2)["url"].startswith("orig:")    # jinde platí „nejvyšší dostupná“
+    # pokračování z Rozkoukaných (bez odkazu na titul) pustí tutéž variantu
+    vid = api("discover_title", **FILM)["actions"][0]["target"]["params"]["vid"]
+    assert api("play", vid=vid)["url"] == "https://cdn.x/720.mp4"
+    api("title_prefs_set", kind="movie", id=11, quality="app")
+    assert api("discover_movie_play", **FILM)["url"].startswith("orig:")     # adresa se po změně vybírá znovu
+
+
+def test_title_minimum_quality_does_not_touch_the_list_of_available_titles(api, monkeypatch):
+    """Nižší kvalita povolená jen u jednoho filmu ho ukáže na jeho stránce, ale seznam dostupných
+    titulů (ten se řídí nastavením aplikace) se kvůli tomu nemění ani neověřuje znovu."""
+    api("settings_set", tmdb_key="k" * 32, min_quality="1080")
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    hour = 3600
+    low = [_web(91, "Pelisky 1999 CZ", 2 * hour, "3 GB", quality="720p")]
+    _catalogue_search(monkeypatch, {"Pelíšky 1999": low, "Pelíšky": low, "Pelisky 1999": low, "Pelisky": low})
+    page = api("discover_title", **FILM)
+    assert "jen v nižší kvalitě než Full HD (nalezeno: 1)" in page["detail"]["plot"]
+    assert "Další → Jazyk a kvalita u tohoto filmu → Nejnižší kvalita" in page["detail"]["plot"]
+    assert _record("movie:11")["n"] == 0
+    restarted = []
+    monkeypatch.setattr(app_api.app_index, "restart", lambda: restarted.append(1))
+    api("title_prefs_set", kind="movie", id=11, minimum="")                  # u tohoto filmu bez omezení
+    allowed = api("discover_title", **FILM)
+    assert _titles(allowed["rows"][0]["items"]) == ["CZ dabing · 720p"] and allowed["actions"][0]["title"] == "Přehrát"
+    assert _record("movie:11")["n"] == 0 and restarted == []                 # seznam dostupných se nemění
+    assert app_api._prefs()["minimum"] == "1080"
+    lowest = api("title_prefs_choices", kind="movie", id=11)["filters"][2]
+    assert lowest["value"] == "Bez omezení" and lowest["options"][0]["title"] == "Podle nastavení aplikace (Jen Full HD a vyšší)"
+
+
+def test_series_keeps_its_own_language_for_every_episode(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {})
+    found = [_web(71, "Simpsonovi S01E02 CZ dabing 720p", 1300, "300 MB"),
+             _web(72, "Simpsonovi S01E02 CZ titulky 1080p", 1300, "900 MB")]
+    _catalogue_search(monkeypatch, {"Simpsonovi S01E02": found})
+    show = {"id": 456, "title": "Simpsonovi", "season": 1, "episode": 2}
+    assert _titles(api("discover_episode", **show)["items"]) == ["CZ dabing · 720p", "CZ titulky · 1080p"]
+    offered = api("title_prefs_choices", kind="tv", id=456)
+    assert offered["title"] == "Jazyk a kvalita jen pro tento seriál"
+    api("title_prefs_set", kind="tv", id=456, language="subs")
+    assert _titles(api("discover_episode", **show)["items"]) == ["CZ titulky · 1080p", "CZ dabing · 720p"]
+    played = []
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: (played.append(vid), ("https://cdn.x/v.mp4", {}))[1])
+    api("discover_episode_play", **show)
+    assert played[-1].startswith("72:")
+    # zapamatovaná verze dílu (nese stav zhlédnutí) změnou nastavení seriálu nemizí
+    with app_api._library() as lib:
+        assert lib.get_kv("choice:tv:456:1:2").startswith("72:")
+    api("title_prefs_set", kind="tv", id=456, language="dub")
+    with app_api._library() as lib:
+        assert lib.get_kv("choice:tv:456:1:2").startswith("72:")
+        assert app_api._title_own(lib, "tv:456:1:2") == {"language": "dub"}  # díl se řídí nastavením seriálu
+
+
+def test_favourite_film_is_watched_for_the_version_its_own_settings_ask_for(api, monkeypatch):
+    api("settings_set", tmdb_key="k" * 32)
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    found = [_web(38, "Pelisky 1999 CZ tit 1080p", 7200, "9 GB")]
+    _catalogue_search(monkeypatch, {"Pelíšky 1999": found})
+    page = api("discover_title", **FILM)
+    favourite = next(action for action in page["actions"] if action["title"] == "Do oblíbených")
+    api(favourite["target"]["call"], **favourite["target"]["params"])
+    api("favorites_check", force=True)
+    entry = next(iter(app_api.app_discover.load_favorites().values()))
+    assert (entry["match"], entry["match_prefs"]) == (0, "dub|best")          # dabing tu není: hlídá se dál
+    api("title_prefs_set", kind="movie", id=11, language="subs")             # u tohoto filmu stačí titulky
+    assert api("favorites_check", force=True) == {"found": []}               # jiné zadání není „novinka“
+    entry = next(iter(app_api.app_discover.load_favorites().values()))
+    assert (entry["match"], entry["match_prefs"]) == (1, "subs|best")
+
+
 def test_search_marks_titles_that_are_on_prehrajto_and_puts_them_first(api, monkeypatch):
     api("settings_set", tmdb_key="k" * 32)
     _fake_tmdb(monkeypatch, {"/search/multi": {"results": [
@@ -3513,7 +3668,8 @@ def test_guide_describes_the_app_with_the_names_it_really_uses(api, monkeypatch)
     for words in ("Odebrat z Rozkoukaných", "Opravit přiřazení", "Označit jako zhlédnuté", "Stáhnout na disk",
                   "Verze na Přehraj.to", "Vše na Přehraj.to", "Nově na Přehraj.to", "S dabingem", "Hledat ručně",
                   "Kam stahovat", "Přesunout vše na jiný disk", "Zkouška Přehraj.to", "Zkontrolovat aktualizace",
-                  "Povolit zálohu, která přežije odinstalaci", "Velikost a pozadí", "Výstup zvuku", "Posun zvuku"):
+                  "Povolit zálohu, která přežije odinstalaci", "Velikost a pozadí", "Výstup zvuku", "Posun zvuku",
+                  app_api.app_discover.OWN_PREFS % "filmu", "Podle nastavení aplikace", "vlastní nastavení"):
         assert words in text, words
     api("settings_set", tmdb_key="k" * 32)                                   # dlaždice výpisů Objevuj
     for tile in app_api.app_discover.home_tiles("movie"):
@@ -3748,7 +3904,7 @@ def test_title_page_offers_the_trailer_and_the_whole_description(api, monkeypatc
         lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE 'avail:%'")
     only = api("discover_title", **FILM)
     assert _titles(only["actions"]) == ["Přehrát v iVysílání", "Upoutávka", "Více o filmu", "Do oblíbených",
-                                        "Hledat ručně", "Jazyk a kvalita"]   # není co přehrát z Přehraj.to: vše rozbalené
+                                        "Hledat ručně", "Jazyk a kvalita u tohoto filmu"]   # není co přehrát z Přehraj.to
     assert only["actions"][0]["subtitle"] == "Česká televize"
 
     _fake_tmdb(monkeypatch, {"/movie/12": dict(FILM_DETAIL, id=12)})         # bez upoutávky tlačítko není
