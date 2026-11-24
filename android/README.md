@@ -437,6 +437,26 @@ u tlačítka Pokračovat). Ikony ovládání přebíjejí výchozí ikony Media3
 
 **Diagnostika** (Nástroje, akce `diagnostics`): verze, zařízení, úroveň Widevine, stav přihlášení,
 klíče TMDB a iVysílání a posledních pár chyb (`errors.json`; zapisuje je vstupní bod `call` a přehrávač).
+Tři tlačítka: znovu zkontrolovat, zkouška Přehraj.to a hlášení.
+- **Zkouška Přehraj.to** (`prehrajto_test` v `app_health.py`): aplikace čte web Přehraj.to, a když web změní
+  podobu stránek, hledání přestane fungovat bez varování. Zkouška pustí tři běžná hledání a načte jednu
+  stránku videa; řekne, jestli výsledky mají to, co aplikace potřebuje (soubory s délkou a velikostí, verze
+  k přehrání), a tím odliší chybu aplikace od změny webu. Během přestávky po HTTP 429 se neprovádí.
+- **Hlášení** (`diagnostics_report`): celá diagnostika jako text – do souboru `promitarna-hlaseni-<datum>.txt`
+  na disku (stejná složka jako zálohy) a zkráceně bez diakritiky do kódu QR (knihovna ZXing, jen kodér),
+  který přečte fotoaparát telefonu. Není pak potřeba fotit obrazovku.
+
+**Ochrana katalogu** (`app_health.py`): po otevření aplikace se nejvýš jednou za `SNAPSHOT_EVERY` uloží kopie
+katalogu do `snapshots/` v datech aplikace (zálohovacím rozhraním SQLite, před uložením se zkontroluje,
+drží se poslední `SNAPSHOT_KEEP`). Při startu (`configure` → `guard`) se katalog zkontroluje
+(`PRAGMA quick_check`); poškozený se odloží stranou (`catalog-poskozeny.db`) a nahradí poslední dobrou
+kopií, a když žádná není, začne se s prázdným – jinak by každá obrazovka skončila chybou databáze.
+Co se stalo, je vidět v Diagnostice mezi chybami; řádek „Kopie katalogu“ říká, kolik kopií je a z kdy.
+
+**Jiná verze po chybě přehrávání** (`play_other`, `PlayerActivity`): když se verze titulu z Objevuj
+nepodaří přehrát ani s novou adresou (a není to výpadek připojení), přehrávač místo chyby pustí další
+nejlepší verzi téhož titulu na stejném místě a oznámí to; nejvýš `OTHER_VERSIONS` krát. Nepovedená verze
+se poznačí a příště se nenabídne jako první. U vlastních souborů z katalogu a u iVysílání se nic nemění.
 
 **Stažení celé řady**: u seriálu z katalogu dlaždice „Stáhnout N. řadu“ (`download_season`), u řady
 z Objevuj „Stáhnout celou řadu“ (`discover_download_season`, jedno hledání na díl). V Nastavení jde
@@ -587,3 +607,16 @@ a podkategorie, řady a díly, Moje pořady).
 Zatím chybí: kolekce, Chci vidět, objevování v TMDB, ruční úpravy katalogu, výběr verze filmu
 (vždy se vybere nejlepší: český/slovenský dabing, pak vyšší kvalita) a automatická synchronizace
 na pozadí.
+
+## Odložené návrhy
+
+Domluvené s vlastníkem, zatím neudělané (pořadí není závazné):
+
+- **Méně dotazů na jeden titul při ověřování.** Titul, který na Přehraj.to není, stojí až šest hledání
+  (`_count_versions`: tři pod českým a původním názvem, tři pod dalšími názvy z TMDB). Zkrátit na dvě až
+  tři podle toho, co ukáže Diagnostika o odmítaných dotazech (HTTP 429). Spolu s tím tři drobnosti
+  z kontroly kódu: časovače přehrávače běží i při pauze na pozadí, stránka titulu se krátce načítá ve
+  špatném rozložení, a titul, jehož hledání pokaždé skončí chybou, dokáže zadržet plnění seznamu na
+  jedné stránce plánu.
+- **Zkušební kanál aktualizací.** Každé vydání jde dnes rovnou do televize. Možnost označit vydání jako
+  zkušební a instalovat ho jen na vyžádání; vyžaduje úpravu `.github/workflows/` (souhlas vlastníka).

@@ -83,6 +83,11 @@ def configure(directory, proxy="", no_proxy=""):
     """
     os.makedirs(directory, exist_ok=True)
     _STATE["dir"] = directory
+    try:
+        import app_health
+        app_health.guard(directory)   # poškozený katalog se hned nahradí poslední dobrou kopií
+    except Exception:                 # kontrola nesmí zabránit startu aplikace
+        pass
     _STATE["quick_sync"] = 0   # nová složka s daty (nebo nový start aplikace): účet se zkontroluje znovu
     if proxy:
         os.environ["https_proxy"] = os.environ["http_proxy"] = str(proxy)
@@ -1618,6 +1623,10 @@ def quick_sync(params):
         app_index.start()   # seznam dostupných titulů se plní na pozadí, dokud aplikace běží
     except (ApiError, TmdbError):
         pass
+    try:
+        app_health.snapshot()   # jednou denně ověřená kopie katalogu pro případ poškození
+    except Exception as error:  # kopie je jen pojistka: nesmí nic zastavit
+        _remember_error("kopie katalogu", error)
     return result
 
 
@@ -2760,11 +2769,13 @@ import app_discover  # noqa: E402 – až po definicích výše: modul použív�
 import app_extras  # noqa: E402
 import app_index  # noqa: E402
 import app_backup  # noqa: E402
+import app_health  # noqa: E402
 
 ACTIONS = dict(app_discover.ACTIONS)
 ACTIONS.update(app_extras.ACTIONS)
 ACTIONS.update(app_index.ACTIONS)
 ACTIONS.update(app_backup.ACTIONS)
+ACTIONS.update(app_health.ACTIONS)
 ACTIONS.update({
     "downloads": downloads, "download_add": download_add, "download_next": download_next,
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,
@@ -2874,6 +2885,8 @@ def diagnostics(params):
     add("Seznam dostupných titulů", app_index.summary_text())
     add("Seznam – deník", app_index.journal_text())
     add("Nabídka Přehraj.to", app_index.harvest_text())
+    add("Zkouška Přehraj.to", *app_health.site_text())
+    add("Kopie katalogu", app_health.snapshots_text())
     errors = ["%s  %s: %s" % (time.strftime("%d.%m. %H:%M", time.localtime(entry.get("time") or 0)),
                               entry.get("action") or "", entry.get("text") or "") for entry in _errors()]
     # zkušební předání oficiální aplikaci ČT: obrazovka podle něj zjistí, co aplikace v zařízení přijímá

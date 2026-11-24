@@ -29,7 +29,7 @@ object Backup {
     private fun wide(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
 
     /** Složka pro zálohy na daném disku: mimo složku aplikace, když to systém dovolí, jinak v ní. */
-    private fun folder(volume: Storage.Volume): File {
+    fun folder(volume: Storage.Volume): File {
         if (wide()) {
             val root = volume.dir.absolutePath.substringBefore("/Android/data/", "")
             if (root.isNotEmpty()) return File(root, FOLDER)

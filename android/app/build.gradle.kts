@@ -25,8 +25,8 @@ android {
         applicationId = "cz.petermikula.mojevidea"
         minSdk = 24
         targetSdk = 35
-        versionCode = 31
-        versionName = "0.25.0"
+        versionCode = 32
+        versionName = "0.26.0"
         ndk {
             // 32bitový i 64bitový Android (řada Android TV boxů má 32bitový systém)
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
@@ -119,6 +119,8 @@ dependencies {
     // Verze musí odpovídat verzi Media3.
     implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.8.0+1")
     implementation("com.github.bumptech.glide:glide:4.16.0")
+    // kód QR s hlášením z Diagnostiky (jen kodér, bez čtení a bez fotoaparátu)
+    implementation("com.google.zxing:core:3.5.3")
     // řada „Pokračovat ve sledování“ na domovské obrazovce Android TV
     implementation("androidx.tvprovider:tvprovider:1.0.0")
 }

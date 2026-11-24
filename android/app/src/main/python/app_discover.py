@@ -1927,6 +1927,50 @@ def discover_movie_play(params):
     return stream
 
 
+OTHER_VERSIONS = 2   # tolikrát nejvýš přehrávač po chybě zkusí jinou verzi téhož titulu
+
+
+def play_other(params):
+    """Verzi ``track`` se nepodařilo přehrát: pustí jinou verzi téhož titulu (``choice`` říká kterého –
+    ``movie:<číslo TMDB>`` nebo ``tv:<číslo>:<řada>:<díl>``), nejlepší podle předvoleb. ``tried`` jsou
+    verze, které už selhaly. Vrací adresu pro přehrávač a ``switched`` (popis verze pro oznámení)."""
+    track, choice = str(params.get("track") or ""), str(params.get("choice") or "")
+    tried = {str(vid) for vid in params.get("tried") or []} | {track}
+    parts = choice.split(":")
+    if len(parts) < 2 or parts[0] not in ("movie", "tv") or not parts[1].isdigit() or len(tried) > OTHER_VERSIONS:
+        raise api.ApiError("Jinou verzi se nepodařilo najít.")
+    api.play_failed({"track": track})        # příště se tahle verze nenabídne jako první
+    kind, tmdb_id = parts[0], int(parts[1])
+    position = None
+    if kind == "tv":
+        if len(parts) != 4 or not (parts[2].isdigit() and parts[3].isdigit()):
+            raise api.ApiError("Jinou verzi se nepodařilo najít.")
+        position = (int(parts[2]), int(parts[3]))
+    try:
+        info = _tmdb().details(tmdb_id, want_series=kind == "tv")
+    except TmdbError:
+        raise api.ApiError("Jinou verzi se nepodařilo najít (TMDB neodpovídá).")
+    title = {"id": tmdb_id, "title": info.get("title") or "", "orig": info.get("orig_title") or "",
+             "year": info.get("year") or 0}
+    with api._library() as lib:
+        state = api._state(lib)
+    versions = [version for version in _find_versions(
+        _names(title, kind), 0 if kind == "tv" else int(title["year"] or 0), position, state,
+        runtime=0 if kind == "tv" else int(info.get("runtime") or 0), choice=choice)
+        if not version["short"] and not version["bad"] and version["video"]["id"] not in tried]
+    if not versions:
+        raise api.ApiError("Jiná verze, která by šla přehrát, na Přehraj.to není.")
+    best = versions[0]
+    request = {"vid": best["video"]["id"], "web_result": best["result"], "choice": choice, "fresh": True}
+    stream = api.play(request)
+    stream["choice"] = choice
+    stream["switched"] = _version_label(best, state)
+    # Čím si přehrávač řekne o tutéž verzi znovu (nová adresa po chybě): jinak by se vrátil k té
+    # původní, která nejde přehrát.
+    stream["again"] = {"call": "play", "params": request}
+    return stream
+
+
 def discover_season(params):
     """Díly jedné řady podle TMDB; každý díl vede na své verze na Přehraj.to."""
     season = int(params.get("season") or 0)
@@ -2492,7 +2536,7 @@ ACTIONS = {
     "discover": discover, "discover_years": discover_years, "discover_genres": discover_genres,
     "discover_czechoslovak": discover_czechoslovak, "discover_title": discover_title,
     "discover_season": discover_season, "discover_episode": discover_episode, "discover_check": discover_check,
-    "play_next": play_next, "title_csfd": title_csfd, "favorites_check": favorites_check,
+    "play_next": play_next, "play_other": play_other, "title_csfd": title_csfd, "favorites_check": favorites_check,
     "discover_download_season": discover_download_season, "discover_filters": discover_filters,
     "discover_person": discover_person, "discover_episode_play": discover_episode_play,
     "discover_movie_play": discover_movie_play, "discover_row": discover_row, "next_up_hide": next_up_hide,

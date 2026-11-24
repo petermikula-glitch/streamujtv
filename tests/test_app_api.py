@@ -3355,6 +3355,128 @@ def test_backup_and_restore_bring_everything_back(api, tmp_path, monkeypatch):
     assert not os.path.exists(str(tmp_path / "evil.json"))
 
 
+def test_failed_version_is_replaced_by_another_one(api, monkeypatch):
+    """Verze, kterou přehrávač nepřehrál ani napodruhé: místo chyby se pustí další verze téhož titulu."""
+    api("settings_set", tmdb_key="k" * 32, username="a@b.cz", password="heslo")
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    hour = 3600
+    found = {"Pelíšky 1999": [_web(71, "Pelisky 1999 CZ 1080p", 2 * hour, "4 GB"),
+                              _web(72, "Pelisky 1999 CZ 720p", 2 * hour, "2 GB"),
+                              _web(73, "Pelisky 1999 EN 720p", 2 * hour, "1 GB")]}
+    _catalogue_search(monkeypatch, found)
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/%s.mp4" % vid.split(":")[0], {}))
+    first = api("discover_movie_play", **FILM)
+    assert first["track"] == _web(71, "")["id"]
+    second = api("play_other", track=first["track"], choice=first["choice"])
+    assert second["track"] == _web(72, "")["id"] and second["choice"] == "movie:11"
+    assert second["switched"].startswith("CZ") and "720p" in second["switched"]
+    # nový pokus po chybě (nová adresa) musí pustit zase tuhle verzi, ne tu původní
+    assert second["again"]["call"] == "play" and second["again"]["params"]["vid"] == second["track"]
+    assert api(second["again"]["call"], **second["again"]["params"])["track"] == second["track"]
+    with app_api._library() as lib:
+        assert first["track"] in app_api._bad_videos(lib)                    # příště se nenabídne jako první
+    third = api("play_other", track=second["track"], choice="movie:11", tried=[first["track"]])
+    assert third["track"] == _web(73, "")["id"]
+    # víc pokusů už ne (a když není z čeho brát, řekne to): přehrávač pak ukáže původní chybu
+    again = api.raw("play_other", track=third["track"], choice="movie:11", tried=[first["track"], second["track"]])
+    assert again["ok"] is False
+    assert api.raw("play_other", track="1:x:0000000000000001", choice="")["ok"] is False   # video mimo Objevuj
+
+
+def test_catalogue_is_copied_daily_and_a_broken_one_is_replaced(api, tmp_path, monkeypatch):
+    health = app_api.app_health
+    _fill()
+    first = health.snapshot()
+    assert first and health._healthy(first) and health.snapshot() is None    # čerstvá kopie: další se nedělá
+    real = __import__("time").strftime
+    for hour in range(4):                                                    # další dny: drží se jen poslední tři
+        monkeypatch.setattr(health.time, "strftime", lambda form, *rest, hour=hour: "catalog-20270101-%02d0000.db" % hour
+                            if form.startswith("catalog-") else real(form, *rest))
+        assert health.snapshot(force=True)
+    monkeypatch.setattr(health.time, "strftime", real)
+    assert len(health._snapshots()) == 3 and "uložené" in health.snapshots_text()
+    line = next(line for line in api("diagnostics")["lines"] if line["label"] == "Kopie katalogu")
+    assert line["value"].startswith("3 uložené")
+
+    catalog = str(tmp_path / "catalog.db")
+    assert health.guard(str(tmp_path)) is None                               # zdravý katalog se nechává být
+    for suffix in ("-wal", "-shm"):
+        if os.path.exists(catalog + suffix):
+            os.remove(catalog + suffix)
+    with open(catalog, "r+b") as f:                                          # poškození uprostřed souboru
+        f.seek(4096)
+        f.write(b"\xff" * 8192)
+    assert health._healthy(catalog) is False
+    assert health.guard(str(tmp_path)) == "restored"
+    with app_api._library() as lib:
+        assert lib.count_videos() == 5                                       # katalog je zpátky z kopie
+    assert os.path.exists(str(tmp_path / health.BROKEN))
+    assert "obnoven z kopie" in api("diagnostics")["errors"][0]
+
+    for copy in health._snapshots():                                         # žádná kopie: začne se s prázdným
+        os.remove(copy)
+    with open(catalog, "wb") as f:
+        f.write(b"to neni databaze" * 300)
+    assert health.guard(str(tmp_path)) == "emptied"
+    with app_api._library() as lib:
+        assert lib.count_videos() == 0
+
+
+def test_site_test_says_whether_prehrajto_still_looks_as_expected(api, monkeypatch):
+    discover, health = app_api.app_discover, app_api.app_health
+
+    class Client(object):
+        def get_streams(self, vid):
+            return [{"quality": "ORIG", "url": "x"}, {"quality": "FHD", "resolution": "1080p", "url": "y"}], ""
+
+    monkeypatch.setattr(discover, "_search_client", lambda timeout=8: Client())
+    asked = _catalogue_search(monkeypatch, {query: [_web(n, "%s 1999 CZ 1080p" % query, 6000, "4 GB")]
+                                            for n, query in enumerate(health.TEST_QUERIES, 1)})
+    result = api("prehrajto_test")
+    assert result["ok"] is True and [query for query, _page in asked] == list(health.TEST_QUERIES)
+    assert [line["ok"] for line in result["lines"]] == [True, True, True, True, True]
+    assert "2 verzí k přehrání" in result["lines"][3]["value"]
+    line = next(line for line in api("diagnostics")["lines"] if line["label"] == "Zkouška Přehraj.to")
+    assert line["ok"] is True and "odpovídá tak, jak aplikace čeká" in line["value"]
+
+    # web vrací výsledky, ale bez délky a velikosti: jeho podoba se změnila
+    _catalogue_search(monkeypatch, {query: [dict(_web(1, query, 0, ""), duration=0, size="")] for query in health.TEST_QUERIES})
+    changed = api("prehrajto_test")
+    assert changed["ok"] is False and "změnil podobu stránek" in changed["lines"][-1]["value"]
+    _catalogue_search(monkeypatch, {})                                       # nevrací vůbec nic
+    empty = api("prehrajto_test")
+    assert empty["ok"] is False and "Hledání nevrací nic" in empty["lines"][-1]["value"]
+
+    def refused(client, query, page, cursor):
+        raise app_api.provider.TemporaryError("Přehraj.to dočasně omezuje dotazy (HTTP 429), zkus to za chvíli")
+
+    monkeypatch.setattr(app_api.provider, "search_catalog", refused)         # odmítnutí: jeden dotaz a dost
+    limited = api("prehrajto_test")
+    assert limited["ok"] is False and discover.limited() > 0 and len(limited["lines"]) == 2
+    assert "neproběhla" in api("prehrajto_test")["lines"][0]["value"]        # během přestávky se web nezkouší
+
+
+def test_report_is_saved_and_fits_a_code_for_the_phone(api, tmp_path, monkeypatch):
+    health = app_api.app_health
+    app_api._remember_error("přehrávač", "Pelíšky: zdroj neodpovídá – příliš dlouhá chyba " + "ž" * 400)
+    device = [{"label": "Aplikace", "value": "0.26.0", "ok": None},
+              {"label": "Zařízení", "value": "Homatics Box R 4K Plus, Android 14", "ok": None}]
+    disk = tmp_path / "usb"
+    report = api("diagnostics_report", device=device,
+                 dirs=[{"dir": "", "label": "nic"}, {"dir": str(disk), "label": "USB disk"}])
+    assert report["saved"].startswith("promitarna-hlaseni-") and report["where"] == "USB disk"
+    with open(str(disk / report["saved"]), encoding="utf-8") as f:
+        assert f.read() == report["text"]
+    assert "Aplikace: 0.26.0" in report["text"] and "Seznam dostupných titulů" in report["text"]
+    assert "ž" * 200 in report["text"]                                       # v souboru jsou chyby celé
+    code = report["qr"]
+    assert len(code) <= health.QR_LIMIT and all(ord(char) < 128 for char in code)   # kód jen ze základních znaků
+    assert code.startswith("Promitarna ") and "Aplikace: 0.26.0" in code and "Pelisky: zdroj neodpovida" in code
+    assert "! Prehraj.to: neprihlaseno" in code                              # co je špatně, je v kódu celé
+    nowhere = api("diagnostics_report", device=device, dirs=[])
+    assert nowhere["saved"] == "" and nowhere["qr"]                          # bez disku aspoň kód
+
+
 def test_found_title_survives_misses_that_come_together(api, monkeypatch):
     """Titul, který na Přehraj.to byl, nevypadne kvůli dvěma neúspěchům krátce po sobě (tentýž výpadek),
     ani kvůli „nenašlo se“ těsně po tom, co Přehraj.to odmítalo dotazy."""

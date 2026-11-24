@@ -48,6 +48,7 @@ import java.io.File
 class PlayerActivity : FragmentActivity() {
     private companion object {
         const val SAVE_EVERY_MS = 15_000L
+        const val OTHER_VERSIONS = 2             // tolikrát nejvýš se po chybě zkusí jiná verze téhož titulu
         const val NEXT_COUNTDOWN = 10  // sekund, než se další díl spustí sám
         const val ASK_RESUME_AFTER_MS = 60_000L  // kratší rozkoukání se naváže bez ptaní
         const val HEALTHY_AFTER_MS = 120_000L    // po takové době hraní se chyba bere jako nová, ne opakovaná
@@ -71,6 +72,9 @@ class PlayerActivity : FragmentActivity() {
     private var externalName = ""   // oficiální aplikace, která by chráněný pořad přehrála, ale v zařízení není
     private var started = false
     private var retried = false
+    // verze titulu z Objevuj, které se nepodařilo přehrát: přehrávač pak sám zkusí jinou (viz play_other)
+    private val failedVersions = ArrayList<String>()
+    private var failedChoice = ""
     private var visible = false          // obrazovka je vidět (mezi onStart a onStop)
     private var forcedPosition = -1L     // nový pokus po chybě naváže přesně tam, kde přehrávač byl
     private var lastStream: JSONObject? = null
@@ -483,6 +487,43 @@ class PlayerActivity : FragmentActivity() {
                     // Výpadek připojení za to nemůže – ten o souboru nic neříká.
                     val network = error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
                         error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+                    if (failedChoice != choice) {
+                        failedVersions.clear()
+                        failedChoice = choice
+                    }
+                    // Titul z Objevuj mívá na Přehraj.to víc verzí: místo chyby se zkusí další nejlepší
+                    // (nejvýš dvakrát). Logika si tu nepovedenou sama poznačí.
+                    if (!live && !network && choice.isNotEmpty() && track.isNotEmpty() && failedVersions.size < OTHER_VERSIONS) {
+                        val reason = describe(error)
+                        val request = JSONObject().put("track", track).put("choice", choice)
+                            .put("tried", org.json.JSONArray(failedVersions))
+                        failedVersions.add(track)
+                        if (resumeAt > 0) saveProgress(ended = false)
+                        release()
+                        message.text = "Tuto verzi se nepodařilo přehrát, hledám jinou…"
+                        message.visibility = View.VISIBLE
+                        spinner.visibility = View.VISIBLE
+                        Api.call("play_other", request) { result ->
+                            if (isFinishing || isDestroyed) return@call
+                            val other = result.data
+                            if (other == null || !visible) {
+                                fail(reason)   // jiná verze není (nebo už se nikdo nedívá): původní chyba
+                                return@call
+                            }
+                            android.widget.Toast.makeText(this@PlayerActivity,
+                                "Verzi se nepodařilo přehrát – pouštím jinou: ${other.optString("switched")}",
+                                android.widget.Toast.LENGTH_LONG).show()
+                            // další pokusy (nová adresa po chybě) patří téhle verzi, ne té původní
+                            other.optJSONObject("again")?.let { again ->
+                                call = again.optString("call").ifEmpty { call }
+                                params = again.optJSONObject("params") ?: params
+                            }
+                            retried = false
+                            forcedPosition = resumeAt
+                            if (!handOver(other)) play(other)
+                        }
+                        return
+                    }
                     if (!live && track.isNotEmpty() && !network) Api.send("play_failed", JSONObject().put("track", track))
                     fail(describe(error))
                 }

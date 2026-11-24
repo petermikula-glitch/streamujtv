@@ -36,11 +36,35 @@
             android:textSize="17sp" />
     </ScrollView>
 
-    <Button
-        android:id="@+id/diag_again"
-        style="@style/TitleButton"
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="Zkontrolovat znovu" />
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/diag_again"
+            style="@style/TitleButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Zkontrolovat znovu" />
+
+        <!-- pár hledání na Přehraj.to: pozná se, jestli web nezměnil podobu stránek -->
+        <Button
+            android:id="@+id/diag_site"
+            style="@style/TitleButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:text="Zkouška Přehraj.to" />
+
+        <!-- celá diagnostika jako soubor na disku a jako kód QR pro telefon -->
+        <Button
+            android:id="@+id/diag_report"
+            style="@style/TitleButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:text="Hlášení (kód QR a soubor)" />
+    </LinearLayout>
 </LinearLayout>
