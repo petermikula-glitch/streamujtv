@@ -39,7 +39,9 @@ python3 tools/build_zip.py --check                   # Kodi repozitář odpovíd
 ```
 
 Při změně v `android/` navíc sestavení (`cd android && gradle assembleDebug lintDebug`, postup
-v `android/README.md`). Stejné kontroly běží na GitHubu u každého pull requestu.
+v `android/README.md`). Stejné kontroly běží na GitHubu u každého pull requestu do `main` – jen jako
+pojistka: odeslání pracovní větve je nespouští a minuty GitHub Actions se šetří (pravidla v `CLAUDE.md`,
+oddíl „GitHub Actions – limit 2 000 minut měsíčně“).
 Testy se neobcházejí: nepřeskakují se, nemažou a neupravují jen proto, aby prošly.
 
 ## Sdílená logika

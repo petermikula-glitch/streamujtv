@@ -1,34 +1,55 @@
-# Rychlá kontrola každé změny: testy logiky a shoda Kodi repozitáře se zdroji.
-# Běží u pull requestů i u větví asistentů, aby se chyba našla dřív, než se dostane do main.
+# Pojistka: testy logiky a shoda Kodi repozitáře se zdroji. Hlavní kontrola se dělá před odesláním
+# (AGENTS.md), tady jen u pull requestu do main a po sloučení – a po sloučení se znovu nekontroluje
+# obsah, který už prošel v pull requestu. Pravidla šetření minut: CLAUDE.md.
 name: Testy
 
 on:
-  push:
-    branches: [main, 'claude/**', 'codex/**']
   pull_request:
+    branches: [main]
+    paths-ignore: ['**.md']
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
 
 permissions:
   contents: read
+  actions: read
+
+concurrency:
+  group: testy-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ['3.11', '3.13']
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
+      # Po sloučení: stejný strom souborů už prošel v pull requestu → zbytek se přeskočí.
+      - name: Už ověřeno v pull requestu?
+        id: known
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "verified=$(bash .github/scripts/overeno-v-pr.sh tests.yml)" >> "$GITHUB_OUTPUT"
 
-      - name: Testy
+      # Obě verze Pythonu v jedné úloze: každá úloha se účtuje nejméně jednou minutou.
+      - uses: actions/setup-python@v5
+        if: steps.known.outputs.verified != 'true'
+        with:
+          python-version: |
+            3.13
+            3.11
+
+      - name: Testy (Python 3.11 a 3.13)
+        if: steps.known.outputs.verified != 'true'
         run: |
-          python -m pip install --quiet pytest
-          python -m pytest -q -p no:cacheprovider tests
+          for python in python3.11 python3.13; do
+            "$python" -m pip install --quiet pytest
+            "$python" -m pytest -q -p no:cacheprovider tests
+          done
 
       - name: Kodi repozitář odpovídá zdrojům
-        run: python tools/build_zip.py --check
+        if: steps.known.outputs.verified != 'true'
+        run: python3.11 tools/build_zip.py --check

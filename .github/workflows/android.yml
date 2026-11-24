@@ -1,54 +1,95 @@
 # Sestaví aplikaci pro Android TV a na hlavní větvi ji vydá: vydání app-v<verze> s přílohou APK.
 # Aplikace se na tato vydání sama ptá a nabídne aktualizaci. Nová verze = zvýšit versionCode
 # a versionName v android/app/build.gradle.kts a popsat změny v android/RELEASE_NOTES.md.
+#
+# Šetření minut (pravidla v CLAUDE.md): běží jen u pull requestu do main a po sloučení do main,
+# ne při odeslání pracovní větve. Po sloučení se neopakuje, co už prošlo v pull requestu se stejným
+# stromem souborů: testy se přeskočí, a když navíc není co vydat (vydání té verze už existuje),
+# přeskočí se i sestavení. Změny jen v poznámkách (*.md) běh nespouštějí.
 name: Android aplikace
 
 on:
   push:
-    branches: [main, 'claude/**']
+    branches: [main]
     paths:
       - 'android/**'
       - 'plugin.video.prehrajto.mojevidea/resources/lib/**'
       - 'tests/**'
       - '.github/workflows/android.yml'
+      - '!**.md'
   # pull request se jen sestaví a otestuje; vydává se výhradně z větve main
   pull_request:
+    branches: [main]
     paths:
       - 'android/**'
       - 'plugin.video.prehrajto.mojevidea/resources/lib/**'
       - 'tests/**'
       - '.github/workflows/android.yml'
+      - '!**.md'
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: android-${{ github.ref }}
-  cancel-in-progress: false
+  # Novější odeslání zruší rozběhnutou kontrolu pull requestu. Běh na main se neruší: je to vydání
+  # a přerušení uprostřed nahrávání by nechalo vydání bez souboru.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verze
+        id: version
+        run: echo "name=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android/app/build.gradle.kts)" >> "$GITHUB_OUTPUT"
+
+      # Po sloučení do main: co z kontroly už proběhlo v pull requestu a je-li co vydat.
+      # U pull requestu a ručního spuštění se tento krok přeskočí a proběhne všechno.
+      - name: Co je potřeba udělat
+        id: plan
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          verified="$(bash .github/scripts/overeno-v-pr.sh android.yml)"
+          released=false
+          if gh release view "app-v$VERSION" >/dev/null 2>&1; then released=true; fi
+          tests=true
+          build=true
+          if [ "$verified" = true ]; then
+            tests=false
+            if [ "$released" = true ]; then build=false; fi
+          fi
+          echo "tests=$tests" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "Ověřeno v pull requestu: $verified · vydání app-v$VERSION existuje: $released · testy: $tests · sestavení: $build"
+
       - uses: actions/setup-java@v4
+        if: steps.plan.outputs.build != 'false'
         with:
           distribution: temurin
           java-version: '17'
 
       - uses: actions/setup-python@v5
+        if: steps.plan.outputs.build != 'false'
         with:
           python-version: '3.11'
 
       - name: Testy logiky
+        if: steps.plan.outputs.tests != 'false'
         run: |
           python -m pip install --quiet pytest
           python -m pytest -q -p no:cacheprovider tests
 
       - uses: gradle/actions/setup-gradle@v4
+        if: steps.plan.outputs.build != 'false'
         with:
           gradle-version: '8.14.3'
 
@@ -56,6 +97,7 @@ jobs:
       # Klíč je v android/signing/; tajná proměnná SIGNING_KEYSTORE_BASE64 má přednost, je-li nastavená.
       - name: Podpisový klíč
         id: key
+        if: steps.plan.outputs.build != 'false'
         env:
           SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
         run: |
@@ -69,6 +111,7 @@ jobs:
           fi
 
       - name: Sestavení
+        if: steps.plan.outputs.build != 'false'
         working-directory: android
         env:
           KEYSTORE: ${{ steps.key.outputs.path }}
@@ -81,22 +124,20 @@ jobs:
           fi
 
       - name: Kontrola podpisu
+        if: steps.plan.outputs.build != 'false'
         run: |
           apksigner="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
           "$apksigner" verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | grep "SHA-256"
 
-      - name: Verze
-        id: version
-        run: echo "name=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android/app/build.gradle.kts)" >> "$GITHUB_OUTPUT"
-
       - uses: actions/upload-artifact@v4
+        if: steps.plan.outputs.build != 'false'
         with:
           name: MojeVidea-${{ steps.version.outputs.name }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
 
       - name: Vydání
-        if: github.ref == 'refs/heads/main' && steps.key.outputs.path != ''
+        if: github.ref == 'refs/heads/main' && steps.plan.outputs.build != 'false' && steps.key.outputs.path != ''
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.name }}
