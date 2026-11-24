@@ -1,6 +1,7 @@
 """Rozhraní Android aplikace nad logikou doplňku (android/app/src/main/python/app_api.py)."""
 import json
 import os
+import re
 import sys
 import time
 
@@ -3638,7 +3639,11 @@ def test_report_is_saved_and_fits_a_code_for_the_phone(api, tmp_path, monkeypatc
     code = report["qr"]
     assert len(code) <= health.QR_LIMIT and all(ord(char) < 128 for char in code)   # kód jen ze základních znaků
     assert code.startswith("Promitarna ") and "Aplikace: 0.26.0" in code and "Pelisky: zdroj neodpovida" in code
-    assert "! Prehraj.to: neprihlaseno" in code                              # co je špatně, je v kódu celé
+    assert "! Prehraj .to: neprihlaseno" in code                             # co je špatně, je v kódu celé
+    # Nic, co telefon pozná jako odkaz nebo e-mail: jinak místo textu nabídne otevřít web Přehraj.to.
+    assert not re.search(r"[A-Za-z0-9]\.[A-Za-z]{2}|://|\S@\S|www\.", code), code
+    assert health._unlinked("Prehraj.to a@b.cz https://www.example.com/x v0.28.0 1.5 Mb/s") == (
+        "Prehraj .to a @ b .cz www .example .com/x v0.28.0 1.5 Mb/s")
     nowhere = api("diagnostics_report", device=device, dirs=[])
     assert nowhere["saved"] == "" and nowhere["qr"]                          # bez disku aspoň kód
 

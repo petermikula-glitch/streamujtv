@@ -249,6 +249,18 @@ def _plain(text):
     return "".join(char for char in folded if not unicodedata.combining(char) and (char == "\n" or 32 <= ord(char) < 127))
 
 
+# Tečka uprostřed slova před písmeny („Prehraj.to“, „a@b.cz“, „www.example.com“): fotoaparát telefonu
+# takové místo v textu kódu QR pozná jako adresu webu nebo e-mail a místo textu nabídne otevřít odkaz.
+LINKLIKE_DOT = re.compile(r"(?<=[A-Za-z0-9])\.(?=[A-Za-z]{2,})")
+
+
+def _unlinked(text):
+    """Text pro kód QR, ve kterém telefon nenajde odkaz: bez „http://“ a s mezerou před tečkou, za
+    kterou následuje doména („Prehraj .to“). Čte se to dál stejně, jen to není adresa."""
+    text = re.sub(r"(?i)\b(https?|ftp)://", "", text)
+    return LINKLIKE_DOT.sub(" .", text).replace("@", " @ ")
+
+
 def _mark(ok):
     return "+" if ok is True else "!" if ok is False else "-"
 
@@ -277,7 +289,9 @@ def diagnostics_report(params):
     short += [error[:150] for error in state["errors"][:QR_ERRORS]]
     short += [("%s %s: %s" % (_mark(row.get("ok")), row.get("label"), row.get("value")))[:70]
               for row in everything if row.get("ok") is not False]
-    code = _plain("\n".join(short))
+    # Kód QR nesmí obsahovat nic, co telefon pozná jako odkaz: jinak místo textu hlášení nabídne
+    # otevřít web (např. řádek „Prehraj.to: …“ vedl na stránku Přehraj.to).
+    code = _unlinked(_plain("\n".join(short)))
     if len(code) > QR_LIMIT:
         code = code[:QR_LIMIT - 12].rstrip() + "\n(zkraceno)"
     saved, where = "", ""
