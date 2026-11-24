@@ -25,6 +25,10 @@ import org.json.JSONObject
 
 /** Hledání: výsledky z místního katalogu, iVysílání a Přehraj.to. */
 class SearchActivity : FragmentActivity() {
+    /** Podržené Zpět: rovnou do hlavní nabídky (viz [Home]). */
+    override fun onKeyLongPress(keyCode: Int, event: android.view.KeyEvent?): Boolean =
+        Home.longPress(this, keyCode) || super.onKeyLongPress(keyCode, event)
+
     private val rows = ArrayObjectAdapter(ListRowPresenter())
     private lateinit var message: TextView
     private var latestSearch = 0

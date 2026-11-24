@@ -22,6 +22,10 @@ import org.json.JSONObject
  * Obsah dodává logika v Pythonu: {"detail", "actions", "rows"}.
  */
 class TitleActivity : FragmentActivity() {
+    /** Podržené Zpět: rovnou do hlavní nabídky (viz [Home]). */
+    override fun onKeyLongPress(keyCode: Int, event: android.view.KeyEvent?): Boolean =
+        Home.longPress(this, keyCode) || super.onKeyLongPress(keyCode, event)
+
     private val rows = ArrayObjectAdapter(ListRowPresenter())
     private lateinit var actions: FlowLayout
     private lateinit var spinner: View

@@ -11,7 +11,8 @@ import app_api as api
 # (název karty, krátký popis na kartu – nejvýš 24 znaků, víc se na kartu nevejde –, ikona, text)
 TOPICS = (
     ("Ovládání", "Ovladač a nabídka karty", "settings", """\
-Aplikace se ovládá ovladačem televize: šipkami se vybírá, OK potvrzuje, Zpět vrací o krok.
+Aplikace se ovládá ovladačem televize: šipkami se vybírá, OK potvrzuje, Zpět vrací o krok. \
+Podržením tlačítka Zpět se z kterékoli obrazovky vrátíte rovnou do hlavní nabídky.
 
 Vlevo je pět sekcí: Oblíbené, Rozkoukané, Objevuj, iVysílání a Nástroje. Nahoře vlevo je lupa (hledání) \
 a vedle ní profil, který se právě dívá.

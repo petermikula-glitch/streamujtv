@@ -26,6 +26,10 @@ import org.json.JSONObject
  * Údaje o zařízení zjišťuje aplikace, stav účtu, připojení a poslední chyby dodává logika v Pythonu.
  */
 class DiagnosticsActivity : FragmentActivity() {
+    /** Podržené Zpět: rovnou do hlavní nabídky (viz [Home]). */
+    override fun onKeyLongPress(keyCode: Int, event: android.view.KeyEvent?): Boolean =
+        Home.longPress(this, keyCode) || super.onKeyLongPress(keyCode, event)
+
     private companion object {
         const val QR_SIZE = 290   // dp: strana kódu QR na obrazovce
     }

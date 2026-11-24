@@ -27,6 +27,15 @@ class MainActivity : FragmentActivity() {
                 .commit()
         }
     }
+
+    /** Návrat z hloubky podrženým Zpět ([Home]): výběr přejde do postranní nabídky. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (!intent.getBooleanExtra(Home.EXTRA_MENU, false)) return
+        val main = supportFragmentManager.findFragmentById(android.R.id.content) as? MainFragment ?: return
+        if (main.isAdded && !main.isShowingHeaders) main.startHeadersTransition(true)
+    }
 }
 
 /**

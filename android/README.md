@@ -157,6 +157,12 @@ odhadne podle názvů (díl má vedle názvu pořadu i svůj vlastní). Co není
 
 V záhlaví vedle tlačítka hledání je aktivní profil (obrázek a jméno); kliknutím se otevře výběr profilu.
 
+**Rychlý návrat do hlavní nabídky** (`Home.kt`): podržení tlačítka Zpět na kterékoli obrazovce nad
+hlavní (výpis, stránka, titul, hledání, nastavení, diagnostika) zavře všechny obrazovky nad hlavní
+(`FLAG_ACTIVITY_CLEAR_TOP`) a otevře postranní nabídku. Přehrávač a upoutávka to nemají (tam Zpět
+zastaví přehrávání). Navigator předává obrazovkám hloubku (`depth`) a od třetí obrazovky nad hlavní
+se nejvýš třikrát ukáže tip, že to jde.
+
 **Objevuj** (`app_discover.py`): Přehraj.to nemá katalog podle roku ani žánru, jen hledání podle názvu
 souboru. Seznamy titulů proto dodává TMDB (novinky, populární, nejlépe hodnocené, podle roku, podle
 žánru, československé – země původu `CZ|SK|XC`), a teprve u vybraného titulu se na Přehraj.to hledají

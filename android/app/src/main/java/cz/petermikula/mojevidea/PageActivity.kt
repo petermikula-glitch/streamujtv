@@ -33,6 +33,10 @@ interface RowsHost {
  * obrazovky, jen na vlastní obrazovce. Obsah dodává logika v Pythonu (akce z cíle karty, `rows`).
  */
 class PageActivity : FragmentActivity(), RowsHost {
+    /** Podržené Zpět: rovnou do hlavní nabídky (viz [Home]). */
+    override fun onKeyLongPress(keyCode: Int, event: android.view.KeyEvent?): Boolean =
+        Home.longPress(this, keyCode) || super.onKeyLongPress(keyCode, event)
+
     private var rows: JSONArray? = null
     private var shown = ""
     private var call = ""

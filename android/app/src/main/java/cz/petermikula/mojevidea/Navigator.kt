@@ -38,9 +38,11 @@ object Navigator {
             }
             return
         }
+        if (target.type in setOf("list", "page", "title")) Home.hint(activity, Home.nextDepth(activity))
         when (target.type) {
             "list" -> activity.startActivity(
                 Intent(activity, ListActivity::class.java)
+                    .putExtra(Home.EXTRA_DEPTH, Home.nextDepth(activity))
                     .putExtra(EXTRA_CALL, target.call)
                     .putExtra(EXTRA_PARAMS, target.params.toString())
                     .putExtra(EXTRA_TITLE, target.title.ifEmpty { title })
@@ -49,12 +51,14 @@ object Navigator {
             // obrazovka s řadami dlaždic a karet (složky Filmy a Seriály ze sekce Objevuj)
             "page" -> activity.startActivity(
                 Intent(activity, PageActivity::class.java)
+                    .putExtra(Home.EXTRA_DEPTH, Home.nextDepth(activity))
                     .putExtra(EXTRA_CALL, target.call)
                     .putExtra(EXTRA_PARAMS, target.params.toString())
                     .putExtra(EXTRA_TITLE, target.title.ifEmpty { title })
             )
             "title" -> activity.startActivity(
                 Intent(activity, TitleActivity::class.java)
+                    .putExtra(Home.EXTRA_DEPTH, Home.nextDepth(activity))
                     .putExtra(EXTRA_CALL, target.call)
                     .putExtra(EXTRA_PARAMS, target.params.toString())
                     .putExtra(EXTRA_TITLE, target.title.ifEmpty { title })

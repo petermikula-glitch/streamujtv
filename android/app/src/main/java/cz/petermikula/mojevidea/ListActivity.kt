@@ -18,6 +18,10 @@ import androidx.leanback.widget.VerticalGridPresenter
 import org.json.JSONObject
 
 class ListActivity : FragmentActivity() {
+    /** Podržené Zpět: rovnou do hlavní nabídky (viz [Home]). */
+    override fun onKeyLongPress(keyCode: Int, event: android.view.KeyEvent?): Boolean =
+        Home.longPress(this, keyCode) || super.onKeyLongPress(keyCode, event)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) show(intent.getBooleanExtra(Navigator.EXTRA_POSTER, false), first = null)
