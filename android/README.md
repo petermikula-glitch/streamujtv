@@ -146,7 +146,10 @@ první sekce, ve které něco je (`start`: Oblíbené, jinak Rozkoukané, jinak 
   nemá nadpis) – Objevuj filmy (6 dlaždic) a Moje filmy (Stažené filmy, Filmy z mého účtu, Hledat),
   pod ní nově přidané filmy z účtu; u seriálů obdobně.
 - **iVysílání** – živé kanály, rozkoukané pořady, Moje pořady a kategorie; nic jiného.
-- **Nástroje** – hledání, stahování, synchronizace, metadata, nastavení, předvolby, profily, diagnostika.
+- **Nástroje** – návod, stahování, nastavení a přihlášení, jazyk a kvalita, profily, záloha a diagnostika.
+  Co má cestu jinde nebo běží samo, tu dlaždici nemá: hledání (lupa je nahoře na každé obrazovce),
+  synchronizace s účtem a doplnění hodnocení (běží po otevření aplikace; ručně řádek „Synchronizovat
+  s účtem“ v Nastavení, který doplní i hodnocení, u kterých se to dřív nepovedlo).
 
 Film a seriál z iVysílání se rozlišuje podle druhu pořadu, který si aplikace zapamatuje při jeho
 otevření nebo přidání do oblíbených (`ivys_kind:<pořad>`); u neznámého pořadu se v Rozkoukaných
@@ -228,8 +231,8 @@ Ostatní verze mají skutečnou kvalitu, jakmile se jednou pustí; do té doby n
 o které se jistě ví, že je horší než nejnižší povolená kvalita (bez účtu podle překódovaných verzí, s účtem
 až podle změřeného obrazu), vypadne a ověří se další (nejvýš `VERIFY_VERSIONS`).
 
-**Předvolby přehrávání** (dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích, tlačítko na stránce
-titulu a Nastavení; cíl typu `choices`, akce `prefs_choices`): jazyk (český nebo slovenský dabing – oba si jsou
+**Předvolby přehrávání** (dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích a tlačítko na stránce
+titulu – v Nastavení už nejsou, tam chyběla nejnižší kvalita; cíl typu `choices`, akce `prefs_choices`): jazyk (český nebo slovenský dabing – oba si jsou
 rovny, rozhoduje mezi nimi kvalita / originál s titulky / jedno) a kvalita
 (nejvyšší / 1080p / 720p / nejmenší soubor). Řídí pořadí verzí (`_version_rank`) i výběr varianty
 souboru při přehrání (`_pick_stream`).
@@ -339,7 +342,7 @@ když na nich videa nejsou, nestane se nic a řádek „Nabídka Přehraj.to“ 
 **Hodnocení a plakáty** se doplňují samy (`_auto_enrich`, volá se z `quick_sync` po otevření aplikace, i bez
 přihlášení k Přehraj.to): nové tituly hned, ty, u kterých doplnění selhalo, znovu po šesti hodinách
 a nenalezené po týdnu; jedno kolo nejvýš `AUTO_ENRICH_BATCH` titulů. Když se něco doplní, obrazovka se
-načte znovu (`refresh`). Dlaždice „Doplnit hodnocení a plakáty“ v Nástrojích to spustí hned a pro všechny.
+načte znovu (`refresh`). Ručně a pro všechny (i ty, u kterých se to dřív nepovedlo) to spustí „Synchronizovat s účtem“ v Nastavení.
 
 **Nejnižší kvalita** (`min_quality`: bez omezení / HD a vyšší – výchozí / jen Full HD a vyšší / jen 4K;
 `_meets_minimum` v `app_api.py`): z Přehraj.to se nabízejí jen verze v aspoň takové kvalitě – na stránce
@@ -435,7 +438,7 @@ z Přehraj.to i u pořadů a živého vysílání z iVysílání (po dlouhé pau
 U videa rozkoukaného déle než minutu se přehrávač zeptá, jestli navázat, nebo začít znovu (ne
 u tlačítka Pokračovat). Ikony ovládání přebíjejí výchozí ikony Media3 (`res/values/player_icons.xml`).
 
-**Návod** (druhá dlaždice v Nástrojích, `app_guide.py`, akce `guide`): témata o tom, co aplikace umí a jak
+**Návod** (první dlaždice v Nástrojích, `app_guide.py`, akce `guide`): témata o tom, co aplikace umí a jak
 se ovládá (ovládání, hledání, Objevuj, stránka titulu, přehrávač, jazyk a kvalita, oblíbené a rozkoukané,
 stahování, iVysílání, účet, profily, záloha a potíže). Každé téma je karta, která otevře text v okně (cíl
 `info`). Texty používají názvy dlaždic, voleb a položek nabídek tak, jak je aplikace ukazuje; test

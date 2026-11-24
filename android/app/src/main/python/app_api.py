@@ -717,15 +717,11 @@ def home(params):
     profile = app_extras.current()
     last = settings.get("last_sync")
     tools = [{"title": "Nástroje", "items": [
-        _card("Hledat", _target("search"), "Moje videa, iVysílání a Přehraj.to", icon="search"),
+        # Hledání tu není: lupa je nahoře na každé obrazovce. Synchronizace s účtem je v Nastavení
+        # (nová videa a chybějící hodnocení si aplikace doplňuje sama po otevření).
         app_guide.tile(),
         _card("Stahování", _target("list", "downloads", {}, "Stahování"), _downloads_summary(state["downloads"]),
               icon="download"),
-        _card("Synchronizovat s účtem", _target("command", "sync", {}),
-              "Naposledy: %s" % time.strftime("%d.%m. %H:%M", time.localtime(last)) if last else "Zatím neproběhla",
-              icon="sync"),
-        _card("Doplnit hodnocení a plakáty", _target("command", "enrich", {}),
-              "Doplňuje se samo; tady to spustíte hned", icon="enrich"),
         _card("Nastavení a přihlášení", _target("settings"), settings.get("username") or "Nepřihlášeno",
               icon="settings"),
         _card("Jazyk a kvalita přehrávání", _target("choices", "prefs_choices", {}),
@@ -1598,7 +1594,9 @@ def sync(params):
             return {"message": "Výpis se nepodařilo načíst celý (%d videí). Nic se neodebralo, zkuste to znovu."
                     % stats["total"]}
         _change_settings(lambda settings: settings.update(last_sync=int(time.time())))
-        enriched = _enrich()
+        # Ruční synchronizace doplní hodnocení a plakáty všemu, co je nemá – i titulům, u kterých se to
+        # dřív nepovedlo (samo se to zkouší znovu až po čase).
+        enriched = _enrich(("new", "notfound", "error", "blocked"))
         return {"message": "Videí: %d, nových: %d, odebraných: %d. %s" % (
             stats["total"], stats["new"], stats["removed"], enriched)}
     return _exclusive(work)
@@ -1632,7 +1630,7 @@ def quick_sync(params):
 
 
 def _auto_enrich():
-    """Doplní hodnocení a plakáty titulům, které je nemají – bez mačkání dlaždice v Nástrojích.
+    """Doplní hodnocení a plakáty titulům, které je nemají – samo, bez ruční synchronizace.
 
     Nové tituly hned; ty, u kterých to dřív nevyšlo, znovu až po čase (aby se při každém otevření
     aplikace neptala na totéž). Vrací, kolika titulům se něco doplnilo; když běží jiná operace, nedělá nic."""

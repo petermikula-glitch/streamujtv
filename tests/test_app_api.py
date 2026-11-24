@@ -60,6 +60,11 @@ def _titles(items):
     return [item["title"] for item in items]
 
 
+def _tool(api, title):
+    """Dlaždice Nástrojů podle začátku názvu (pořadí dlaždic se mění, název ne)."""
+    return next(card for card in _section(api, "tools")["Nástroje"] if card["title"].startswith(title))
+
+
 def _section(api, name):
     """Řady jedné sekce hlavní obrazovky: {název řady: karty}. Mřížka dlaždic je víc řad pod jedním
     nadpisem (další jsou bez nadpisu) – tady se spojí do jedné."""
@@ -117,12 +122,14 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
     assert television["Kategorie"][0]["target"] == {"type": "list", "call": "ivys_category",
                                                     "params": {"cid": "3976"}, "title": "Seriály"}
     tools = _section(api, "tools")["Nástroje"]
-    assert [item["target"]["type"] for item in tools] == ["search", "list", "list", "command", "command", "settings",
-                                                          "choices", "list", "backup", "diagnostics"]
-    assert tools[1]["title"] == "Návod" and tools[1]["target"]["call"] == "guide"
-    assert tools[6]["title"] == "Jazyk a kvalita přehrávání" and tools[6]["subtitle"] == "Český nebo slovenský dabing · Nejvyšší dostupná"
-    assert tools[7]["title"] == "Profil: Hlavní profil" and tools[7]["image"] == "res:avatar_clapper"
-    assert tools[2]["target"]["call"] == "downloads"
+    # Hledání (lupa je nahoře všude), synchronizace a doplnění hodnocení (běží samy; ručně v Nastavení) tu nejsou.
+    assert _titles(tools) == ["Návod", "Stahování", "Nastavení a přihlášení", "Jazyk a kvalita přehrávání",
+                              "Profil: Hlavní profil", "Záloha a obnova", "Diagnostika"]
+    assert [item["target"]["type"] for item in tools] == ["list", "list", "settings", "choices", "list", "backup",
+                                                          "diagnostics"]
+    assert tools[0]["target"]["call"] == "guide" and tools[1]["target"]["call"] == "downloads"
+    assert tools[3]["subtitle"] == "Český nebo slovenský dabing · Nejvyšší dostupná"
+    assert tools[4]["image"] == "res:avatar_clapper"
 
 
 def test_catalogue_rows_lists_and_search(api):
@@ -316,12 +323,16 @@ def test_sync_reports_progress_and_blocks_parallel_runs(api, monkeypatch):
     monkeypatch.setattr(app_api.provider, "make_client", lambda *a, **k: Client())
     monkeypatch.setattr(app_api.catalog, "enrich", lambda lib, metas, **kw: {
         "ok": len(metas), "notfound": 0, "csfd_blocked": False})
+    wanted, real = [], app_api._enrich
+    monkeypatch.setattr(app_api, "_enrich", lambda statuses=("new",), **more: wanted.append(statuses) or real(statuses, **more))
     result = api("sync")
     assert result["message"].startswith("Videí: 2, nových: 2, odebraných: 0.") and "doplněna u 2" in result["message"]
+    # ruční synchronizace doplňuje hodnocení a plakáty i tam, kde se to dřív nepovedlo (dlaždice na to už není)
+    assert wanted == [("new", "notfound", "error", "blocked")]
     assert seen == [{"text": "Načítám videa z účtu: stránka 3, 2 videí", "busy": True}]
     assert api("progress") == {"text": "", "busy": False}
-    rows = _section(api, "tools")
-    assert "Naposledy:" in rows["Nástroje"][3]["subtitle"] and rows["Nástroje"][5]["subtitle"] == "a@b.cz"
+    assert _tool(api, "Nastavení")["subtitle"] == "a@b.cz"
+    assert app_api._settings()["last_sync"] > 0                              # (kdy naposledy, ukazuje Diagnostika)
 
     Client.listing_complete = False
     assert "Nic se neodebralo" in api("sync")["message"]
@@ -458,7 +469,7 @@ def test_download_queue_progress_local_playback_and_removal(api, tmp_path):
     assert _titles(api("downloads", kind="movie")["items"]) == ["Pelíšky"] and api("downloads", kind="movie")["title"] == "Stažené filmy"
     assert api("downloads", kind="episode")["items"] == [] and api("downloads", kind="episode")["title"] == "Stažené díly"
     assert api("downloads", kind="movie")["items"][0]["image"] == "https://img/pelisky.jpg"   # plakát filmu, ne náhled
-    assert "1 ve frontě" in _section(api, "tools")["Nástroje"][2]["subtitle"]
+    assert "1 ve frontě" in _tool(api, "Stahování")["subtitle"]
 
     (disk / "Pelíšky.mkv").write_bytes(b"x" * 200)
     (disk / "Pelíšky.1.vtt").write_text("WEBVTT")
@@ -1966,7 +1977,7 @@ def test_first_run_offers_the_guide_and_poster_lists_announce_their_shape(api):
     assert tiles["Objevuj filmy"][0]["target"]["poster"] is True              # výpis plakátů
     grid = [card for row in api("discover_home", kind="movie")["rows"] if row.get("tiles") for card in row["items"]]
     assert next(card for card in grid if card["title"] == "Podle roku")["target"].get("poster") is None   # dlaždice
-    assert "poster" not in _section(api, "tools")["Nástroje"][4]["target"]
+    assert "poster" not in _tool(api, "Nastavení")["target"]
 
 
 def test_discover_lists_can_be_filtered(api, monkeypatch):
@@ -2198,7 +2209,7 @@ def test_playback_preferences_are_offered_as_choices(api):
     assert subtitles == {"title": "Originál s titulky", "current": False, "params": {"prefer_language": "subs"}}
     api(offered["apply"], **subtitles["params"])
     assert api("prefs_choices")["filters"][0]["value"] == "Originál s titulky"
-    assert "Originál s titulky" in _section(api, "tools")["Nástroje"][6]["subtitle"]
+    assert "Originál s titulky" in _tool(api, "Jazyk a kvalita")["subtitle"]
 
 
 def test_search_marks_titles_that_are_on_prehrajto_and_puts_them_first(api, monkeypatch):
@@ -2862,7 +2873,6 @@ def test_ratings_and_posters_fill_in_by_themselves(api, monkeypatch):
     monkeypatch.setattr(app_api, "ENRICH_NOTFOUND_AFTER", -1)                          # … až po čase
     assert api("quick_sync") == {"new": 0, "skipped": "account", "refresh": True} and len(asked) == 2
     assert api("quick_sync") == {"new": 0, "skipped": "account"} and len(asked) == 2   # hotovo: už se neptá
-    assert "samo" in _section(api, "tools")["Nástroje"][4]["subtitle"]
 
 
 def test_listing_fills_step_by_step_and_does_not_run_ahead(api, monkeypatch):

@@ -24,7 +24,7 @@ a Opravit přiřazení.
 dabing (CZ, SK) a jestli je k mání ve 4K."""),
 
     ("Hledání", "Filmy, herci, režiséři", "search", """\
-Hledání otevřete lupou nahoře nebo dlaždicí Hledat v Nástrojích.
+Hledání otevřete lupou vlevo nahoře (je na každé obrazovce) nebo dlaždicí Hledat v sekci Objevuj.
 
 Hledá se najednou ve vašich videích, v iVysílání, na Přehraj.to a (s klíčem TMDB) mezi filmy a seriály. \
 Stačí i jméno herce nebo režiséra: aplikace nabídne osobu a po otevření její filmy a seriály, které \
@@ -144,8 +144,9 @@ v oficiální aplikaci iVysílání, pokud ji v televizi máte."""),
 E-mail a heslo k Přehraj.to se zadávají v Nástrojích → Nastavení a přihlášení. S účtem se filmy \
 přehrávají v původní kvalitě; bez něj jen v převedených verzích.
 
-„Synchronizovat s účtem“ načte videa, která máte na účtu uložená, a zařadí je mezi filmy a seriály. \
-Hodnocení a plakáty se doplňují samy; dlaždice „Doplnit hodnocení a plakáty“ to spustí hned.
+Nová videa z účtu si aplikace načítá sama po otevření. „Synchronizovat s účtem“ (tamtéž v Nastavení) \
+projde účet celý: přidá, co chybí, odebere, co jste z účtu smazali, a doplní hodnocení a plakáty i tam, \
+kde se to dřív nepovedlo.
 
 Když aplikace soubor přiřadí ke špatnému filmu nebo dílu, podržte OK na kartě a zvolte \
 „Opravit přiřazení“.
