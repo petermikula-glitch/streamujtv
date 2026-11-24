@@ -1525,6 +1525,8 @@ def settings_set(params):
         # Jiná nejnižší kvalita: co je „k mání“, se počítá jinak. Seznam ověřených titulů se kvůli tomu
         # nemaže – tituly se přeověří na pozadí a do té doby platí, co se o nich ví.
         app_discover.minimum_changed(need, _need_lines(_prefs()))
+        app_index.note("změna nejnižší kvality: %s → %s (seznam zůstává, tituly se ověří znovu)" % (
+            MINIMUM_LABEL.get(lowest, lowest) or "bez omezení", MINIMUM_LABEL.get(_prefs()["minimum"]) or "bez omezení"))
         app_index.restart()
     if account[0]:
         # Jiný účet nebo heslo: uložené přihlášení patřilo tomu předchozímu. Kdyby zůstalo, aplikace
@@ -2862,6 +2864,7 @@ def diagnostics(params):
     prefs = _prefs(settings)
     add("Předvolby", "%s, %s" % (dict(LANGUAGE_CHOICES)[prefs["language"]], dict(QUALITY_CHOICES)[prefs["quality"]]))
     add("Seznam dostupných titulů", app_index.summary_text())
+    add("Seznam – deník", app_index.journal_text())
     add("Nabídka Přehraj.to", app_index.harvest_text())
     errors = ["%s  %s: %s" % (time.strftime("%d.%m. %H:%M", time.localtime(entry.get("time") or 0)),
                               entry.get("action") or "", entry.get("text") or "") for entry in _errors()]

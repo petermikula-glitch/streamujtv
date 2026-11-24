@@ -30,6 +30,9 @@ HARVEST_KEY = "index:harvest"    # co naposledy nabídlo samo Přehraj.to (zprá
 HARVEST_EVERY = 6 * 3600         # nabídka Přehraj.to se čte nejvýš jednou za tuto dobu
 HARVEST_TITLES = 40              # tolik titulů z ní se nejvýš zkusí přiřadit a ověřit
 STATE_KEY = "index:state"        # kde se v plánu skončilo a kolik se dnes ověřilo
+JOURNAL_KEY = "index:journal"    # odkdy se seznam vede, kolik měl naposledy záznamů a co ho změnilo
+JOURNAL_KEEP = 5                 # tolik posledních událostí se pamatuje
+JOURNAL_DROP = 20                # o tolik záznamů (a zároveň o třetinu) musí seznam ubýt, aby to stálo za zápis
 CYCLE_EVERY = 20 * 3600          # celý plán se prochází znovu nejdřív po této době
 DAILY_LIMIT = 3000               # tolik titulů nejvýš se za den ověří na pozadí
 CHUNK = 2                        # tolik titulů najednou…
@@ -312,6 +315,10 @@ def start():
     if not api._tmdb().enabled or not discover.BACKGROUND:
         return False
     state = _state()
+    try:
+        watch(len(_entries()))             # po každém otevření aplikace: neubylo ze seznamu?
+    except Exception as error:             # deník je jen pro Diagnostiku, nesmí nic zastavit
+        api._remember_error("deník seznamu", error)
     if state.get("pace"):
         discover.gentle_pace(max(float(state["pace"]), discover.gentle_pace()))   # tempo naučené minule
     if state.get("day") == _today() and int(state.get("count") or 0) >= DAILY_LIMIT:
@@ -353,6 +360,51 @@ def stats():
             "today": int(state.get("count") or 0) if state.get("day") == _today() else 0,
             "finished": int(state.get("finished") or 0), "step": plan_done,
             "running": _CRAWL["thread"] is not None}
+
+
+def _journal(lib):
+    try:
+        journal = json.loads(lib.get_kv(JOURNAL_KEY) or "{}")
+    except ValueError:
+        journal = {}
+    return journal if isinstance(journal, dict) else {}
+
+
+def note(text, count=None):
+    """Zapíše do deníku seznamu událost (``text``) a kolik má seznam právě záznamů. Podle deníku jde
+    v Diagnostice poznat, proč seznam ubyl nebo začal znovu: změna nastavení, nebo ztráta dat aplikace
+    (pak je pryč i deník a seznam je „veden od“ nového dne)."""
+    with api._library() as lib:
+        journal = _journal(lib)
+        journal.setdefault("since", int(time.time()))
+        if count is not None:
+            journal["count"] = int(count)
+        if text:
+            events = [[int(time.time()), str(text)[:160]]] + list(journal.get("events") or [])
+            journal["events"] = events[:JOURNAL_KEEP]
+        lib.set_kv(JOURNAL_KEY, json.dumps(journal))
+    return journal
+
+
+def watch(count):
+    """Hlídá velikost seznamu: když záznamů výrazně ubude, aniž to způsobila změna nastavení, zapíše
+    to do deníku (nemělo by se to stát – a když ano, je vidět kdy a o kolik). Vrací deník."""
+    with api._library() as lib:
+        journal = _journal(lib)
+    before = int(journal.get("count") or 0)
+    if "since" not in journal or count != before:
+        dropped = before - count >= JOURNAL_DROP and count * 3 < before * 2
+        journal = note("záznamů ubylo z %d na %d" % (before, count) if dropped else "", count)
+    return journal
+
+
+def journal_text():
+    """Řádek do Diagnostiky: odkdy se seznam vede a co se s ním naposledy stalo."""
+    journal = watch(len(_entries()))
+    text = "veden od %s" % time.strftime("%d.%m. %H:%M", time.localtime(journal.get("since") or 0))
+    events = ["%s %s" % (time.strftime("%d.%m. %H:%M", time.localtime(when)), what)
+              for when, what in journal.get("events") or []]
+    return text + ("; " + "; ".join(events) if events else "; beze změn")
 
 
 def summary_text():

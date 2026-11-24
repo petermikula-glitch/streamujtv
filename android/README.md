@@ -288,7 +288,9 @@ si pamatuje (`index:state`), celý plán opakuje nejdřív po `CYCLE_EVERY`. Vý
 `avail:…`, takže projitý výpis je hned. Záznam nese i souhrn verzí (`_summary`: jaký dabing je k mání
 a nejlepší známé rozlišení), údaje pro kartu a čas `f`, odkdy je titul na Přehraj.to: podle něj je řada
 a výpis „Nově na Přehraj.to“ (`discover_fresh`; titul, který tam dřív nebyl a přibyl, nebo čerstvá novinka).
-Karty mají štítky CZ/SK (dabing) a 4K, filtr výpisu umí „jen s dabingem“. Stav je v Diagnostice.
+Karty mají štítky CZ/SK (dabing) a 4K, filtr výpisu umí „jen s dabingem“. Stav je v Diagnostice, i s deníkem
+seznamu (`index:journal`, `journal_text`): odkdy se vede, změny nastavení, které se ho týkaly, a nečekaný
+úbytek záznamů (`watch`) – aby šlo poznat, proč seznam ubyl nebo začal znovu.
 Přehraj.to nejde projít celé – nemá výpis všeho, jen hledání –, a tak se prochází z druhé strany: vedle
 žebříčků a žánrů i rok po roce (`YEARS_BACK` let zpátky, `YEAR_PAGES` stránek nejoblíbenějších titulů roku)
 a česká a slovenská tvorba posledních let zvlášť; nejvýš `DAILY_LIMIT` titulů denně. Co se našlo, je vidět

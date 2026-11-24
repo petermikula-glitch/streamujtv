@@ -3006,6 +3006,25 @@ def test_rate_limit_stops_background_checks_but_not_the_person(api, monkeypatch)
         assert discover._known(lib, "movie", [11, 12])["movie:11"]["n"] == 1
 
 
+def test_diagnostics_keeps_a_journal_of_the_list(api):
+    """Deník seznamu: odkdy se vede a co ho změnilo – aby šlo poznat, proč ubyl nebo začal znovu."""
+    index, prefix = app_api.app_index, app_api.app_discover.AVAILABLE_PREFIX
+
+    def line():
+        return next(line["value"] for line in api("diagnostics")["lines"] if line["label"] == "Seznam – deník")
+
+    with app_api._library() as lib:
+        for number in range(60):
+            lib.set_kv(prefix + "movie:%d" % number, json.dumps({"n": 1, "ts": 1, "r": 2, "d": "", "q": 1080, "s": 0}))
+    assert line().startswith("veden od ") and line().endswith("; beze změn")
+    api("settings_set", min_quality="2160")                                  # změna nastavení se zapíše, seznam zůstává
+    assert "změna nejnižší kvality: bez omezení → 4K" in line() and len(index._entries()) == 60
+    with app_api._library() as lib, lib.conn:
+        lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE ? AND k NOT LIKE ?", (prefix + "%", prefix + "movie:1%"))
+    assert "záznamů ubylo z 60 na 11" in line()                              # nečekaný úbytek je vidět i s časem
+    assert line().count("záznamů ubylo") == 1                                # a nezapisuje se pořád dokola
+
+
 def test_found_title_survives_misses_that_come_together(api, monkeypatch):
     """Titul, který na Přehraj.to byl, nevypadne kvůli dvěma neúspěchům krátce po sobě (tentýž výpadek),
     ani kvůli „nenašlo se“ těsně po tom, co Přehraj.to odmítalo dotazy."""
