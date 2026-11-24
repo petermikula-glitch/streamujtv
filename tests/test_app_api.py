@@ -117,11 +117,12 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
     assert television["Kategorie"][0]["target"] == {"type": "list", "call": "ivys_category",
                                                     "params": {"cid": "3976"}, "title": "Seriály"}
     tools = _section(api, "tools")["Nástroje"]
-    assert [item["target"]["type"] for item in tools] == ["search", "list", "command", "command", "settings",
+    assert [item["target"]["type"] for item in tools] == ["search", "list", "list", "command", "command", "settings",
                                                           "choices", "list", "backup", "diagnostics"]
-    assert tools[5]["title"] == "Jazyk a kvalita přehrávání" and tools[5]["subtitle"] == "Český nebo slovenský dabing · Nejvyšší dostupná"
-    assert tools[6]["title"] == "Profil: Hlavní profil" and tools[6]["image"] == "res:avatar_clapper"
-    assert tools[1]["target"]["call"] == "downloads"
+    assert tools[1]["title"] == "Návod" and tools[1]["target"]["call"] == "guide"
+    assert tools[6]["title"] == "Jazyk a kvalita přehrávání" and tools[6]["subtitle"] == "Český nebo slovenský dabing · Nejvyšší dostupná"
+    assert tools[7]["title"] == "Profil: Hlavní profil" and tools[7]["image"] == "res:avatar_clapper"
+    assert tools[2]["target"]["call"] == "downloads"
 
 
 def test_catalogue_rows_lists_and_search(api):
@@ -320,7 +321,7 @@ def test_sync_reports_progress_and_blocks_parallel_runs(api, monkeypatch):
     assert seen == [{"text": "Načítám videa z účtu: stránka 3, 2 videí", "busy": True}]
     assert api("progress") == {"text": "", "busy": False}
     rows = _section(api, "tools")
-    assert "Naposledy:" in rows["Nástroje"][2]["subtitle"] and rows["Nástroje"][4]["subtitle"] == "a@b.cz"
+    assert "Naposledy:" in rows["Nástroje"][3]["subtitle"] and rows["Nástroje"][5]["subtitle"] == "a@b.cz"
 
     Client.listing_complete = False
     assert "Nic se neodebralo" in api("sync")["message"]
@@ -457,7 +458,7 @@ def test_download_queue_progress_local_playback_and_removal(api, tmp_path):
     assert _titles(api("downloads", kind="movie")["items"]) == ["Pelíšky"] and api("downloads", kind="movie")["title"] == "Stažené filmy"
     assert api("downloads", kind="episode")["items"] == [] and api("downloads", kind="episode")["title"] == "Stažené díly"
     assert api("downloads", kind="movie")["items"][0]["image"] == "https://img/pelisky.jpg"   # plakát filmu, ne náhled
-    assert "1 ve frontě" in _section(api, "tools")["Nástroje"][1]["subtitle"]
+    assert "1 ve frontě" in _section(api, "tools")["Nástroje"][2]["subtitle"]
 
     (disk / "Pelíšky.mkv").write_bytes(b"x" * 200)
     (disk / "Pelíšky.1.vtt").write_text("WEBVTT")
@@ -2197,7 +2198,7 @@ def test_playback_preferences_are_offered_as_choices(api):
     assert subtitles == {"title": "Originál s titulky", "current": False, "params": {"prefer_language": "subs"}}
     api(offered["apply"], **subtitles["params"])
     assert api("prefs_choices")["filters"][0]["value"] == "Originál s titulky"
-    assert "Originál s titulky" in _section(api, "tools")["Nástroje"][5]["subtitle"]
+    assert "Originál s titulky" in _section(api, "tools")["Nástroje"][6]["subtitle"]
 
 
 def test_search_marks_titles_that_are_on_prehrajto_and_puts_them_first(api, monkeypatch):
@@ -2861,7 +2862,7 @@ def test_ratings_and_posters_fill_in_by_themselves(api, monkeypatch):
     monkeypatch.setattr(app_api, "ENRICH_NOTFOUND_AFTER", -1)                          # … až po čase
     assert api("quick_sync") == {"new": 0, "skipped": "account", "refresh": True} and len(asked) == 2
     assert api("quick_sync") == {"new": 0, "skipped": "account"} and len(asked) == 2   # hotovo: už se neptá
-    assert "samo" in _section(api, "tools")["Nástroje"][3]["subtitle"]
+    assert "samo" in _section(api, "tools")["Nástroje"][4]["subtitle"]
 
 
 def test_listing_fills_step_by_step_and_does_not_run_ahead(api, monkeypatch):
@@ -3475,6 +3476,38 @@ def test_report_is_saved_and_fits_a_code_for_the_phone(api, tmp_path, monkeypatc
     assert "! Prehraj.to: neprihlaseno" in code                              # co je špatně, je v kódu celé
     nowhere = api("diagnostics_report", device=device, dirs=[])
     assert nowhere["saved"] == "" and nowhere["qr"]                          # bez disku aspoň kód
+
+
+def test_guide_describes_the_app_with_the_names_it_really_uses(api, monkeypatch):
+    """Návod: každé téma je karta s textem. Názvy dlaždic, voleb a položek nabídek, o které se opírá,
+    musejí být ty, které aplikace opravdu ukazuje – po přejmenování je potřeba upravit i návod."""
+    guide = api("guide")
+    assert guide["next"] is None and len(guide["items"]) >= 10
+    assert all(item["target"]["type"] == "info" and len(item["target"]["params"]["text"]) > 200 and item["subtitle"]
+               for item in guide["items"])
+    assert len({item["title"] for item in guide["items"]}) == len(guide["items"])
+    assert all(len(item["subtitle"]) <= 24 for item in guide["items"])       # delší popisek se na kartu nevejde
+    text = "\n".join(item["target"]["params"]["text"] for item in guide["items"])
+    tools = _section(api, "tools")["Nástroje"]
+    for tile in tools:                                                       # dlaždice Nástrojů
+        name = tile["title"].split(":")[0]
+        if name != "Návod":
+            assert name in text, name
+    for _value, name in app_api.LANGUAGE_CHOICES + app_api.QUALITY_CHOICES:  # volby jazyka a kvality
+        assert name in text, name
+    for _value, name in app_api.MINIMUM_CHOICES:
+        assert name.split(" (")[0] in text, name
+    for choice in api("subtitle_style")["audio_outputs"]:                    # výstupy zvuku (aspoň ten doporučený)
+        if choice["id"] == "pcm_soft":
+            assert choice["title"] in text
+    for words in ("Odebrat z Rozkoukaných", "Opravit přiřazení", "Označit jako zhlédnuté", "Stáhnout na disk",
+                  "Verze na Přehraj.to", "Vše na Přehraj.to", "Nově na Přehraj.to", "S dabingem", "Hledat ručně",
+                  "Kam stahovat", "Přesunout vše na jiný disk", "Zkouška Přehraj.to", "Zkontrolovat aktualizace",
+                  "Povolit zálohu, která přežije odinstalaci", "Velikost a pozadí", "Výstup zvuku", "Posun zvuku"):
+        assert words in text, words
+    api("settings_set", tmdb_key="k" * 32)                                   # dlaždice výpisů Objevuj
+    for tile in app_api.app_discover.home_tiles("movie"):
+        assert tile["title"] in text, tile["title"]
 
 
 def test_found_title_survives_misses_that_come_together(api, monkeypatch):

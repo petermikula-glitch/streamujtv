@@ -718,6 +718,7 @@ def home(params):
     last = settings.get("last_sync")
     tools = [{"title": "Nástroje", "items": [
         _card("Hledat", _target("search"), "Moje videa, iVysílání a Přehraj.to", icon="search"),
+        app_guide.tile(),
         _card("Stahování", _target("list", "downloads", {}, "Stahování"), _downloads_summary(state["downloads"]),
               icon="download"),
         _card("Synchronizovat s účtem", _target("command", "sync", {}),
@@ -2770,12 +2771,14 @@ import app_extras  # noqa: E402
 import app_index  # noqa: E402
 import app_backup  # noqa: E402
 import app_health  # noqa: E402
+import app_guide  # noqa: E402
 
 ACTIONS = dict(app_discover.ACTIONS)
 ACTIONS.update(app_extras.ACTIONS)
 ACTIONS.update(app_index.ACTIONS)
 ACTIONS.update(app_backup.ACTIONS)
 ACTIONS.update(app_health.ACTIONS)
+ACTIONS.update(app_guide.ACTIONS)
 ACTIONS.update({
     "downloads": downloads, "download_add": download_add, "download_next": download_next,
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,

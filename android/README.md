@@ -435,6 +435,12 @@ z Přehraj.to i u pořadů a živého vysílání z iVysílání (po dlouhé pau
 U videa rozkoukaného déle než minutu se přehrávač zeptá, jestli navázat, nebo začít znovu (ne
 u tlačítka Pokračovat). Ikony ovládání přebíjejí výchozí ikony Media3 (`res/values/player_icons.xml`).
 
+**Návod** (druhá dlaždice v Nástrojích, `app_guide.py`, akce `guide`): témata o tom, co aplikace umí a jak
+se ovládá (ovládání, hledání, Objevuj, stránka titulu, přehrávač, jazyk a kvalita, oblíbené a rozkoukané,
+stahování, iVysílání, účet, profily, záloha a potíže). Každé téma je karta, která otevře text v okně (cíl
+`info`). Texty používají názvy dlaždic, voleb a položek nabídek tak, jak je aplikace ukazuje; test
+`test_guide_describes_the_app_with_the_names_it_really_uses` selže, když se některý přejmenuje a návod ne.
+
 **Diagnostika** (Nástroje, akce `diagnostics`): verze, zařízení, úroveň Widevine, stav přihlášení,
 klíče TMDB a iVysílání a posledních pár chyb (`errors.json`; zapisuje je vstupní bod `call` a přehrávač).
 Tři tlačítka: znovu zkontrolovat, zkouška Přehraj.to a hlášení.
