@@ -3312,18 +3312,29 @@ def test_changing_preferences_keeps_series_progress(api):
         assert lib.get_kv(app_api.CHOICE_PREFIX + "movie:11") is None        # u filmu se ruční volba zapomene
 
 
-def test_profile_keeps_no_limit_and_switch_reevaluates_the_list(api, monkeypatch):
+def test_minimum_quality_and_the_list_of_titles_are_shared_by_all_profiles(api, monkeypatch):
+    """Seznam dostupných titulů je společný, a tak i nejnižší kvalita, podle které se sestavuje. Dřív ji
+    měl každý profil svou: přepnutí profilu seznam přepočítalo, začalo ho znovu ověřovat a Diagnostika
+    ukazovala v každém profilu jiná čísla."""
     discover = app_api.app_discover
     monkeypatch.setattr(app_api, "MIN_QUALITY_DEFAULT", "720")
-    api("settings_set", min_quality="")                                      # první profil: bez omezení
+    api("settings_set", min_quality="", prefer_language="subs")              # první profil: bez omezení, titulky
     discover._remember_availability("movie", 11, 2, "", 1999, {"d": "cz", "q": 0, "s": 0})
+    restarted = []
+    monkeypatch.setattr(app_api.app_index, "restart", lambda: restarted.append(1))
+    before = app_api.app_index.stats()
     api("profile_add", avatar="owl", text="Druhý")
-    assert api("profile_switch", id="p2")["close"] and app_api._prefs()["minimum"] == "720"
+    assert api("profile_switch", id="p2")["close"]
+    assert app_api._prefs()["minimum"] == ""                                 # nejnižší kvalita zůstala
+    assert app_api._prefs()["language"] == "dub"                             # jazyk má profil svůj
     with app_api._library() as lib:
         known = discover._known(lib, "movie", [11])["movie:11"]
-    assert known["stale"] and known["n"] == 0                                # přísnější profil: ověří se znovu
+    assert not known.get("stale") and known["n"] == 2                        # seznam se nepřepočítal
+    assert app_api.app_index.stats() == before and restarted == []           # Diagnostika ukazuje totéž
+    api("settings_set", min_quality="1080")                                  # změna v druhém profilu…
     api("profile_switch", id="p1")
-    assert app_api._prefs()["minimum"] == ""                                 # „bez omezení“ profilu zůstalo
+    assert app_api._prefs()["minimum"] == "1080"                             # …platí i v prvním
+    assert app_api._prefs()["language"] == "subs"
 
 
 def test_partly_failed_search_is_not_remembered_as_missing(api, monkeypatch):

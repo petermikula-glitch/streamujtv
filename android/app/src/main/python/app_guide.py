@@ -98,7 +98,8 @@ verze a řadí výpisy.
 Kvalita – Nejvyšší dostupná, 1080p, 720p, nebo Úsporná (nejmenší soubor).
 
 Nejnižší kvalita – co se vůbec nabízí: Bez omezení, HD a vyšší, Jen Full HD a vyšší, Jen 4K. \
-Titul, který je jen v horší kvalitě, se ve výpisech neukáže.
+Titul, který je jen v horší kvalitě, se ve výpisech neukáže. Platí pro všechny profily, protože \
+seznam dostupných titulů je společný; jazyk a kvalita jsou u každého profilu vlastní.
 
 Jen pro jeden titul: na jeho stránce tlačítko Další → „Jazyk a kvalita u tohoto filmu“ (u seriálu \
 platí pro všechny díly). Tytéž tři věci se uloží jen k tomuto titulu; zbytek aplikace se dál řídí \
@@ -160,7 +161,8 @@ Klíč TMDB (zdarma na themoviedb.org) se zadává tamtéž. Bez něj nefunguje 
 
     ("Profily", "Každý má své", "favorites:history", """\
 Každý profil má vlastní Rozkoukané, Oblíbené, Moje pořady z iVysílání, předvolby jazyka a kvality \
-a naposledy hledané výrazy. Katalog, stažené soubory a přihlášení jsou společné.
+a naposledy hledané výrazy. Katalog, seznam dostupných titulů (i nejnižší kvalita, podle které se \
+sestavuje), stažené soubory a přihlášení jsou společné.
 
 Profil přepnete kliknutím na jeho jméno nahoře na hlavní obrazovce, nebo dlaždicí Profil \
 v Nástrojích. Tamtéž se přidává nový: vyberete obrázek a napíšete jméno.

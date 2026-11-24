@@ -19,8 +19,10 @@ AVATARS = (("clapper", "Klapka"), ("popcorn", "Popcorn"), ("crown", "Koruna"), (
            ("rocket", "Raketa"))
 TABLES = ("history", "watched_marks", "progress_hidden", "ivys_history", "ivys_favorites")
 KV_PREFIXES = ("choice:", "last_season:", "recent_series", "tracks:", "tprefs:")
-# osobní položky nastavení: předvolby, naposledy hledané a čas posledního hlídání oblíbených
-SETTINGS = ("prefer_language", "prefer_quality", "min_quality", "min_quality_chosen", "search_history", "favorites_checked",
+# osobní položky nastavení: předvolby, naposledy hledané a čas posledního hlídání oblíbených.
+# Nejnižší kvalita mezi nimi není: určuje, co je ve společném seznamu dostupných titulů „k mání“,
+# a kdyby ji měl každý profil jinou, přepnutí profilu by seznam přepočítalo a začalo znovu ověřovat.
+SETTINGS = ("prefer_language", "prefer_quality", "search_history", "favorites_checked",
             "subtitle_size", "subtitle_background")
 LIVE = "profile_live"            # čí osobní stav je právě v katalogu (zapisuje se spolu s ním)
 TRACKS_PREFIX = "tracks:"        # zvuk a titulky naposledy zvolené u seriálu nebo filmu
@@ -245,7 +247,6 @@ def profile_switch(params):
                     snapshot = json.load(f)
             except (OSError, ValueError):
                 snapshot = {}
-            need = api._need_lines(api._prefs())
             with api._library() as lib:
                 temporary = _file(data["active"]) + ".tmp"
                 with open(temporary, "w", encoding="utf-8") as f:
@@ -254,11 +255,7 @@ def profile_switch(params):
                 _restore(lib, snapshot if isinstance(snapshot, dict) else {}, target["id"])
             data["active"] = target["id"]
             _save(data)
-            wanted = api._need_lines(api._prefs())
-            if wanted != need:
-                # Profil má jinou nejnižší kvalitu: co je „k mání“, se počítá jinak (seznam je společný).
-                app_discover.minimum_changed(need, wanted)
-                api.app_index.restart()
+            # Seznam dostupných titulů i nejnižší kvalita jsou společné: přepnutí profilu na nich nic nemění.
         return {"message": "", "close": True, "toast": "Dívá se: %s" % target["name"]}
 
     return api._exclusive(work)

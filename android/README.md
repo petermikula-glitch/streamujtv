@@ -426,9 +426,13 @@ a pozadí“ – čtyři velikosti a pozadí černé, poloprůhledné, nebo jen 
 titulcích pod oknem a ukládá se k profilu.
 
 **Profily** (`app_extras.py`): každý profil má vlastní Rozkoukané, Oblíbené, Moje pořady z iVysílání
-a předvolby přehrávání. Tabulky katalogu se nemění (sdílí je doplněk pro Kodi): osobní stav patří
+a předvolby jazyka a kvality přehrávání. Tabulky katalogu se nemění (sdílí je doplněk pro Kodi): osobní stav patří
 vždy aktivnímu profilu a při přepnutí se uloží do `profile_<id>.json` a nahradí stavem druhého
-profilu. Katalog, stažené soubory a přihlášení jsou společné. Při víc profilech se aplikace po startu
+profilu. Katalog, stažené soubory a přihlášení jsou společné, stejně jako seznam dostupných titulů
+a nejnižší kvalita, podle které se sestavuje (`min_quality` není v `app_extras.SETTINGS`). Dřív ji
+měl každý profil svou a přepnutí na profil s jinou hodnotou seznam přepočítalo a začalo znovu ověřovat
+(Diagnostika pak v každém profilu ukazovala jiná čísla). Hodnota uložená ve starších souborech
+`profile_<id>.json` se při přepnutí nepoužije; platí ta, která byla nastavená při aktualizaci. Při víc profilech se aplikace po startu
 zeptá, kdo se dívá. Osobní jsou i naposledy hledané výrazy. Čí stav v katalogu právě je, si katalog
 pamatuje sám (`profile_live`), takže přerušené přepnutí profily nepomíchá.
 Přepíná se kliknutím na profil v záhlaví hlavní obrazovky nebo dlaždicí
