@@ -87,6 +87,11 @@
             android:name=".DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <!-- drží aplikaci naživu, dokud se plní seznam dostupných titulů (i při spořiči obrazovky) -->
+        <service
+            android:name=".IndexService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <receiver
             android:name=".UpdateReceiver"
             android:exported="false" />

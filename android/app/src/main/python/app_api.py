@@ -679,9 +679,17 @@ def _ivys_label(row):
     return row["title"] or row["show_title"]
 
 
+def _resume_now(card):
+    """Karta v Rozkoukaných: klepnutí naváže rovnou tam, kde se skončilo, bez dotazu „Pokračovat, nebo
+    od začátku?“ (přehrávač se neptá, když má ``resume``). Od začátku jde pustit z nabídky karty."""
+    if card["target"]["type"] == "play":
+        card["target"] = dict(card["target"], params=dict(card["target"]["params"], resume=True))
+    return card
+
+
 def _ivys_progress_card(row):
     point = (row["position"], row["total"])
-    target = _target("play", "ivys_play", {"idec": row["idec"]})
+    target = _target("play", "ivys_play", {"idec": row["idec"], "resume": True})
     menu = [{"title": "Pokračovat", "target": target},
             {"title": "Přehrát od začátku", "target": _target("play", "ivys_play", {"idec": row["idec"], "restart": True})},
             {"title": "Odebrat z Rozkoukaných", "target": _target("command", "progress_remove", {"idec": row["idec"]})}]
@@ -913,7 +921,7 @@ def _progress_rows(lib, state):
     metas = lib.get_metas(video["meta_key"] for video in videos)
     television = lib.ivys_progress(2 * HOME_ROW)
     for name, episodes in (("Filmy", False), ("Seriály", True)):
-        found = [(video["last_played"] or 0, _video_card(video, metas.get(video["meta_key"]), state))
+        found = [(video["last_played"] or 0, _resume_now(_video_card(video, metas.get(video["meta_key"]), state)))
                  for video in videos if (video["kind"] == "episode") == episodes]
         found += [(row["last_played"] or 0, _ivys_progress_card(row)) for row in television
                   if _ivys_is_film(lib, row["show_id"], row["title"], row["show_title"]) != episodes]

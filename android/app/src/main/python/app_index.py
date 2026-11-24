@@ -332,12 +332,46 @@ def _renew():
     return renewed
 
 
+def _settle_waiting():
+    """Jednou (verze 0.29.1): nalezené tituly, které čekaly na nové ověření jen proto, že se změnila
+    nejnižší kvalita (dřív i přepnutím profilu), a nové nejnižší kvalitě vyhovují, se znovu ověřovat
+    nebudou – byly to stovky dotazů navíc. Ověří se zase až po obvyklé době."""
+    state = _state()
+    if state.get("settled"):
+        return 0
+    need = api._need_lines(api._prefs())
+    now, changed = int(time.time()), [0]
+
+    def change(entry):
+        if entry.get("n") and not entry.get("ts") and not entry.get("x") and int(entry.get("q") or 0) >= need:
+            entry["ts"] = now
+            changed[0] += 1
+            return True
+        return False
+
+    discover._rewrite_records(change)
+    if changed[0]:
+        note("%d nalezených titulů už nečeká na nové ověření (vyhovují nastavení)" % changed[0], len(_entries()))
+    state = _state()
+    state["settled"] = 1
+    _save(state)
+    return changed[0]
+
+
+def keepalive(params):
+    """Pro službu, která drží aplikaci naživu, když běží jen na pozadí (spořič obrazovky, noc):
+    znovu spustí procházení, pokud se zastavilo (výpadek spojení), a řekne, jestli ještě běží."""
+    start()
+    return {"active": _CRAWL["thread"] is not None}
+
+
 def start():
     """Spustí procházení na pozadí, pokud neběží a je co procházet. Volá se po otevření aplikace."""
     if not api._tmdb().enabled or not discover.BACKGROUND:
         return False
     try:
         _renew()
+        _settle_waiting()
     except Exception as error:             # obnova seznamu nesmí zastavit otevření aplikace
         api._remember_error("obnova seznamu", error)
     state = _state()
@@ -558,4 +592,4 @@ def catalogue_tile(kind):
 
 
 ACTIONS = {"discover_fresh": discover_fresh, "discover_fresh_row": discover_fresh_row,
-           "discover_index": discover_index}
+           "discover_index": discover_index, "index_keepalive": keepalive}

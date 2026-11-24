@@ -21,6 +21,7 @@ object Home {
     private const val HINT_TIMES = 3   // kolikrát nejvýš se tip ukáže
     private const val HINT_DEPTH = 3   // od kolikáté obrazovky nad hlavní
     private var hinted = false         // v jednom spuštění nejvýš jednou
+    private const val LONG_REPEATS = 8 // ovladač, který neoznačí podržení: tolik opakování stisku (asi půl sekundy)
 
     /** Zavře obrazovky nad hlavní a otevře na ní postranní nabídku. */
     fun go(activity: Activity) {
@@ -31,11 +32,29 @@ object Home {
         )
     }
 
-    /** Pro `onKeyLongPress` obrazovek: podržené Zpět = hlavní nabídka. */
-    fun longPress(activity: Activity, keyCode: Int): Boolean {
-        if (keyCode != KeyEvent.KEYCODE_BACK || activity is MainActivity) return false
-        go(activity)
-        return true
+    private var held = false   // podržené Zpět už vrátilo do nabídky: jeho uvolnění se nesmí počítat jako Zpět
+
+    /**
+     * Pro `dispatchKeyEvent` obrazovek (stisk se zachytí dřív, než ho dostane výpis nebo jiný prvek):
+     * podržené Zpět = hlavní nabídka. Krátký stisk projde dál a vrací o krok jako dřív.
+     */
+    fun dispatch(activity: Activity, event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_BACK || activity is MainActivity) return false
+        return when (event.action) {
+            KeyEvent.ACTION_DOWN -> when {
+                event.repeatCount == 0 -> { held = false; false }
+                event.isLongPress || event.repeatCount >= LONG_REPEATS -> {
+                    if (!held) {
+                        held = true
+                        go(activity)
+                    }
+                    true
+                }
+                else -> true   // opakování během držení: čeká se, jestli jde o podržení
+            }
+            KeyEvent.ACTION_UP -> if (held) { held = false; true } else false
+            else -> false
+        }
     }
 
     /** Hloubka obrazovky, kterou `activity` právě otevírá. */

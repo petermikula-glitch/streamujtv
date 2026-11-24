@@ -581,16 +581,15 @@ class PlayerActivity : FragmentActivity() {
         if (player == null) return
         val available = groups(type)
         val text = type == C.TRACK_TYPE_TEXT
-        val names = (if (text) listOf("Vypnuto") else emptyList()) + available.map { label(it) }
-        val current = available.indexOfFirst { it.isSelected }.let { if (text) it + 1 else it }
+        if (!text) {
+            chooseAudio(available)
+            return
+        }
+        val names = listOf("Vypnuto") + available.map { label(it) }
+        val current = available.indexOfFirst { it.isSelected } + 1
         AlertDialog.Builder(this)
-            .setTitle(if (text) "Titulky" else "Zvuková stopa")
-            .apply {
-                if (text) setNeutralButton("Velikost a pozadí") { _, _ -> chooseSubtitleStyle() }
-                else setNeutralButton("Výstup zvuku: " + audioOutputTitle(audioMode).substringBefore(" –")) { _, _ ->
-                    chooseAudioOutput()
-                }
-            }
+            .setTitle("Titulky")
+            .setNeutralButton("Velikost a pozadí") { _, _ -> chooseSubtitleStyle() }
             .setSingleChoiceItems(Dialogs.choices(this, names), current) { dialog, which ->
                 dialog.dismiss()
                 // přehrávač se mezitím mohl vyměnit (další díl, nový pokus): volba patří tomu, který hraje
@@ -611,6 +610,36 @@ class PlayerActivity : FragmentActivity() {
     }
 
     /** Možnosti výstupu zvuku (název a krátké vysvětlení) tak, jak je dodala logika. */
+    /**
+     * Zvuk: jazykové stopy a pod nimi dva řádky – Výstup zvuku (co se stane s prostorovým zvukem)
+     * a Posun zvuku. Dřív byly jen tlačítkem pod seznamem, které se na televizi snadno přehlédne.
+     */
+    private fun chooseAudio(available: List<Tracks.Group>) {
+        val current = available.indexOfFirst { it.isSelected }
+        val names = available.mapIndexed { index, group -> (if (index == current) "✓  " else "     ") + label(group) } +
+            listOf("Výstup zvuku: " + audioOutputTitle(audioMode).substringBefore(" –") + "  ›",
+                "Posun zvuku: " + delayText(audioDelayMs) + "  ›")
+        AlertDialog.Builder(this)
+            .setTitle("Zvuk")
+            .setAdapter(Dialogs.items(this, names)) { _, which ->
+                when (which) {
+                    available.size -> chooseAudioOutput()
+                    available.size + 1 -> chooseAudioDelay()
+                    else -> {
+                        val playing = player ?: return@setAdapter
+                        val group = available[which]
+                        val tracks = (0 until group.length).filter { group.isTrackSupported(it) }
+                        userChangedTracks = true
+                        playing.trackSelectionParameters = playing.trackSelectionParameters.buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, tracks))
+                            .build()
+                    }
+                }
+            }
+            .showStyled()
+    }
+
     private fun audioOutputs(): List<JSONObject> = subtitleStyle?.optJSONArray("audio_outputs")?.let { list ->
         (0 until list.length()).mapNotNull { list.optJSONObject(it) }
     }.orEmpty()

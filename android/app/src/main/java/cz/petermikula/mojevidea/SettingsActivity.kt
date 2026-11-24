@@ -12,8 +12,8 @@ import org.json.JSONObject
 
 class SettingsActivity : FragmentActivity() {
     /** Podržené Zpět: rovnou do hlavní nabídky (viz [Home]). */
-    override fun onKeyLongPress(keyCode: Int, event: android.view.KeyEvent?): Boolean =
-        Home.longPress(this, keyCode) || super.onKeyLongPress(keyCode, event)
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
+        Home.dispatch(this, event) || super.dispatchKeyEvent(event)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

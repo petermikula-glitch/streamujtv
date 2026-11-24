@@ -77,11 +77,12 @@ Když se zvolená verze nepodaří přehrát, přehrávač sám zkusí další n
 OK během přehrávání ukáže ovládání: pauza, posun zpět a vpřed, časová osa. Šipkou nahoru se dostanete \
 na tři tlačítka vpravo nahoře: zvuková stopa, titulky a přehrát od začátku.
 
-Zvuková stopa – výběr jazyka. Tlačítko Výstup zvuku pod seznamem určuje, co se stane s prostorovým \
-zvukem: předat soundbaru, nechat dekódovat aplikaci, totéž s tlumenými basy, nebo stereo. Když film \
-hučí nebo duní, zkuste „Prostorový s tlumenými basy“.
+Zvuk – okno se zvukovými stopami (jazyky, ✓ je ta, která hraje). Pod nimi jsou dva řádky:
 
-Posun zvuku (v okně Výstup zvuku) – když zvuk nesedí na ústa. Posouvá se po 25 ms a změna platí hned.
+Výstup zvuku – co se stane s prostorovým zvukem: předat soundbaru, nechat dekódovat aplikaci, \
+totéž s tlumenými basy, nebo stereo. Když film hučí nebo duní, zkuste „Prostorový s tlumenými basy“.
+
+Posun zvuku – když zvuk nesedí na ústa. Posouvá se po 25 ms a změna platí hned.
 
 Titulky – výběr nebo vypnutí; „Velikost a pozadí“ mění jejich vzhled.
 
@@ -116,7 +117,8 @@ Film, který na Přehraj.to zatím není v jazyce a kvalitě, jakou chcete, apli
 až se objeví.
 
 Rozkoukané: všechno, co jste nedokoukali, s ukazatelem, kde jste skončili. Nahoře je velký panel \
-s tím posledním.
+s tím posledním. Klepnutí na kartu pustí film nebo díl rovnou od místa, kde jste skončili; od začátku \
+ho pustíte podržením OK → Přehrát od začátku.
 
 Odebrat z Rozkoukaných: podržte OK na kartě a zvolte „Odebrat z Rozkoukaných“. Stejně jde video \
 označit jako zhlédnuté nebo nezhlédnuté.
@@ -182,10 +184,11 @@ Diagnostika (Nástroje) ukazuje stav účtu, připojení a poslední chyby. Má 
 Zkontrolovat znovu.
 Zkouška Přehraj.to – ověří, jestli hledání na Přehraj.to vrací to, co má.
 Hlášení – ukáže kód QR. Namiřte na něj fotoaparát telefonu a klepněte na „Napsat e-mail“: otevře \
-se nový e-mail s textem hlášení, který můžete poslat tomu, kdo aplikaci spravuje, nebo zkopírovat.
+se nový e-mail s textem hlášení (adresát je e-mail vašeho účtu Přehraj.to), který můžete odeslat, \
+přeposlat tomu, kdo aplikaci spravuje, nebo zkopírovat.
 
 Když film nejde přehrát: zkuste jinou verzi z řady „Verze na Přehraj.to“. Když zvuk hučí nebo nesedí \
-na ústa: v přehrávači Zvuková stopa → Výstup zvuku. Když výpis hlásí, že Přehraj.to omezuje dotazy: \
+na ústa: v přehrávači tlačítko Zvuk → Výstup zvuku nebo Posun zvuku. Když výpis hlásí, že Přehraj.to omezuje dotazy: \
 stačí počkat, aplikace pokračuje sama."""),
 )
 

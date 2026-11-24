@@ -255,14 +255,20 @@ REPORT_SUBJECT = "Promitarna - hlaseni z diagnostiky"
 MAIL_SAFE = "-_.~!$'()*,;:@"
 
 
-def _mail(text):
-    """Kód QR jako rozepsaný e-mail („mailto:“ bez adresáta): fotoaparát telefonu nabídne Napsat e-mail
-    a otevře se nový e-mail s textem hlášení – ten jde odeslat i zkopírovat. U čistého textu to
-    fotoaparát iPhonu neumí (text jen ukáže). Když by byl odkaz delší než ``QR_LIMIT``, konec textu
-    se uřízne."""
+EMAIL = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+
+
+def _mail(text, to=""):
+    """Kód QR jako rozepsaný e-mail („mailto:“): fotoaparát telefonu nabídne Napsat e-mail a otevře
+    se nový e-mail s textem hlášení – ten jde odeslat i zkopírovat. U čistého textu to fotoaparát
+    iPhonu neumí (text jen ukáže). ``to`` je adresát; fotoaparát iPhonu odkaz bez adresáta za e-mail
+    nepovažuje (verze 0.29.0 ukázala jen jeho text). Když by byl odkaz delší než ``QR_LIMIT``, konec
+    textu se uřízne."""
+    address = to if EMAIL.match(to or "") else ""
+
     def link(body):
-        return "mailto:?subject=%s&body=%s" % (quote(REPORT_SUBJECT, safe=MAIL_SAFE),
-                                               quote(body.replace("\n", "\r\n"), safe=MAIL_SAFE))
+        return "mailto:%s?subject=%s&body=%s" % (address, quote(REPORT_SUBJECT, safe=MAIL_SAFE),
+                                                 quote(body.replace("\n", "\r\n"), safe=MAIL_SAFE))
 
     if len(link(text)) <= QR_LIMIT:
         return link(text)
@@ -306,7 +312,8 @@ def diagnostics_report(params):
               for row in everything if row.get("ok") is not False]
     # Kód QR je rozepsaný e-mail: čistý text fotoaparát iPhonu jen ukáže a nedá zkopírovat, a když
     # v něm najde něco jako adresu („Prehraj.to: …“), nabídne místo textu otevřít web.
-    code = _mail(_plain("\n".join(short)))
+    # Adresát: e-mail účtu Přehraj.to – hlášení si pošlete sami sobě (zobrazí se jen na vaší televizi).
+    code = _mail(_plain("\n".join(short)), api._settings().get("username") or "")
     saved, where = "", ""
     name = REPORT_PREFIX + time.strftime("%Y%m%d-%H%M%S") + ".txt"
     for place in params.get("dirs") or []:

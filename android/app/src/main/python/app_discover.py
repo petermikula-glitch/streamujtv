@@ -368,15 +368,17 @@ def minimum_changed(before, after):
     """Uživatel změnil nejnižší nabízenou kvalitu (``before`` → ``after``, v řádcích; 0 = bez omezení).
 
     Co je „k mání“, se tím počítá jinak – ale co už se zjistilo, se nezahazuje (dřív se seznam smazal
-    celý a ověřovalo se od začátku). Nalezené tituly zůstávají a jen se na pozadí ověří znovu; při
-    zpřísnění se hned skryjí ty, jejichž nejlepší známá kvalita novému požadavku nestačí. Nenalezené
-    se při zmírnění berou jako neověřené (mohou teď vyhovět), při zpřísnění platí dál."""
+    celý a ověřovalo se od začátku). Nalezené tituly, jejichž nejlepší známá kvalita novému požadavku
+    stačí, zůstávají, jak jsou – znovu se neověřují (dřív se ověřovaly všechny a stálo to stovky dotazů,
+    které pak chyběly na nové tituly). Při zpřísnění se hned skryjí a ověří znovu ty, jejichž kvalita
+    nestačí nebo není známá. Nenalezené se při zmírnění berou jako neověřené (mohou teď vyhovět),
+    při zpřísnění platí dál."""
     def change(entry):
         if entry.get("n"):
-            if after > before and int(entry.get("q") or 0) < after:
-                entry.update(n=0, x=1)                   # skrytý nastavením; nové ověření rozhodne
-                entry.pop("miss", None)
-            entry["ts"] = 0                              # ověřit znovu (do té doby platí, co se ví)
+            if after <= before or int(entry.get("q") or 0) >= after:
+                return False                             # vyhovuje dál: není co ověřovat
+            entry.update(n=0, x=1, ts=0)                 # skrytý nastavením; nové ověření rozhodne
+            entry.pop("miss", None)
         elif after < before:
             if entry.get("iv"):
                 entry.update(ts=0, x=1)                  # (``x``: až se najde, není „nově na Přehraj.to“)
@@ -580,7 +582,10 @@ def _count_versions(kind, tmdb_id, names, year, state, client, gentle=False):
         return [version for version in versions if not version["short"]]
 
     found = search(names)
-    if not found:
+    if not found and not gentle:
+        # Další názvy (slovenský…) jen u výpisu, na který člověk čeká. Při plnění seznamu na pozadí
+        # by u každého nenalezeného titulu zdvojnásobily počet dotazů – a Přehraj.to jich za hodinu
+        # snese jen omezeně; stránka titulu je při otevření zkusí sama.
         extra = _local_names(kind, tmdb_id, names)
         if extra:
             found = search(extra)

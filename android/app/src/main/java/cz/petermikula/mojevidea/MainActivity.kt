@@ -289,6 +289,8 @@ class MainFragment : BrowseSupportFragment(), RowsHost {
     private fun quickSync() {
         Api.call("quick_sync") { result ->
             if (!isAdded) return@call
+            // seznam dostupných titulů se plní dál, i když televize přejde na spořič (viz IndexService)
+            IndexService.start(requireContext())
             val data = result.data ?: return@call
             // nová videa z účtu, nebo se samo doplnilo hodnocení a plakáty: obrazovka se načte znovu
             if (data.optInt("new") <= 0 && !data.optBoolean("refresh")) return@call

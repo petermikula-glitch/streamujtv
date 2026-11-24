@@ -261,7 +261,7 @@ výrazně kratší než film (délka z TMDB) jde do řady „Ukázky a neúplné
 které se nepodařilo přehrát, až na konec, opakovaně nahraný stejný soubor se slučuje. Verzi, kterou si
 uživatel pustil sám, si aplikace u titulu pamatuje a nabídne ji příště první.
 
-**Výstup zvuku** (`StereoAudio.kt`, tlačítko „Výstup zvuku“ v dialogu Zvuková stopa, nastavení `audio_output`,
+**Výstup zvuku** (`StereoAudio.kt`, řádek „Výstup zvuku“ v okně Zvuk pod jazykovými stopami, nastavení `audio_output`,
 možnosti dodává `subtitle_style` → `audio_outputs`): co se s prostorovým zvukem stane, než odejde do televize
 a soundbaru.
 - **Prostorový – předat soundbaru** (`auto`, výchozí): Dolby a DTS se pošlou zakódované, dekóduje soundbar.
@@ -275,7 +275,7 @@ a soundbaru.
 Přepnutí sestaví přehrávač znovu na stejném místě a zachová zvolenou stopu, titulky i to, jestli se hrálo
 nebo stálo; volba platí pro celé zařízení. Tlačítko zvuku je proto vidět i u videa s jedinou stopou.
 
-**Posun zvuku** (tlačítko v okně Výstup zvuku, `audio_delay_set`, nastavení `audio_delays`): soundbar zvuk
+**Posun zvuku** (řádek „Posun zvuku“ v okně Zvuk i tlačítko v okně Výstup zvuku, `audio_delay_set`, nastavení `audio_delays`): soundbar zvuk
 zpracovává a ten pak zní později, než se hýbou ústa. Posun po krocích 25 ms (−300 až +600 ms) platí hned,
 takže se ladí při řeči na obraze, a pamatuje se pro každý výstup zvuku zvlášť (předaný a dekódovaný zvuk
 zpožďuje soundbar různě). Přehrávač se řídí časem zvuku; `ShiftedAudioSink` ten čas posune, a obraz
@@ -477,9 +477,22 @@ Tři tlačítka: znovu zkontrolovat, zkouška Přehraj.to a hlášení.
 - **Hlášení** (`diagnostics_report`): celá diagnostika jako text – do souboru `promitarna-hlaseni-<datum>.txt`
   na disku (stejná složka jako zálohy) a zkráceně bez diakritiky do kódu QR (knihovna ZXing, jen kodér),
   který přečte fotoaparát telefonu. Není pak potřeba fotit obrazovku. Kód je rozepsaný e-mail
-  (`mailto:?subject=…&body=…` bez adresáta, nejvýš `QR_LIMIT` znaků i s kódováním %XX): fotoaparát
+  (`mailto:<e-mail účtu>?subject=…&body=…`, nejvýš `QR_LIMIT` znaků i s kódováním %XX): fotoaparát
   nabídne Napsat e-mail a text hlášení jde odeslat nebo zkopírovat. Čistý text fotoaparát iPhonu
-  jen ukáže a nedá zkopírovat a v řádku „Prehraj.to: …“ najde odkaz na web (verze 0.28.0).
+  jen ukáže a nedá zkopírovat a v řádku „Prehraj.to: …“ najde odkaz na web (verze 0.28.0); odkaz
+  bez adresáta (0.29.0) za e-mail nepovažuje a ukáže jen jeho text. Adresát je přihlašovací e-mail
+  k Přehraj.to (kód se ukazuje jen na televizi uživatele); když přihlašovací jméno e-mail není, je
+  odkaz bez adresáta.
+
+**Seznam se plní i při spořiči** (`IndexService.kt`): po otevření aplikace se spustí služba v popředí
+(typ `dataSync`, oznámení s nejnižší důležitostí, částečný wake lock nejvýš `MAX_HOURS` = 10 h). Bez ní
+Android 14 aplikaci, která běží jen na pozadí (spořič obrazovky, noc), po pár minutách zmrazí a procházení
+stojí. Každých 5 minut se služba zeptá `index_keepalive`: logika znovu spustí procházení, pokud se po
+výpadku zastavilo, a řekne, jestli ještě běží; když ne (plán projitý, denní limit), služba skončí.
+Úspornější ověřování (0.29.1): změna nejnižší kvality už znovu neověřuje nalezené tituly, jejichž
+známá kvalita nové hodnotě stačí (dřív stovky dotazů), jednou se tak „uklidní“ i tituly, které na nové
+ověření čekaly zbytečně (`_settle_waiting`); a na pozadí se u nenalezeného titulu nezkoušejí další
+názvy z TMDB (slovenský…), které počet dotazů zdvojnásobovaly – zkusí je výpis a stránka titulu.
 
 **Ochrana katalogu** (`app_health.py`): po otevření aplikace se nejvýš jednou za `SNAPSHOT_EVERY` uloží kopie
 katalogu do `snapshots/` v datech aplikace (zálohovacím rozhraním SQLite, před uložením se zkontroluje,

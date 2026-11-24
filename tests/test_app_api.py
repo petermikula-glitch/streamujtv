@@ -1032,7 +1032,8 @@ def test_next_episode_from_the_catalogue_follows_a_finished_one(api):
     assert row[0]["subtitle"].startswith("Další díl")
     api("progress_save", track=second, position=300, total=1200, started=True)
     assert "Další díly" not in _section(api, "progress")                    # rozkoukaný díl je už mezi rozkoukanými
-    assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": second}
+    # karta v Rozkoukaných naváže rovnou, bez dotazu „Pokračovat, nebo od začátku?“
+    assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": second, "resume": True}
 
 
 def test_next_episode_never_silently_skips_a_missing_one(api, monkeypatch):
@@ -1330,18 +1331,18 @@ def test_profiles_keep_progress_favourites_and_preferences_apart(api, monkeypatc
     assert "smazat nejde" in api("profile_delete", id=owl["target"]["params"]["id"])["error"]
     api("progress_save", track=first, position=300, total=1200, started=True)
     api("settings_set", prefer_quality="720")
-    assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": first}
+    assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": first, "resume": True}
 
     main = api("profiles")["items"][0]
     api(main["target"]["call"], **main["target"]["params"])                 # zpět: původní stav je na místě
-    assert [item["target"]["params"] for item in _section(api, "progress")["Filmy"]] == [{"vid": REF}]
+    assert [item["target"]["params"] for item in _section(api, "progress")["Filmy"]] == [{"vid": REF, "resume": True}]
     assert _titles(_section(api, "favorites")["Filmy"]) == ["Pelíšky"]
     settings = api("settings_get")
     assert (settings["prefer_language"], settings["prefer_quality"]) == ("subs", "best")
     assert meta["key"] and _titles(api("movies")["items"]) == ["Filtr", "Pelíšky"]   # katalog je společný
 
     api(main["target"]["call"], **owl["target"]["params"])                  # a druhý profil má své
-    assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": first}
+    assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": first, "resume": True}
     assert api("settings_get")["prefer_quality"] == "720"
     api(main["target"]["call"], **main["target"]["params"])
     assert "smazaný" in api("profile_delete", id=owl["target"]["params"]["id"])["message"]
@@ -1947,9 +1948,10 @@ def test_minimum_quality_is_on_by_default_and_keeps_what_was_verified(api, monke
     assert api("settings_set", min_quality="1080")["min_quality"] == "1080"  # přísněji
     assert api("settings_get")["min_quality"] == "1080"
     state = known()
-    # Seznam ověřených titulů se nemaže: co vyhovuje, zůstává a jen se ověří znovu; co novému požadavku
-    # podle známé kvality nestačí, se skryje, dokud nové ověření nerozhodne; „není tam“ platí dál.
-    assert state["movie:11"]["n"] == 2 and state["movie:11"]["stale"]
+    # Seznam ověřených titulů se nemaže: co novému požadavku podle známé kvality vyhovuje, zůstává a znovu
+    # se neověřuje (stály by to stovky dotazů); co nestačí, se skryje, dokud nové ověření nerozhodne;
+    # „není tam“ platí dál.
+    assert state["movie:11"]["n"] == 2 and not state["movie:11"].get("stale")
     assert state["movie:12"]["n"] == 0 and state["movie:12"]["stale"]
     assert state["movie:13"]["n"] == 0 and not state["movie:13"].get("stale")
     assert state["movie:14"]["iv"] == "777"
@@ -2618,7 +2620,7 @@ def test_interrupted_profile_switch_does_not_mix_profiles(api, monkeypatch):
     assert "error" in api("profile_switch", id=owl)
     monkeypatch.setattr(app_api, "_change_settings", genuine)
     assert api("home")["profile"]["name"] == "Hlavní profil"                 # nic se nepřepnulo ani nepomíchalo
-    assert [item["target"]["params"] for item in _section(api, "progress")["Filmy"]] == [{"vid": REF}]
+    assert [item["target"]["params"] for item in _section(api, "progress")["Filmy"]] == [{"vid": REF, "resume": True}]
     api("profile_switch", id=owl)                                            # druhý pokus projde
     assert api("home")["profile"]["name"] == "Jana" and list(_section(api, "progress")) == ["Rozkoukané"]
     assert api("search_history") == {"rows": []}                             # hledané výrazy má každý profil své
@@ -2628,7 +2630,7 @@ def test_interrupted_profile_switch_does_not_mix_profiles(api, monkeypatch):
     with app_api._library() as lib:
         lib.set_kv("profile_live", owl)
     api("profile_switch", id="p1")                                           # a původní profil o nic nepřišel
-    assert [item["target"]["params"] for item in _section(api, "progress")["Filmy"]] == [{"vid": REF}]
+    assert [item["target"]["params"] for item in _section(api, "progress")["Filmy"]] == [{"vid": REF, "resume": True}]
     assert _titles(api("search_history")["rows"][0]["items"]) == ["pelisky"]
 
 
@@ -3386,6 +3388,44 @@ def test_open_list_does_not_hammer_services_while_checks_cannot_run(api, monkeyp
     assert refreshes[0] == discover.RECHECK_REFRESH and refreshes[1:] == [None, None, None]
 
 
+def test_titles_waiting_only_for_a_setting_change_are_settled_once(api, monkeypatch):
+    """Nalezené tituly, které čekaly na nové ověření jen kvůli změně nejnižší kvality (dřív i kvůli
+    přepnutí profilu), a nastavení vyhovují, se znovu neověřují – byly to stovky dotazů navíc."""
+    prefix = app_api.app_discover.AVAILABLE_PREFIX
+    api("settings_set", min_quality="720")
+    with app_api._library() as lib:
+        lib.set_kv(prefix + "movie:21", json.dumps({"n": 2, "ts": 0, "r": 2, "q": 1080}))   # čeká zbytečně
+        lib.set_kv(prefix + "movie:22", json.dumps({"n": 1, "ts": 0, "r": 2, "q": 480}))    # nestačí: ověří se
+        lib.set_kv(prefix + "movie:23", json.dumps({"n": 0, "ts": 0, "r": 2, "x": 1, "q": 1080}))   # skrytý
+    assert app_api.app_index._settle_waiting() == 1
+    with app_api._library() as lib:
+        assert json.loads(lib.get_kv(prefix + "movie:21"))["ts"] > 0
+        assert json.loads(lib.get_kv(prefix + "movie:22"))["ts"] == 0
+        assert json.loads(lib.get_kv(prefix + "movie:23"))["ts"] == 0
+        lib.set_kv(prefix + "movie:24", json.dumps({"n": 2, "ts": 0, "r": 2, "q": 1080}))
+    assert app_api.app_index._settle_waiting() == 0                          # jen jednou
+    assert "už nečeká na nové ověření" in app_api.app_index.journal_text()
+
+
+def test_background_crawl_does_not_try_extra_names(api, monkeypatch):
+    """Na pozadí se u nenalezeného titulu nezkoušejí další názvy (slovenský…): zdvojnásobily by počet
+    dotazů. Výpis, na který člověk čeká, je zkusí."""
+    discover = app_api.app_discover
+    monkeypatch.setattr(discover, "_local_names", lambda kind, tmdb_id, known=(): ["Pelíšky SK"])
+    asked = _catalogue_search(monkeypatch, {})
+    discover._count_versions("movie", 11, ["Pelíšky"], 1999, {}, None, gentle=True)
+    assert all("SK" not in query for query, _page in asked) and asked
+    asked[:] = []
+    discover._count_versions("movie", 11, ["Pelíšky"], 1999, {}, None)
+    assert any("SK" in query for query, _page in asked)
+
+
+def test_keepalive_restarts_a_stopped_crawl(api, monkeypatch):
+    started = []
+    monkeypatch.setattr(app_api.app_index, "start", lambda: started.append(1))
+    assert api("index_keepalive") == {"active": False} and started == [1]
+
+
 def test_background_check_follows_a_changed_minimum(api, monkeypatch):
     """Ověřování, které běží, když uživatel změní nejnižší kvalitu, nesmí uložit výsledky podle té původní."""
     import threading
@@ -3660,6 +3700,11 @@ def test_report_is_saved_and_fits_a_code_for_the_phone(api, tmp_path, monkeypatc
     assert body.endswith("(zkraceno)")                                        # dlouhé hlášení se uřízne, ale vejde se
     short = health._mail("Kratky text & dalsi = 100 % #1?")
     assert unquote(short.split("&body=", 1)[1]) == "Kratky text & dalsi = 100 % #1?"
+    # Fotoaparát iPhonu odkaz bez adresáta nepozná: adresát je e-mail účtu (hlášení si pošlete sami sobě).
+    assert health._mail("x", "a@b.cz").startswith("mailto:a@b.cz?subject=")
+    assert health._mail("x", "jmeno-bez-zavinace").startswith("mailto:?subject=")   # není e-mail: bez adresáta
+    api("settings_set", username="a@b.cz", password="heslo")
+    assert api("diagnostics_report", device=device, dirs=[])["qr"].startswith("mailto:a@b.cz?subject=")
     nowhere = api("diagnostics_report", device=device, dirs=[])
     assert nowhere["saved"] == "" and nowhere["qr"]                          # bez disku aspoň kód
 
