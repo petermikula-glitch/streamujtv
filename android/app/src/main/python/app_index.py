@@ -30,6 +30,7 @@ HARVEST_KEY = "index:harvest"    # co naposledy nabídlo samo Přehraj.to (zprá
 HARVEST_EVERY = 6 * 3600         # nabídka Přehraj.to se čte nejvýš jednou za tuto dobu
 HARVEST_TITLES = 40              # tolik titulů z ní se nejvýš zkusí přiřadit a ověřit
 STATE_KEY = "index:state"        # kde se v plánu skončilo a kolik se dnes ověřilo
+GENERATION = 2                   # zvýšení = po aktualizaci se celý seznam jednou ověří znovu (``_renew``)
 JOURNAL_KEY = "index:journal"    # odkdy se seznam vede, kolik měl naposledy záznamů a co ho změnilo
 JOURNAL_KEEP = 5                 # tolik posledních událostí se pamatuje
 JOURNAL_DROP = 20                # o tolik záznamů (a zároveň o třetinu) musí seznam ubýt, aby to stálo za zápis
@@ -150,7 +151,12 @@ def step(limit=None):
             break
         chunk = batch[start:start + CHUNK]
         fresh = discover._check_available(kind, chunk, shared, gentle=True)
-        checked += len(chunk)
+        # počítá se jen to, co se opravdu ověřilo – ne pokusy, které skončily odmítnutím nebo výpadkem
+        done = [item for item in chunk if discover._fresh(fresh, "%s:%s" % (kind, item["id"]))]
+        checked += len(done)
+        if len(done) < len(chunk) and busy() and not discover.search_paused():
+            batch = batch[:start]          # ustoupilo se výpisu nebo hledání: stránka se dodělá potom
+            break
         if discover.search_paused() or any("%s:%s" % (kind, item["id"]) not in fresh for item in chunk):
             failed = True                  # služba neodpovídá nebo omezuje dotazy: nemá cenu pokračovat
             break
@@ -236,10 +242,8 @@ def harvest(force=False):
                 known = discover._known(lib, kind, [item["id"] for item in items])
             todo = [item for item in items if _wanted(known, kind, item)]
             for start in range(0, len(todo), CHUNK):
-                if _CRAWL["stop"]:
-                    break
-                if discover.search_paused():
-                    break
+                if _CRAWL["stop"] or busy() or discover.search_paused():
+                    break                  # přednost má, co dělá člověk; zbytek se zkusí příště
                 discover._check_available(kind, todo[start:start + CHUNK], shared, gentle=True)
                 if start + CHUNK < len(todo):
                     time.sleep(GAP)
@@ -310,10 +314,32 @@ def restart():
     return start()
 
 
+def _renew():
+    """Jednou po aktualizaci, která mění ověřování (``GENERATION``): celý seznam se ověří znovu.
+    Nalezené tituly zůstávají vidět a přeověří se, „nenašlo se“ přestává platit a plán se projde od
+    začátku. Nová instalace nemá co obnovovat, jen si zapamatuje, že je aktuální."""
+    state = _state()
+    if int(state.get("gen") or 0) >= GENERATION:
+        return False
+    renewed = bool(_entries())
+    if renewed:
+        discover.reverify_all()
+        note("po aktualizaci se celý seznam ověřuje znovu (nalezené tituly zůstávají vidět)", len(_entries()))
+    state = _state()
+    state.update(gen=GENERATION, step=0, restart=int(state.get("restart") or 0) + 1)
+    state.pop("finished", None)
+    _save(state)
+    return renewed
+
+
 def start():
     """Spustí procházení na pozadí, pokud neběží a je co procházet. Volá se po otevření aplikace."""
     if not api._tmdb().enabled or not discover.BACKGROUND:
         return False
+    try:
+        _renew()
+    except Exception as error:             # obnova seznamu nesmí zastavit otevření aplikace
+        api._remember_error("obnova seznamu", error)
     state = _state()
     try:
         watch(len(_entries()))             # po každém otevření aplikace: neubylo ze seznamu?
@@ -356,7 +382,11 @@ def stats():
     entries = _entries()
     state = _state()
     plan_done = int(state.get("step") or 0)
-    return {"known": len(entries), "available": len([1 for _kind, _id, entry in entries if entry.get("n")]),
+    current = [entry for _kind, _id, entry in entries if entry.get("n") or entry.get("iv")
+               or entry.get("r") == discover.AVAILABLE_RULES]
+    return {"known": len(current),
+            "available": len([1 for entry in current if entry.get("n") or entry.get("iv")]),
+            "waiting": len([1 for entry in current if (entry.get("n") or entry.get("iv")) and not entry.get("ts")]),
             "today": int(state.get("count") or 0) if state.get("day") == _today() else 0,
             "finished": int(state.get("finished") or 0), "step": plan_done,
             "running": _CRAWL["thread"] is not None}
@@ -417,9 +447,11 @@ def summary_text():
     wait = discover.limited()
     limit = "; Přehraj.to teď omezuje počet dotazů – pokračuje se asi za %s" % discover._duration_text(wait + 59) \
         if wait else ""
-    return "ověřeno %d titulů, k mání %d; dnes ověřeno %d; výpisů projito %d z %d; celý průchod dokončen: %s%s%s" % (
-        info["known"], info["available"], info["today"], min(info["step"], total), total, when,
-        " (právě běží)" if info["running"] else "", limit)
+    waiting = ", z toho %d čeká na nové ověření" % info["waiting"] if info["waiting"] else ""
+    return ("prověřeno %d titulů: k mání %d%s, nenalezeno %d; dnes prověřeno %d; výpisů projito %d z %d; "
+            "celý průchod dokončen: %s%s%s") % (
+        info["known"], info["available"], waiting, info["known"] - info["available"], info["today"],
+        min(info["step"], total), total, when, " (právě běží)" if info["running"] else "", limit)
 
 
 def _fresh(kind=None):
@@ -521,7 +553,7 @@ def catalogue_tile(kind):
     name = "Seriály" if kind == "tv" else "Filmy"
     return api._card("Vše na Přehraj.to", api._target("list", "discover_index", {"kind": kind},
                                                       "%s na Přehraj.to" % name),
-                     "Ověřeno %d – seznam se plní sám" % count if count else "Seznam se plní sám na pozadí",
+                     "K mání %d – seznam se plní sám" % count if count else "Seznam se plní sám na pozadí",
                      icon="all:" + ("series" if kind == "tv" else "movies"))
 
 

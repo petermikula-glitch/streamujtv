@@ -79,7 +79,8 @@ def _snapshot(lib):
               if key.startswith(KV_PREFIXES)}
     settings = api._settings()
     return {"tables": tables, "kv": values, "favorites": app_discover.load_favorites(),
-            "settings": {key: settings[key] for key in SETTINGS if settings.get(key)}}
+            # i prázdná hodnota je volba (nejnižší kvalita „bez omezení“): ukládá se vše, co je nastavené
+            "settings": {key: settings[key] for key in SETTINGS if key in settings}}
 
 
 def _restore(lib, snapshot, owner):
@@ -244,6 +245,7 @@ def profile_switch(params):
                     snapshot = json.load(f)
             except (OSError, ValueError):
                 snapshot = {}
+            need = api._need_lines(api._prefs())
             with api._library() as lib:
                 temporary = _file(data["active"]) + ".tmp"
                 with open(temporary, "w", encoding="utf-8") as f:
@@ -252,6 +254,11 @@ def profile_switch(params):
                 _restore(lib, snapshot if isinstance(snapshot, dict) else {}, target["id"])
             data["active"] = target["id"]
             _save(data)
+            wanted = api._need_lines(api._prefs())
+            if wanted != need:
+                # Profil má jinou nejnižší kvalitu: co je „k mání“, se počítá jinak (seznam je společný).
+                app_discover.minimum_changed(need, wanted)
+                api.app_index.restart()
         return {"message": "", "close": True, "toast": "Dívá se: %s" % target["name"]}
 
     return api._exclusive(work)
@@ -409,12 +416,20 @@ def subtitle_style(params):
     return {"size": size, "background": background,
             # výstup zvuku patří k přehrávači stejně jako vzhled titulků: načítá se jedním dotazem
             "audio_output": settings.get("audio_output") if settings.get("audio_output") in AUDIO_OUTPUTS else "auto",
+            "audio_outputs": [{"id": name, "title": title, "note": note} for name, title, note in AUDIO_OUTPUT_CHOICES],
             "scale": next(scale for name, _title, scale in SUBTITLE_SIZES if name == size),
             "sizes": [{"id": name, "title": title, "scale": scale} for name, title, scale in SUBTITLE_SIZES],
             "backgrounds": [{"id": name, "title": title} for name, title in SUBTITLE_BACKGROUNDS]}
 
 
-AUDIO_OUTPUTS = ("auto", "stereo")   # auto: prostorový zvuk se předá televizi; stereo: převede ho aplikace
+# Výstup zvuku přehrávače: co se s prostorovým zvukem (5.1, 7.1) stane, než odejde do televize a soundbaru.
+AUDIO_OUTPUT_CHOICES = (
+    ("auto", "Prostorový – předat soundbaru", "Dolby a DTS dekóduje soundbar (výchozí)"),
+    ("pcm", "Prostorový – dekóduje aplikace", "Když předaný zvuk hučí, vypadává nebo mlčí"),
+    ("pcm_soft", "Prostorový s tlumenými basy", "Totéž, basový kanál asi o 8 dB tišeji – když filmy duní"),
+    ("stereo", "Stereo", "Dva kanály, výraznější řeč, bez basového kanálu"),
+)
+AUDIO_OUTPUTS = tuple(name for name, _title, _note in AUDIO_OUTPUT_CHOICES)
 
 
 def audio_output_set(params):

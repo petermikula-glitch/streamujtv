@@ -54,6 +54,12 @@
         <activity android:name=".SearchActivity" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".SettingsActivity" android:theme="@style/AppTheme.GuidedStep" />
         <activity android:name=".DiagnosticsActivity" />
+        <!-- upoutávka ve vloženém přehrávači YouTube; po skončení se vrátí na stránku titulu -->
+        <activity
+            android:name=".TrailerActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout"
+            android:hardwareAccelerated="true"
+            android:theme="@style/PlayerTheme" />
         <activity android:name=".WelcomeActivity" android:theme="@style/AppTheme.GuidedStep" />
         <!-- vstup z domovské obrazovky televize: spustí rozkoukané video; nic jiného neumí -->
         <activity

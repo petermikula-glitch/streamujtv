@@ -72,7 +72,12 @@ object Navigator {
             "diagnostics" -> activity.startActivity(Intent(activity, DiagnosticsActivity::class.java))
             "refresh" -> onChanged()  // „Zkusit znovu“: obrazovka si obsah načte znovu
             "info" -> showInfo(activity, target.title.ifEmpty { title }, target.params.optString("text"))
-            "open" -> openOutside(activity, target.params)
+            "open" -> {
+                // upoutávku z YouTube přehraje aplikace sama a po konci se vrátí; jiné odkazy jdou ven
+                val trailer = target.params.optString("youtube")
+                if (trailer.isNotEmpty()) TrailerActivity.start(activity, trailer, target.params)
+                else openOutside(activity, target.params)
+            }
             "storage" -> chooseStorage(activity, onChanged)
             "move" -> planMove(activity, target, onChanged)
             "input" -> askText(activity, title, target, onChanged)
@@ -345,7 +350,7 @@ object Navigator {
      * `packages` (podle pořadí), pak v čemkoli, co ji v televizi umí otevřít; když v ničem, zkusí
      * `fallback`, a když ani to, řekne to (`missing`).
      */
-    private fun openOutside(activity: FragmentActivity, params: org.json.JSONObject) {
+    fun openOutside(activity: FragmentActivity, params: org.json.JSONObject) {
         val packages = params.optJSONArray("packages")?.let { list ->
             (0 until list.length()).map { list.optString(it) }.filter { it.isNotEmpty() }
         }.orEmpty()

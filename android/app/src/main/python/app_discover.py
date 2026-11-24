@@ -341,13 +341,8 @@ def _known(lib, kind, ids):
     return known
 
 
-def minimum_changed(before, after):
-    """Uživatel změnil nejnižší nabízenou kvalitu (``before`` → ``after``, v řádcích; 0 = bez omezení).
-
-    Co je „k mání“, se tím počítá jinak – ale co už se zjistilo, se nezahazuje (dřív se seznam smazal
-    celý a ověřovalo se od začátku). Nalezené tituly zůstávají a jen se na pozadí ověří znovu; při
-    zpřísnění se hned skryjí ty, jejichž nejlepší známá kvalita novému požadavku nestačí. Nenalezené
-    se při zmírnění berou jako neověřené (mohou teď vyhovět), při zpřísnění platí dál."""
+def _rewrite_records(change):
+    """Projde všechny záznamy o dostupnosti a uloží ty, které ``change(záznam)`` upravila (vrátila True)."""
     with api._library() as lib, lib.conn:
         rows = lib.conn.execute("SELECT k, v FROM settings_kv WHERE k LIKE ?", (AVAILABLE_PREFIX + "%",)).fetchall()
         for key, value in rows:
@@ -359,19 +354,50 @@ def minimum_changed(before, after):
                 continue
             if isinstance(entry.get("iv"), str) and "its" not in entry:
                 entry["its"] = entry.get("ts") or 0      # údaj o iVysílání má dál své stáří
-            if entry.get("n"):
-                if after > before and int(entry.get("q") or 0) < after:
-                    entry.update(n=0, x=1)               # skrytý nastavením; nové ověření rozhodne
-                    entry.pop("miss", None)
-                entry["ts"] = 0                          # ověřit znovu (do té doby platí, co se ví)
-            elif after < before:
-                if entry.get("iv"):
-                    entry["ts"] = 0
-                else:
-                    entry["r"] = 0                       # „není tam“ platilo pro přísnější požadavek
+            if change(entry):
+                lib.conn.execute("UPDATE settings_kv SET v=? WHERE k=?", (json.dumps(entry), key))
+
+
+def minimum_changed(before, after):
+    """Uživatel změnil nejnižší nabízenou kvalitu (``before`` → ``after``, v řádcích; 0 = bez omezení).
+
+    Co je „k mání“, se tím počítá jinak – ale co už se zjistilo, se nezahazuje (dřív se seznam smazal
+    celý a ověřovalo se od začátku). Nalezené tituly zůstávají a jen se na pozadí ověří znovu; při
+    zpřísnění se hned skryjí ty, jejichž nejlepší známá kvalita novému požadavku nestačí. Nenalezené
+    se při zmírnění berou jako neověřené (mohou teď vyhovět), při zpřísnění platí dál."""
+    def change(entry):
+        if entry.get("n"):
+            if after > before and int(entry.get("q") or 0) < after:
+                entry.update(n=0, x=1)                   # skrytý nastavením; nové ověření rozhodne
+                entry.pop("miss", None)
+            entry["ts"] = 0                              # ověřit znovu (do té doby platí, co se ví)
+        elif after < before:
+            if entry.get("iv"):
+                entry.update(ts=0, x=1)                  # (``x``: až se najde, není „nově na Přehraj.to“)
             else:
-                continue
-            lib.conn.execute("UPDATE settings_kv SET v=? WHERE k=?", (json.dumps(entry), key))
+                entry["r"] = 0                           # „není tam“ platilo pro přísnější požadavek
+        else:
+            return False
+        return True
+
+    _rewrite_records(change)
+
+
+def reverify_all():
+    """Všechno se ověří znovu: nalezené tituly zůstávají vidět a přeověří se na pozadí, „nenašlo se“
+    přestává platit (titul je zase neověřený). Volá se jednou po aktualizaci, která ověřování mění –
+    dřívější záznamy mohly vzniknout v době, kdy Přehraj.to dotazy odmítalo."""
+    def change(entry):
+        if entry.get("n") or entry.get("iv"):
+            entry["ts"] = 0
+            entry.pop("miss", None)
+            if not entry.get("n"):
+                entry["x"] = 1                           # až se najde, není „nově na Přehraj.to“
+        else:
+            entry["r"] = 0
+        return True
+
+    _rewrite_records(change)
 
 
 def _fresh(known, key):
@@ -433,14 +459,18 @@ def _card_fields(item):
     return fields
 
 
-def _remember_availability(kind, tmdb_id, count, television=None, year=0, extra=None):
+def _remember_availability(kind, tmdb_id, count, television=None, year=0, extra=None, searched=True):
     """Uloží, co se o titulu zjistilo. ``television`` je pořad v iVysílání, ``""`` když tam není,
     ``None`` když se to nezjišťovalo (dřívější údaj pak zůstane). Podle roku uvedení (``year``) se
     určí, za jak dlouho se nenalezený titul ověří znovu. ``extra`` jsou další údaje záznamu: souhrn
     verzí (``_summary``) a údaje pro kartu (``_card_fields``).
 
     ``f`` v záznamu říká, odkdy je titul na Přehraj.to: nastaví se, když se titul najde poprvé po tom,
-    co tam dřív nebyl, nebo když jde o čerstvě uvedený titul. Podle něj je řada „Nově na Přehraj.to“."""
+    co tam dřív nebyl, nebo když jde o čerstvě uvedený titul. Podle něj je řada „Nově na Přehraj.to“.
+
+    ``searched=False``: na Přehraj.to se teď nehledalo, ``count`` je dřívější údaj a doplňuje se jen
+    iVysílání. Stáří údaje o Přehraj.to (``ts``, ``miss``) se pak nemění – jinak by se titul, u kterého
+    se jen znovu ověřuje iVysílání, na Přehraj.to už nikdy nehledal."""
     if not tmdb_id:
         return
     key = AVAILABLE_PREFIX + "%s:%s" % (kind, tmdb_id)
@@ -452,6 +482,13 @@ def _remember_availability(kind, tmdb_id, count, television=None, year=0, extra=
         except ValueError:
             old = None
         old = old if isinstance(old, dict) else {}
+        if not searched and old.get("r") == AVAILABLE_RULES and "n" in old:
+            kept = dict(old)
+            kept.update({name: value for name, value in (extra or {}).items() if name in ("t", "o", "y", "rd", "p", "v")})
+            if television is not None:
+                kept["iv"], kept["its"] = television, now
+            lib.set_kv(key, json.dumps(kept))
+            return
         # údaje pro kartu a souhrn zůstávají, dokud je nepřepíše čerstvější
         entry.update({name: old[name] for name in ("t", "o", "y", "rd", "p", "v", "d", "q", "s", "f") if name in old})
         entry.update(extra or {})
@@ -490,7 +527,7 @@ def _remember_availability(kind, tmdb_id, count, television=None, year=0, extra=
             if isinstance(old.get("iv"), str):
                 entry["iv"], entry["its"] = old["iv"], old.get("its") or old.get("ts") or 0
         else:
-            entry["iv"], entry["its"] = television, entry["ts"]
+            entry["iv"], entry["its"] = television, now
         lib.set_kv(key, json.dumps(entry))
 
 
@@ -549,13 +586,16 @@ def search_paused():
     return max(0.0, _PAUSED.get("prehrajto", 0) - time.time(), limited())
 
 
-def _check_available(kind, items, state, gentle=False):
+def _check_available(kind, items, state, gentle=False, patient=False):
     """Ověří tituly, u kterých aplikace dostupnost nezná: hledání na Přehraj.to (u seriálu jeho
     první díl) a jedno v iVysílání, pár titulů souběžně. Výsledek si pamatuje (viz ``_known``);
     co se zjistit nepodařilo, zůstane neznámé a zkusí se příště. Vrací čerstvý stav všech titulů.
-    ``gentle``: seznam se plní sám na pozadí, dotazy jdou pomalu."""
+    ``gentle``: seznam se plní sám na pozadí, dotazy jdou pomalu. ``patient``: když právě běží jiné
+    ověřování a nepustí, vrací ``None`` (volající to zkusí znovu), ne „co se ví“."""
     ids = [item["id"] for item in items]
     if not _CHECK_LOCK.acquire(timeout=CHECK_WAIT):
+        if patient:
+            return None
         # jiné ověřování běží moc dlouho (opuštěné výpisy): vrátit, co se ví, a nedržet další vlákno
         with api._library() as lib:
             return _known(lib, kind, ids)
@@ -566,6 +606,10 @@ def _check_available(kind, items, state, gentle=False):
         if not todo:
             return known
         client = _search_client(timeout=5)   # jeden klient pro všechna hledání (jedno přihlášení)
+        # Předvolby se berou čerstvé: vlákno na pozadí si jinak nese ty z doby, kdy začalo, a po změně
+        # nejnižší kvality by dál ukládalo výsledky podle té původní.
+        prefs = api._prefs()
+        state = dict(state, prefs=prefs)
 
         def paused(service):
             return _PAUSED.get(service, 0) > time.time() or (service == "prehrajto" and limited() > 0)
@@ -578,29 +622,36 @@ def _check_available(kind, items, state, gentle=False):
             # Přehraj.to už ověřené je a údaj platí: chybí jen iVysílání
             count = entry["n"] if entry and not entry.get("stale") else None
             extra = _card_fields(item)
+            searched = False               # hledalo se teď na Přehraj.to? (jinak je ``count`` dřívější údaj)
             if count is None and not paused("prehrajto"):
                 try:
                     count, summary = _count_versions(kind, item["id"], names, year, state, client, gentle)
                     extra.update(summary)
-                    if not count and entry and entry["n"] and time.time() - _LIMITED["last"] < LIMIT_DISTRUST:
+                    searched = True
+                    if not count and entry and entry["n"] and _distrust():
                         # Byl tam, a krátce po tom, co Přehraj.to odmítalo dotazy, se nenašel:
                         # takovému výsledku se nevěří, titul se ověří později.
                         count = None
+                except _Yield:
+                    count = None           # plnění seznamu ustoupilo; titul se ověří příště
                 except api.ApiError:
                     _PAUSED["prehrajto"] = time.time() + max(CHECK_PAUSE, limited())
-            if not paused("ivysilani"):
+            # iVysílání jen tehdy, když se výsledek uloží (údaj o Přehraj.to je): jinak by to byl dotaz nazmar
+            if count is not None and not paused("ivysilani"):
                 television = _ivys_match(kind, names, year)
                 if television is None:
                     _PAUSED["ivysilani"] = time.time() + CHECK_PAUSE
-            return item["id"], count, television, year, extra
+            return item["id"], count, television, year, extra, searched
 
         with ThreadPoolExecutor(max_workers=CHECK_WORKERS) as pool:
             results = list(pool.map(check, todo))
-        for tmdb_id, count, television, year, extra in results:
+        if api._prefs()["minimum"] != prefs["minimum"]:
+            results = []                   # nejnižší kvalita se mezitím změnila: výsledky patří té původní
+        for tmdb_id, count, television, year, extra, searched in results:
             # co se zjistilo, to se uloží; chybějící polovina (služba neodpovídala) se doplní příště
             before = known.get("%s:%s" % (kind, tmdb_id))
             if count is not None and (television is not None or before is None or before.get("stale")):
-                _remember_availability(kind, tmdb_id, count, television, year, extra)
+                _remember_availability(kind, tmdb_id, count, television, year, extra, searched=searched)
         with api._library() as lib:
             return _known(lib, kind, ids)
     finally:
@@ -648,13 +699,24 @@ def _verify_loop(state):
             _VERIFY["queue"] = [entry for entry in _VERIFY["queue"] if entry not in batch]
             _VERIFY["active"] = {key for key, _item in batch}
         try:
-            known = _check_available(kind, [item for _key, item in batch], state)
+            known = _check_available(kind, [item for _key, item in batch], state, patient=True)
         except Exception:   # vlákno na pozadí nesmí spadnout: neověřené tituly se jen chvíli nezkoušejí
             known = {}
+        if known is None:
+            # Ověřování zrovna drží plnění seznamu na pozadí (ustupuje, ale dotaz musí doběhnout):
+            # tituly, na které se člověk dívá, se kvůli tomu neoznačí za neověřitelné – zkusí se hned znovu.
+            with _VERIFY_LOCK:
+                _VERIFY["queue"][:0] = batch
+                _VERIFY["active"] = set()
+            continue
         with _VERIFY_LOCK:
+            # Co se ověřit nepodařilo – i titul, o kterém se už něco ví –, se chvíli nezkouší: jinak
+            # by ho otevřený výpis řadil do fronty znovu při každém obnovení. Když Přehraj.to dotazy
+            # odmítá (nebo se jeho výsledku zatím nevěří), čeká se, až to pomine.
+            again = time.time() + max(CHECK_PAUSE, limited(), _distrust())
             for key, _item in batch:
-                if "%s:%s" % key not in known:
-                    _VERIFY["failed"][key] = time.time() + CHECK_PAUSE
+                if not _fresh(known, "%s:%s" % key):
+                    _VERIFY["failed"][key] = again
             _VERIFY["active"] = set()
 
 
@@ -1160,7 +1222,7 @@ def _rate_limited():
         now = time.time()
         if now < _LIMITED["until"]:
             return                         # přestávka už běží (odmítnutí dotazu, na který čekal člověk)
-        again = _LIMITED["wait"] and now - _LIMITED["last"] < LIMIT_FORGET
+        again = _LIMITED["wait"] and now - _LIMITED["until"] < LIMIT_FORGET   # od konce minulé přestávky
         _LIMITED["wait"] = min(LIMIT_WAIT_MAX, _LIMITED["wait"] * 2) if again else LIMIT_WAIT
         _LIMITED.update(until=now + _LIMITED["wait"], last=now, hits=_LIMITED["hits"] + 1)
         _PACE["gentle"] = min(GENTLE_SLOWEST, _PACE["gentle"] * 1.5)
@@ -1169,6 +1231,20 @@ def _rate_limited():
 def limited():
     """Kolik sekund ještě trvá přestávka po odmítnutí dotazů; 0 = žádná."""
     return max(0.0, _LIMITED["until"] - time.time())
+
+
+def _distrust():
+    """Kolik sekund se ještě nevěří výsledku „nenašlo se“ u titulu, který na Přehraj.to byl: po dobu
+    přestávky a ``LIMIT_DISTRUST`` po jejím konci."""
+    return max(0.0, _LIMITED["until"] + LIMIT_DISTRUST - time.time()) if _LIMITED["until"] else 0.0
+
+
+class _Yield(Exception):
+    """Plnění seznamu na pozadí ustupuje: někdo čeká na výpis nebo na hledání."""
+
+
+def _someone_waits():
+    return bool(_VERIFY["queue"]) or bool(_VERIFY["active"]) or _VERIFY.get("hold", 0) > time.time()
 
 
 def gentle_pace(value=None, recover=False):
@@ -1191,7 +1267,11 @@ def _search_page(client, query, page, cursor, retries, paced=False, gentle=False
     if paced:
         if limited():
             raise provider.TemporaryError("Přehraj.to dočasně omezuje dotazy (HTTP 429) – ověřování čeká")
+        if gentle and _someone_waits():
+            raise _Yield()                 # plnění seznamu drží zámek ověřování: ať ho hned pustí
         _pace(gentle)
+        if gentle and _someone_waits():
+            raise _Yield()
     try:
         found = provider.search_catalog(client, query, page, cursor)
         if paced:
@@ -1284,8 +1364,9 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
                 found[vid] = ({"id": vid, "title": video["raw_title"], "thumb": video.get("thumb") or "",
                                "size": video.get("size") or "", "duration": video.get("duration") or 0,
                                "quality": video.get("quality") or ""}, nameparser.parse(video["raw_title"]))
-    # ``strict`` (ověřování dostupnosti): i jediný nepovedený dotaz znamená „nevím“, ne „není tam“
-    if not found and queries and (failed == len(queries) or (strict and failed)):
+    # Nic se nenašlo a aspoň jeden dotaz se nepovedl: to je „nevím“, ne „není tam“ – jinak by stránka
+    # titulu po výpadku napsala, že film na Přehraj.to není, a zapamatovala si to.
+    if not found and queries and failed:
         if not strict:
             api._remember_error("hledání na Přehraj.to", reason)   # důvod je vidět v Diagnostice
         raise api.ApiError(SEARCH_FAILED % _failure_reason(reason))
@@ -1491,6 +1572,9 @@ def _extra_actions(params, kind, info, detail):
         # odkaz youtube.com: zkrácený tvar „vnd.youtube:…“ aplikace YouTube pro televize nesnese.
         actions.append({"title": "Upoutávka", "subtitle": "", "target": {
             "type": "open", "call": "", "title": "", "params": {
+                # ``youtube``: aplikace upoutávku přehraje sama ve vloženém přehrávači YouTube a po konci
+                # se vrátí na stránku titulu; adresa a aplikace YouTube jsou záloha, kdyby to nešlo
+                "youtube": key,
                 "url": "https://www.youtube.com/watch?v=" + key, "packages": list(YOUTUBE_APPS),
                 "missing": "Upoutávku se nepodařilo otevřít: v televizi chybí aplikace YouTube."}}})
     about = _about(info, detail, extras, kind)
@@ -1628,7 +1712,7 @@ def discover_title(params):
             page["detail"]["plot"] = page["detail"]["plot"].replace(
                 NOT_FOUND, "Na Přehraj.to jsem tento film nenašel, je ale v iVysílání České televize.", 1)
     if show is not None and entry and entry["iv"] != show:
-        _remember_availability(kind, params["id"], entry["n"], show, int(params.get("year") or 0))
+        _remember_availability(kind, params["id"], entry["n"], show, int(params.get("year") or 0), searched=False)
     return page
 
 

@@ -31,8 +31,50 @@ class StereoRenderersFactory(context: Context) : DefaultRenderersFactory(context
         .build()
 }
 
+/**
+ * Výstup „Prostorový – dekóduje aplikace“: zakódovaný zvuk (Dolby, DTS) se nepředává, dekóduje ho
+ * aplikace a ven jde vícekanálový zvuk PCM tak, jak je (5.1 zůstává 5.1). Pomáhá, když soundbar nebo
+ * televize předaný formát nezvládne. S `bassGain` pod 1 hraje basový kanál (LFE) tišeji – pro
+ * soundbary, kterým filmy s výraznými basy duní.
+ */
+@OptIn(UnstableApi::class)
+class PcmRenderersFactory(context: Context, private val bassGain: Float) : DefaultRenderersFactory(context) {
+    @Suppress("DEPRECATION")  // sestavení bez kontextu je záměr: výstup pak umí jen PCM, žádné předávání formátů
+    override fun buildAudioSink(
+        context: Context,
+        enableFloatOutput: Boolean,
+        enableAudioTrackPlaybackParams: Boolean,
+    ): AudioSink {
+        val builder = DefaultAudioSink.Builder()
+        if (bassGain < 1f) builder.setAudioProcessors(arrayOf<AudioProcessor>(StereoAudio.bassTrim(bassGain)))
+        return builder.build()
+    }
+}
+
 @OptIn(UnstableApi::class)
 object StereoAudio {
+    const val SOFT_BASS = 0.4f          // basový kanál asi o 8 dB tišeji
+    private const val LFE = 3           // pořadí kanálů z dekodérů: FL FR FC LFE BL BR …
+
+    /**
+     * Váhy, které počet kanálů nemění a jen ztiší basový kanál (u zvuku se šesti a více kanály),
+     * po řádcích `[vstup * počet + výstup]`.
+     */
+    fun bassCoefficients(channels: Int, gain: Float): FloatArray {
+        val result = FloatArray(channels * channels)
+        for (index in 0 until channels) {
+            result[index * channels + index] = if (channels >= 6 && index == LFE) gain else 1f
+        }
+        return result
+    }
+
+    /** Ztišení basového kanálu pro všechny počty kanálů, které dekodéry vydávají. */
+    fun bassTrim(gain: Float): ChannelMixingAudioProcessor = ChannelMixingAudioProcessor().apply {
+        for (channels in 1..8) {
+            putChannelMixingMatrix(ChannelMixingMatrix(channels, channels, bassCoefficients(channels, gain)))
+        }
+    }
+
     private const val MAIN = 0.55f      // přední levý a pravý
     private const val CENTER = 0.45f    // střed (řeč) do obou stran: dohromady zní silněji než přední
     private const val SURROUND = 0.30f  // zadní a boční

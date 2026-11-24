@@ -418,6 +418,10 @@ class SectionFragment : RowsSupportFragment() {
         private val fetchedAt = HashMap<String, Long>()
         private val failed = HashSet<String>()
         private val waiting = HashMap<String, MutableList<() -> Unit>>()
+        // Řady, jejichž tituly se ještě ověřují: kdy si mají říct o čerstvý stav. Společné všem stránkám
+        // sekce – stránka, která dotaz spustila, mezitím často zanikne (přepnutí sekce) a nová by se
+        // bez toho už nezeptala: řada by zůstala jako obrysy karet.
+        private val due = HashMap<String, Long>()
         private const val FRESH_MS = 30_000L
 
         fun create(index: Int) = SectionFragment().apply { arguments = Bundle().apply { putInt(INDEX, index) } }
@@ -428,7 +432,31 @@ class SectionFragment : RowsSupportFragment() {
 
     override fun onDestroy() {
         later.removeCallbacksAndMessages(null)
+        scheduled.clear()
         super.onDestroy()
+    }
+
+    override fun onPause() {
+        later.removeCallbacksAndMessages(null)   // zakrytá stránka (přehrávač, jiná obrazovka) se neptá
+        scheduled.clear()
+        super.onPause()
+    }
+
+    // řady, na jejichž obnovení už tahle stránka čeká: pro každou nejvýš jeden časovač
+    private val scheduled = HashSet<String>()
+
+    /** Za `delay` ms si řada řekne o čerstvý stav – jen když je stránka vidět a už na to nečeká. */
+    private fun again(key: String, call: String, params: org.json.JSONObject, delay: Long) {
+        if (!isResumed || !scheduled.add(key)) return
+        later.postDelayed({
+            scheduled.remove(key)
+            if (isResumed) fetch(key, call, params)
+        }, delay.coerceAtLeast(500L))
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (due.isNotEmpty() && view != null) refresh()   // naváže na ověřování, které mezitím běželo
     }
 
     private val rows = ArrayObjectAdapter(ClassPresenterSelector().apply {
@@ -476,9 +504,12 @@ class SectionFragment : RowsSupportFragment() {
             } else {
                 failed.add(key)
             }
-            waiting.remove(key)?.forEach { it() }
             // řada, jejíž tituly se ještě ověřují na pozadí, si za chvíli řekne o čerstvý stav
-            if (seconds > 0) later.postDelayed({ if (isAdded) fetch(key, call, params) }, seconds * 1000L)
+            // (čas se zapisuje dřív, než se stránky překreslí: časovač si podle něj nastaví ta, která je vidět)
+            if (seconds > 0) due[key] = android.os.SystemClock.elapsedRealtime() + seconds * 1000L
+            else due.remove(key)
+            waiting.remove(key)?.forEach { it() }
+            if (seconds > 0) again(key, call, params, seconds * 1000L)
         }
     }
 
@@ -537,7 +568,12 @@ class SectionFragment : RowsSupportFragment() {
             val key = "$call|$params"
             // načíst: poprvé, po příkazu uživatele, a při změně obsahu jen když je výsledek starší
             val age = fetchedAt[key]?.let { now - it }
-            if (age == null || force || (reload && age > FRESH_MS)) fetch(key, call, params)
+            val next = due[key]   // řada se ještě ověřuje: kdy se má zeptat znovu
+            if (age == null || force || (reload && age > FRESH_MS)) {
+                fetch(key, call, params)
+            } else if (next != null && key !in waiting) {
+                again(key, call, params, next - now)
+            }
             val known = remembered[key]
             // nepovinná řada se ukáže, až když má co nabídnout (jinak by probliklo prázdné místo)
             if (row.optBoolean("optional") && known == null) continue

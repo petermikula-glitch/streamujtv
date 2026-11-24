@@ -1519,8 +1519,11 @@ def settings_set(params):
     if account[1]:
         # Jiná předvolba jazyka nebo kvality: verze, které si uživatel dřív u titulů vybral ručně,
         # by jinak zůstaly první a nabídka by se nezměnila. Nově platí pořadí podle předvoleb.
+        # U dílů seriálu volba zůstává: nese stav zhlédnutí dílu (který soubor se u něj pustil),
+        # a smazat ji by znamenalo ztratit rozkoukané řady.
         with _library() as lib, lib.conn:
-            lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE ?", (CHOICE_PREFIX + "%",))
+            lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE ? AND k NOT LIKE ?",
+                             (CHOICE_PREFIX + "%", CHOICE_PREFIX + "tv:%"))
     if account[2]:
         # Jiná nejnižší kvalita: co je „k mání“, se počítá jinak. Seznam ověřených titulů se kvůli tomu
         # nemaže – tituly se přeověří na pozadí a do té doby platí, co se o nich ví.

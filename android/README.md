@@ -202,9 +202,13 @@ z přehrávače se výběr v řadách přesune na díl, kterým se pokračuje (`
 
 Tlačítka stránky: Přehrát, Stáhnout na disk, (V iVysílání), Upoutávka, Více o filmu, Do/Z oblíbených
 a „Další“ (nabídka `menu`: Hledat ručně, Jazyk a kvalita). Když není co přehrát z Přehraj.to, nabídka
-„Další“ se rozbalí do samostatných tlačítek. „Upoutávka“ (cíl typu `open`) je trailer z TMDB (`Tmdb.extras`,
-nejraději česky nebo slovensky) a otevírá se běžným odkazem youtube.com v aplikaci YouTube – zkrácený tvar
-`vnd.youtube:` aplikace YouTube pro televize nesnese. „Více o filmu“ (cíl typu `info`) ukáže v okně celý
+„Další“ se rozbalí do samostatných tlačítek. „Upoutávka“ (cíl typu `open` s klíčem `youtube`) je trailer
+z TMDB (`Tmdb.extras`, nejraději česky nebo slovensky). Přehraje ji aplikace sama (`TrailerActivity`: vložený
+přehrávač YouTube ve WebView, hlásí se jménem balíčku aplikace) a po skončení nebo tlačítku Zpět se vrátí na
+stránku titulu – z aplikace YouTube se člověk sám nevrátil. Když vložený přehrávač nejde použít (chybí
+WebView, video vkládání nedovoluje, do 15 s se nerozběhne), otevře se upoutávka jako dřív běžným odkazem
+youtube.com v aplikaci YouTube (zkrácený tvar `vnd.youtube:` aplikace YouTube pro televize nesnese).
+„Více o filmu“ (cíl typu `info`) ukáže v okně celý
 popis, slogan, původní název, režii, obsazení a zemi (`_about`); textem jde listovat šipkami.
 Tlačítka (`FlowLayout`) se zalamují na další řádek, aby bylo každé vidět celé; popis dostane jen tolik
 řádků, kolik nad řadami karet zbývá (`fitPlot`). Nad tlačítky je řádek se souborem, který tlačítko Přehrát
@@ -235,13 +239,19 @@ výrazně kratší než film (délka z TMDB) jde do řady „Ukázky a neúplné
 které se nepodařilo přehrát, až na konec, opakovaně nahraný stejný soubor se slučuje. Verzi, kterou si
 uživatel pustil sám, si aplikace u titulu pamatuje a nabídne ji příště první.
 
-**Výstup zvuku** (`StereoAudio.kt`, volba v dialogu Zvuková stopa, nastavení `audio_output`): běžně přehrávač
-předá prostorový zvuk (Dolby, DTS, 5.1 PCM) televizi nebo soundbaru. Když to za televizí nehraje dobře – hukot,
-řeč zaniká – a jiná zvuková stopa nepomůže, protože bývá zakódovaná stejně, jde přepnout na „Stereo“: zvuk pak
-vždy dekóduje aplikace (`StereoRenderersFactory` staví výstup jen pro PCM, nic se nepředává) a prostorový
-převede na dva kanály (`ChannelMixingAudioProcessor`: střed s řečí do obou stran, zadní tišeji, basový kanál
-se vynechá). Přepnutí sestaví přehrávač znovu na stejném místě; volba platí pro celé zařízení. Tlačítko zvuku
-je proto vidět i u videa s jedinou stopou.
+**Výstup zvuku** (`StereoAudio.kt`, tlačítko „Výstup zvuku“ v dialogu Zvuková stopa, nastavení `audio_output`,
+možnosti dodává `subtitle_style` → `audio_outputs`): co se s prostorovým zvukem stane, než odejde do televize
+a soundbaru.
+- **Prostorový – předat soundbaru** (`auto`, výchozí): Dolby a DTS se pošlou zakódované, dekóduje soundbar.
+- **Prostorový – dekóduje aplikace** (`pcm`): ven jde vícekanálový zvuk PCM (5.1 zůstává 5.1;
+  `PcmRenderersFactory` staví výstup jen pro PCM, nic se nepředává). Když předaný zvuk hučí, vypadává nebo mlčí.
+- **Prostorový s tlumenými basy** (`pcm_soft`): totéž, basový kanál (LFE) hraje asi o 8 dB tišeji
+  (`StereoAudio.bassTrim`) – pro filmy, které na soundbaru duní.
+- **Stereo** (`stereo`): prostorový zvuk se převede na dva kanály (`StereoRenderersFactory`,
+  `ChannelMixingAudioProcessor`: střed s řečí do obou stran, zadní tišeji, basový kanál se vynechá).
+
+Přepnutí sestaví přehrávač znovu na stejném místě a zachová zvolenou stopu, titulky i to, jestli se hrálo
+nebo stálo; volba platí pro celé zařízení. Tlačítko zvuku je proto vidět i u videa s jedinou stopou.
 
 **Po dokoukání** (`play_next` v `app_discover.py`, panel v `PlayerActivity`): přehrávač se zeptá, co
 dál. U dílu seriálu je to další díl – z vlastního katalogu, jinak vyhledaný na Přehraj.to (u seriálu
@@ -290,7 +300,13 @@ a nejlepší známé rozlišení), údaje pro kartu a čas `f`, odkdy je titul n
 a výpis „Nově na Přehraj.to“ (`discover_fresh`; titul, který tam dřív nebyl a přibyl, nebo čerstvá novinka).
 Karty mají štítky CZ/SK (dabing) a 4K, filtr výpisu umí „jen s dabingem“. Stav je v Diagnostice, i s deníkem
 seznamu (`index:journal`, `journal_text`): odkdy se vede, změny nastavení, které se ho týkaly, a nečekaný
-úbytek záznamů (`watch`) – aby šlo poznat, proč seznam ubyl nebo začal znovu.
+úbytek záznamů (`watch`) – aby šlo poznat, proč seznam ubyl nebo začal znovu. Řádek „Seznam dostupných titulů“
+říká, kolik titulů je prověřeno, kolik z nich je k mání a kolik se nenašlo; „dnes prověřeno“ počítá jen
+tituly opravdu ověřené (ne pokusy, které skončily odmítnutím) a o půlnoci začíná od nuly.
+Po aktualizaci, která ověřování mění (`GENERATION`, `_renew`), se celý seznam jednou ověří znovu: nalezené
+tituly zůstávají vidět a přeověří se, „nenašlo se“ přestává platit a plán se projde od začátku
+(`discover.reverify_all`). Plnění seznamu ustupuje výpisu, na který se někdo dívá, i uprostřed dávky
+(`_Yield`), a údaj o iVysílání se doplňuje, aniž by posunul stáří údaje o Přehraj.to (`searched=False`).
 Přehraj.to nejde projít celé – nemá výpis všeho, jen hledání –, a tak se prochází z druhé strany: vedle
 žebříčků a žánrů i rok po roce (`YEARS_BACK` let zpátky, `YEAR_PAGES` stránek nejoblíbenějších titulů roku)
 a česká a slovenská tvorba posledních let zvlášť; nejvýš `DAILY_LIMIT` titulů denně. Co se našlo, je vidět

@@ -39,6 +39,9 @@ class ListActivity : FragmentActivity() {
         }
         supportFragmentManager.beginTransaction().replace(android.R.id.content, fragment).commitAllowingStateLoss()
     }
+
+    /** Mřížka, která je právě vidět (po výměně tvaru už ne ta, která otevřela okno s filtrem). */
+    fun current(): ListFragment? = supportFragmentManager.findFragmentById(android.R.id.content) as? ListFragment
 }
 
 /** Mřížka karet jednoho výpisu; další stránky se dotahují, jak se uživatel blíží ke konci. */
@@ -52,6 +55,7 @@ class ListFragment : VerticalGridSupportFragment() {
     private val presenter = CardPresenter(false) { card -> Navigator.menu(requireActivity(), card) { reload() } }
     private var emptyText = "Nic tu není."
     private var verifying = false   // tituly výpisu se právě ověřují na pozadí (výpis se sám obnoví)
+    private var refreshEvery = 0    // s: výpis si sám říká o obnovení (0 = ne)
     private var emptyArt = EmptyArt.NOTHING
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val refresh = Runnable { if (isResumed) reload(quiet = true) }
@@ -118,7 +122,9 @@ class ListFragment : VerticalGridSupportFragment() {
         super.onResume()
         // po návratu z přehrávače se mění rozkoukanost a zhlédnutí; výpis se obnoví v rozsahu, v jakém
         // je načtený (dlouhé výpisy ne – znamenalo by to řadu dotazů)
-        if (resumed && cards.size() <= 80) reload(quiet = true)
+        // Výpis, který se sám obnovuje (ověřování, stahování), naváže vždy: časovač se při odchodu ruší
+        // a bez toho by stavový řádek zamrzl na „zbývá ověřit…“.
+        if (resumed && (cards.size() <= 80 || refreshEvery > 0)) reload(quiet = true)
         resumed = true
     }
 
@@ -158,6 +164,11 @@ class ListFragment : VerticalGridSupportFragment() {
                     )
                 } else if (!quiet) {
                     Toast.makeText(requireContext(), result.error, Toast.LENGTH_LONG).show()
+                }
+                // Nepovedené tiché obnovení nesmí samoobnovování zastavit: zkusí se znovu (o něco později).
+                if (loaded && refreshEvery > 0) {
+                    handler.removeCallbacks(refresh)
+                    handler.postDelayed(refresh, (refreshEvery * 1000L).coerceAtLeast(5000L))
                 }
                 return@call
             }
@@ -202,7 +213,10 @@ class ListFragment : VerticalGridSupportFragment() {
     ) {
         loaded = true
         pagesLoaded = pages
-        if (list.isNotEmpty() && CardPresenter.posterShape(list) != presenter.poster) {
+        // Dokud se výpis teprve plní (ověřování) a žádná karta nemá obrázek, o tvaru se nerozhoduje:
+        // samotná karta Filtr by mřížku přepnula na šířku a první plakáty zase zpátky.
+        val undecided = data.optInt("refresh") > 0 && list.none { it.image.isNotEmpty() }
+        if (list.isNotEmpty() && !undecided && CardPresenter.posterShape(list) != presenter.poster) {
             handler.removeCallbacks(refresh)
             (activity as? ListActivity)?.show(!presenter.poster, data, params)
             return
@@ -214,6 +228,7 @@ class ListFragment : VerticalGridSupportFragment() {
         handler.removeCallbacks(refresh)
         val seconds = data.optInt("refresh")
         if (seconds > 0) handler.postDelayed(refresh, seconds * 1000L)
+        refreshEvery = seconds
         verifying = seconds > 0 && data.optString("status").isNotEmpty()
         val same = cards.size() == list.size &&
             (0 until cards.size()).all { (cards.get(it) as? Card)?.key == list[it].key }
@@ -354,30 +369,39 @@ class ListFragment : VerticalGridSupportFragment() {
             val reset = data.optJSONObject("reset")
             val names = groups.map { "${it.optString("title")}: ${it.optString("value")}" } +
                 (if (reset != null) listOf("Zrušit filtry") else emptyList())
-            android.app.AlertDialog.Builder(requireContext())
+            // Okna drží obrazovku, ne tuhle mřížku: výpis, který se právě plní, může mřížku mezitím
+            // vyměnit za jinou (jiný tvar karet) a volba pak patří té nové.
+            val host = requireActivity()
+            android.app.AlertDialog.Builder(host)
                 .setTitle(data.optString("title").ifEmpty { "Filtr" })
-                .setAdapter(Dialogs.items(requireContext(), names)) { _, which ->
-                    if (which >= groups.size) applyFilter(reset ?: return@setAdapter) else chooseFilter(groups[which])
+                .setAdapter(Dialogs.items(host, names)) { _, which ->
+                    if (which >= groups.size) shown(host).applyFilter(reset ?: return@setAdapter)
+                    else chooseFilter(host, groups[which])
                 }
                 .showStyled()
         }
     }
 
-    private fun chooseFilter(group: JSONObject) {
+    /** Mřížka, která je teď na obrazovce (viz [ListActivity.current]); jinak tahle. */
+    private fun shown(host: FragmentActivity): ListFragment = (host as? ListActivity)?.current() ?: this
+
+    private fun chooseFilter(host: FragmentActivity, group: JSONObject) {
+        if (host.isFinishing || host.isDestroyed) return
         val list = group.optJSONArray("options") ?: return
         val options = (0 until list.length()).mapNotNull { list.optJSONObject(it) }
-        android.app.AlertDialog.Builder(requireContext())
+        android.app.AlertDialog.Builder(host)
             .setTitle(group.optString("title"))
-            .setSingleChoiceItems(Dialogs.choices(requireContext(), options.map { it.optString("title") }),
+            .setSingleChoiceItems(Dialogs.choices(host, options.map { it.optString("title") }),
                 options.indexOfFirst { it.optBoolean("current") }) { dialog, which ->
                 dialog.dismiss()
-                options[which].optJSONObject("params")?.let { applyFilter(it) }
+                options[which].optJSONObject("params")?.let { shown(host).applyFilter(it) }
             }
             .showStyled()
     }
 
     /** Stejný výpis s jinými parametry, od začátku. */
     private fun applyFilter(chosen: JSONObject) {
+        if (!isAdded) return
         handler.removeCallbacks(refresh)
         params = JSONObject(chosen.toString())
         next = null
@@ -410,6 +434,7 @@ class ListFragment : VerticalGridSupportFragment() {
             val seconds = data.optInt("refresh")
             if (seconds > 0) {
                 // nově načtená stránka se ještě ověřuje: výpis se za chvíli obnoví celý
+                refreshEvery = seconds
                 verifying = data.optString("status").isNotEmpty()
                 showStatus(data.optString("status"))
                 handler.removeCallbacks(refresh)
