@@ -18,6 +18,7 @@ import shutil
 import sqlite3
 import time
 import unicodedata
+from urllib.parse import quote
 
 import provider
 
@@ -249,16 +250,30 @@ def _plain(text):
     return "".join(char for char in folded if not unicodedata.combining(char) and (char == "\n" or 32 <= ord(char) < 127))
 
 
-# Tečka uprostřed slova před písmeny („Prehraj.to“, „a@b.cz“, „www.example.com“): fotoaparát telefonu
-# takové místo v textu kódu QR pozná jako adresu webu nebo e-mail a místo textu nabídne otevřít odkaz.
-LINKLIKE_DOT = re.compile(r"(?<=[A-Za-z0-9])\.(?=[A-Za-z]{2,})")
+REPORT_SUBJECT = "Promitarna - hlaseni z diagnostiky"
+# Znaky, které smějí v odkazu mailto: zůstat, jak jsou (RFC 6068); ostatní se zapíší jako %XX.
+MAIL_SAFE = "-_.~!$'()*,;:@"
 
 
-def _unlinked(text):
-    """Text pro kód QR, ve kterém telefon nenajde odkaz: bez „http://“ a s mezerou před tečkou, za
-    kterou následuje doména („Prehraj .to“). Čte se to dál stejně, jen to není adresa."""
-    text = re.sub(r"(?i)\b(https?|ftp)://", "", text)
-    return LINKLIKE_DOT.sub(" .", text).replace("@", " @ ")
+def _mail(text):
+    """Kód QR jako rozepsaný e-mail („mailto:“ bez adresáta): fotoaparát telefonu nabídne Napsat e-mail
+    a otevře se nový e-mail s textem hlášení – ten jde odeslat i zkopírovat. U čistého textu to
+    fotoaparát iPhonu neumí (text jen ukáže). Když by byl odkaz delší než ``QR_LIMIT``, konec textu
+    se uřízne."""
+    def link(body):
+        return "mailto:?subject=%s&body=%s" % (quote(REPORT_SUBJECT, safe=MAIL_SAFE),
+                                               quote(body.replace("\n", "\r\n"), safe=MAIL_SAFE))
+
+    if len(link(text)) <= QR_LIMIT:
+        return link(text)
+    low, high = 0, len(text)          # nejdelší začátek textu, který se i s poznámkou vejde
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(link(text[:middle].rstrip() + "\n(zkraceno)")) <= QR_LIMIT:
+            low = middle
+        else:
+            high = middle - 1
+    return link(text[:low].rstrip() + "\n(zkraceno)")
 
 
 def _mark(ok):
@@ -289,11 +304,9 @@ def diagnostics_report(params):
     short += [error[:150] for error in state["errors"][:QR_ERRORS]]
     short += [("%s %s: %s" % (_mark(row.get("ok")), row.get("label"), row.get("value")))[:70]
               for row in everything if row.get("ok") is not False]
-    # Kód QR nesmí obsahovat nic, co telefon pozná jako odkaz: jinak místo textu hlášení nabídne
-    # otevřít web (např. řádek „Prehraj.to: …“ vedl na stránku Přehraj.to).
-    code = _unlinked(_plain("\n".join(short)))
-    if len(code) > QR_LIMIT:
-        code = code[:QR_LIMIT - 12].rstrip() + "\n(zkraceno)"
+    # Kód QR je rozepsaný e-mail: čistý text fotoaparát iPhonu jen ukáže a nedá zkopírovat, a když
+    # v něm najde něco jako adresu („Prehraj.to: …“), nabídne místo textu otevřít web.
+    code = _mail(_plain("\n".join(short)))
     saved, where = "", ""
     name = REPORT_PREFIX + time.strftime("%Y%m%d-%H%M%S") + ".txt"
     for place in params.get("dirs") or []:

@@ -119,7 +119,8 @@ class DiagnosticsActivity : FragmentActivity() {
             textSize = 15f
             setTextColor(ContextCompat.getColor(this@DiagnosticsActivity, R.color.text_primary))
             setPadding(0, side / 2, 0, 0)
-            text = "Namiřte na kód fotoaparát telefonu: ukáže text hlášení, který jde zkopírovat a poslat.\n" +
+            text = "Namiřte na kód fotoaparát telefonu a klepněte na „Napsat e-mail“: otevře se nový e-mail " +
+                "s textem hlášení, který můžete odeslat nebo zkopírovat.\n" +
                 (if (saved.isNotEmpty()) "Celé hlášení je i v souboru $saved (${data.optString("where")})."
                  else "Soubor se neuložil – není disk, na který by šlo zapsat.")
         }, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT,

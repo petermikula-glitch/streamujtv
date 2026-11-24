@@ -180,7 +180,8 @@ Zkontrolovat aktualizace.
 Diagnostika (Nástroje) ukazuje stav účtu, připojení a poslední chyby. Má tři tlačítka:
 Zkontrolovat znovu.
 Zkouška Přehraj.to – ověří, jestli hledání na Přehraj.to vrací to, co má.
-Hlášení – ukáže kód QR; telefon ho přečte fotoaparátem a text můžete poslat tomu, kdo aplikaci spravuje.
+Hlášení – ukáže kód QR. Namiřte na něj fotoaparát telefonu a klepněte na „Napsat e-mail“: otevře \
+se nový e-mail s textem hlášení, který můžete poslat tomu, kdo aplikaci spravuje, nebo zkopírovat.
 
 Když film nejde přehrát: zkuste jinou verzi z řady „Verze na Přehraj.to“. Když zvuk hučí nebo nesedí \
 na ústa: v přehrávači Zvuková stopa → Výstup zvuku. Když výpis hlásí, že Přehraj.to omezuje dotazy: \

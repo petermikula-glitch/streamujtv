@@ -470,7 +470,10 @@ Tři tlačítka: znovu zkontrolovat, zkouška Přehraj.to a hlášení.
   k přehrání), a tím odliší chybu aplikace od změny webu. Během přestávky po HTTP 429 se neprovádí.
 - **Hlášení** (`diagnostics_report`): celá diagnostika jako text – do souboru `promitarna-hlaseni-<datum>.txt`
   na disku (stejná složka jako zálohy) a zkráceně bez diakritiky do kódu QR (knihovna ZXing, jen kodér),
-  který přečte fotoaparát telefonu. Není pak potřeba fotit obrazovku.
+  který přečte fotoaparát telefonu. Není pak potřeba fotit obrazovku. Kód je rozepsaný e-mail
+  (`mailto:?subject=…&body=…` bez adresáta, nejvýš `QR_LIMIT` znaků i s kódováním %XX): fotoaparát
+  nabídne Napsat e-mail a text hlášení jde odeslat nebo zkopírovat. Čistý text fotoaparát iPhonu
+  jen ukáže a nedá zkopírovat a v řádku „Prehraj.to: …“ najde odkaz na web (verze 0.28.0).
 
 **Ochrana katalogu** (`app_health.py`): po otevření aplikace se nejvýš jednou za `SNAPSHOT_EVERY` uloží kopie
 katalogu do `snapshots/` v datech aplikace (zálohovacím rozhraním SQLite, před uložením se zkontroluje,

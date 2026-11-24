@@ -6,6 +6,7 @@ import sys
 import time
 
 import pytest
+from urllib.parse import unquote
 
 import ivysilani
 import nameparser
@@ -3649,12 +3650,16 @@ def test_report_is_saved_and_fits_a_code_for_the_phone(api, tmp_path, monkeypatc
     assert "ž" * 200 in report["text"]                                       # v souboru jsou chyby celé
     code = report["qr"]
     assert len(code) <= health.QR_LIMIT and all(ord(char) < 128 for char in code)   # kód jen ze základních znaků
-    assert code.startswith("Promitarna ") and "Aplikace: 0.26.0" in code and "Pelisky: zdroj neodpovida" in code
-    assert "! Prehraj .to: neprihlaseno" in code                             # co je špatně, je v kódu celé
-    # Nic, co telefon pozná jako odkaz nebo e-mail: jinak místo textu nabídne otevřít web Přehraj.to.
-    assert not re.search(r"[A-Za-z0-9]\.[A-Za-z]{2}|://|\S@\S|www\.", code), code
-    assert health._unlinked("Prehraj.to a@b.cz https://www.example.com/x v0.28.0 1.5 Mb/s") == (
-        "Prehraj .to a @ b .cz www .example .com/x v0.28.0 1.5 Mb/s")
+    # Kód je rozepsaný e-mail bez adresáta: telefon otevře nový e-mail s textem hlášení (iPhone čistý
+    # text jen ukáže a nedá zkopírovat; a když v něm najde „Prehraj.to“, nabídne místo textu web).
+    assert code.startswith("mailto:?subject=Promitarna%20-%20hlaseni") and code.count("&") == 1
+    assert not re.search(r"[\s#?/]", code.split("?", 1)[1])                 # jen znaky, které do odkazu smějí
+    body = unquote(code.split("&body=", 1)[1])
+    assert body.startswith("Promitarna ") and "Aplikace: 0.26.0" in body and "Pelisky: zdroj neodpovida" in body
+    assert "\r\n! Prehraj.to: neprihlaseno" in body                          # co je špatně, je v kódu celé
+    assert body.endswith("(zkraceno)")                                        # dlouhé hlášení se uřízne, ale vejde se
+    short = health._mail("Kratky text & dalsi = 100 % #1?")
+    assert unquote(short.split("&body=", 1)[1]) == "Kratky text & dalsi = 100 % #1?"
     nowhere = api("diagnostics_report", device=device, dirs=[])
     assert nowhere["saved"] == "" and nowhere["qr"]                          # bez disku aspoň kód
 
