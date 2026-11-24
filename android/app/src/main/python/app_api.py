@@ -727,6 +727,9 @@ def home(params):
                            dict(QUALITY_CHOICES)[state["prefs"]["quality"]]), icon="settings:movies"),
         _card("Profil: %s" % profile["name"], _target("list", "profiles", {}, "Kdo se dívá?"),
               "Přepnout nebo přidat profil", "res:avatar_" + profile["avatar"], wide=True),
+        # záloha: kam se uloží, vybírá aplikace (zná připojené disky); co v ní je, řeší ``app_backup``
+        _card("Záloha a obnova", _target("backup"), "Data aplikace do souboru na disku a zpět",
+              icon="folder:history"),
         _card("Diagnostika", _target("diagnostics"), "Stav účtu, připojení a poslední chyby",
               icon="settings:history"),
     ]}]
@@ -2756,10 +2759,12 @@ def update_check(params):
 import app_discover  # noqa: E402 – až po definicích výše: modul používá pomocné funkce odsud
 import app_extras  # noqa: E402
 import app_index  # noqa: E402
+import app_backup  # noqa: E402
 
 ACTIONS = dict(app_discover.ACTIONS)
 ACTIONS.update(app_extras.ACTIONS)
 ACTIONS.update(app_index.ACTIONS)
+ACTIONS.update(app_backup.ACTIONS)
 ACTIONS.update({
     "downloads": downloads, "download_add": download_add, "download_next": download_next,
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,

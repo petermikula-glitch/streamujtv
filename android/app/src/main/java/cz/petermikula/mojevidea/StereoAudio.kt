@@ -9,45 +9,50 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.ForwardingAudioSink
 
 /**
- * Výstup zvuku „Stereo“: zvuk dekóduje aplikace a prostorový (5.1, 7.1) převede na dva kanály.
+ * Výstup zvuku přehrávače podle volby uživatele (`mode`) a posun zvuku vůči obrazu (`shiftUs`).
  *
- * Běžně přehrávač předá prostorový zvuk (Dolby, DTS) tak, jak je, televizi nebo soundbaru. Když ho
- * zařízení za televizí nezvládne nebo ho hraje jen dvěma reproduktory bez přepočtu, je slyšet hukot
- * a řeč zaniká – a přepnutí na jinou zvukovou stopu nepomůže, protože i ta bývá zakódovaná stejně.
- * V tomto režimu se proto ven posílá vždy obyčejný stereo zvuk: nic se nepředává, kanály se smíchají
- * tady (střed s řečí do obou stran, zadní tišeji, basový kanál se vynechá).
+ * - `auto`: prostorový zvuk (Dolby, DTS) se předá tak, jak je, televizi nebo soundbaru.
+ * - `pcm`: zakódovaný zvuk se nepředává, dekóduje ho aplikace a ven jde vícekanálový zvuk PCM (5.1
+ *   zůstává 5.1). Pomáhá, když soundbar nebo televize předaný formát nezvládne.
+ * - `pcm_soft`: totéž, jen basový kanál (LFE) hraje tišeji – pro soundbary, kterým filmy duní.
+ * - `stereo`: prostorový zvuk se převede na dva kanály (střed s řečí do obou stran, zadní tišeji,
+ *   basový kanál se vynechá).
+ *
+ * Posun: soundbar zvuk zpracovává a zní pak později než obraz (nebo naopak). Přehrávač se řídí
+ * časem zvuku, a tak stačí ten čas posunout – obraz i titulky se o tolik pozdrží nebo předběhnou.
  */
 @OptIn(UnstableApi::class)
-class StereoRenderersFactory(context: Context) : DefaultRenderersFactory(context) {
+class AudioRenderersFactory(
+    context: Context,
+    private val mode: String,
+    private val shiftUs: () -> Long,
+) : DefaultRenderersFactory(context) {
     @Suppress("DEPRECATION")  // sestavení bez kontextu je záměr: výstup pak umí jen PCM, žádné předávání formátů
     override fun buildAudioSink(
         context: Context,
         enableFloatOutput: Boolean,
         enableAudioTrackPlaybackParams: Boolean,
-    ): AudioSink = DefaultAudioSink.Builder()
-        .setAudioProcessors(arrayOf<AudioProcessor>(StereoAudio.mixer()))
-        .build()
+    ): AudioSink? {
+        val sink = when (mode) {
+            "stereo" -> DefaultAudioSink.Builder().setAudioProcessors(arrayOf<AudioProcessor>(StereoAudio.mixer())).build()
+            "pcm" -> DefaultAudioSink.Builder().build()
+            "pcm_soft" -> DefaultAudioSink.Builder()
+                .setAudioProcessors(arrayOf<AudioProcessor>(StereoAudio.bassTrim(StereoAudio.SOFT_BASS))).build()
+            else -> super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+        } ?: return null
+        return ShiftedAudioSink(sink, shiftUs)
+    }
 }
 
-/**
- * Výstup „Prostorový – dekóduje aplikace“: zakódovaný zvuk (Dolby, DTS) se nepředává, dekóduje ho
- * aplikace a ven jde vícekanálový zvuk PCM tak, jak je (5.1 zůstává 5.1). Pomáhá, když soundbar nebo
- * televize předaný formát nezvládne. S `bassGain` pod 1 hraje basový kanál (LFE) tišeji – pro
- * soundbary, kterým filmy s výraznými basy duní.
- */
+/** Výstup zvuku, který hlásí čas posunutý o `shiftUs` (kladné: zvuk zní později, obraz na něj počká). */
 @OptIn(UnstableApi::class)
-class PcmRenderersFactory(context: Context, private val bassGain: Float) : DefaultRenderersFactory(context) {
-    @Suppress("DEPRECATION")  // sestavení bez kontextu je záměr: výstup pak umí jen PCM, žádné předávání formátů
-    override fun buildAudioSink(
-        context: Context,
-        enableFloatOutput: Boolean,
-        enableAudioTrackPlaybackParams: Boolean,
-    ): AudioSink {
-        val builder = DefaultAudioSink.Builder()
-        if (bassGain < 1f) builder.setAudioProcessors(arrayOf<AudioProcessor>(StereoAudio.bassTrim(bassGain)))
-        return builder.build()
+private class ShiftedAudioSink(sink: AudioSink, private val shiftUs: () -> Long) : ForwardingAudioSink(sink) {
+    override fun getCurrentPositionUs(sourceEnded: Boolean): Long {
+        val position = super.getCurrentPositionUs(sourceEnded)
+        return if (position == AudioSink.CURRENT_POSITION_NOT_SET) position else position - shiftUs()
     }
 }
 

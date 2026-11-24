@@ -91,6 +91,9 @@ class PlayerActivity : FragmentActivity() {
     private var audioChoice = ""
     // výstup zvuku: auto (prostorový zvuk se předává) | pcm, pcm_soft (dekóduje aplikace, 5.1 zůstává) | stereo
     private var audioMode = "auto"
+    // posun zvuku vůči obrazu (ms; kladné = zvuk zní později): pro každý výstup zvlášť, platí hned
+    private var audioDelays = JSONObject()
+    @Volatile private var audioDelayMs = 0
     private var appliedAudioMode = ""     // s jakým výstupem je sestavený přehrávač, který právě hraje
     // Co si nově sestavený přehrávač (jiný výstup zvuku) převezme od dosavadního: zvolenou stopu
     // a titulky, a jestli se hrálo nebo stálo.
@@ -179,6 +182,8 @@ class PlayerActivity : FragmentActivity() {
             result.data?.let { style ->
                 applySubtitleStyle(style)
                 audioMode = style.optString("audio_output").ifEmpty { "auto" }
+                audioDelays = style.optJSONObject("audio_delays") ?: JSONObject()
+                audioDelayMs = audioDelays.optInt(audioMode)
                 // přehrávač už mezitím hraje s jiným výstupem zvuku: sestavit ho znovu na stejném místě
                 if (player != null && audioMode != appliedAudioMode) rebuild()
             }
@@ -328,12 +333,7 @@ class PlayerActivity : FragmentActivity() {
         // Ostatní výstupy zvuku: dekóduje vždy aplikace a ven jde PCM – 5.1 beze změny, s tišším basovým
         // kanálem, nebo převedené na dva kanály (viz StereoAudio.kt).
         appliedAudioMode = audioMode
-        val renderers = (when (audioMode) {
-            "stereo" -> StereoRenderersFactory(this)
-            "pcm" -> PcmRenderersFactory(this, 1f)
-            "pcm_soft" -> PcmRenderersFactory(this, StereoAudio.SOFT_BASS)
-            else -> DefaultRenderersFactory(this)
-        })
+        val renderers = AudioRenderersFactory(this, audioMode) { audioDelayMs * 1000L }
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
         val exo = ExoPlayer.Builder(this, renderers)
@@ -604,11 +604,75 @@ class PlayerActivity : FragmentActivity() {
                 val mode = options[which].optString("id")
                 if (mode.isEmpty() || mode == audioMode) return@setSingleChoiceItems
                 audioMode = mode
+                audioDelayMs = audioDelays.optInt(mode)
                 Api.send("audio_output_set", JSONObject().put("mode", mode))
                 Toast.makeText(this, "Zvuk: " + options[which].optString("title"), Toast.LENGTH_LONG).show()
                 rebuild()
             }
+            .setNeutralButton("Posun zvuku: " + delayText(audioDelayMs)) { _, _ -> chooseAudioDelay() }
             .showStyled()
+    }
+
+    private fun delayText(ms: Int): String = if (ms == 0) "žádný" else (if (ms > 0) "+" else "−") + "${kotlin.math.abs(ms)} ms"
+
+    /**
+     * Posun zvuku vůči obrazu: soundbar zvuk zpracovává, a tak bývá slyšet později, než se hýbou ústa.
+     * Každé stisknutí posune o krok a změna platí hned, takže se dá ladit při řeči na obraze. Ukládá
+     * se pro zvolený výstup zvuku (předaný a dekódovaný zvuk zpožďuje soundbar různě).
+     */
+    private fun chooseAudioDelay() {
+        val limits = subtitleStyle?.optJSONObject("audio_delay")
+        val step = limits?.optInt("step", 25) ?: 25
+        val lowest = limits?.optInt("min", -300) ?: -300
+        val highest = limits?.optInt("max", 600) ?: 600
+        val padding = (20 * resources.displayMetrics.density).toInt()
+        val value = android.widget.TextView(this).apply {
+            textSize = 18f
+            setTextColor(androidx.core.content.ContextCompat.getColor(this@PlayerActivity, R.color.text_primary))
+            setPadding(0, 0, 0, padding / 2)
+        }
+        val later = Button(this, null, 0, R.style.TitleButton).apply { text = "Zvuk je slyšet pozdě  →  +$step ms" }
+        val sooner = Button(this, null, 0, R.style.TitleButton).apply { text = "Zvuk je slyšet brzy  →  −$step ms" }
+        val none = Button(this, null, 0, R.style.TitleButton).apply { text = "Bez posunu" }
+        fun show() {
+            value.text = "Posun: ${delayText(audioDelayMs)}" + when {
+                audioDelayMs > 0 -> " – obraz čeká na zvuk"
+                audioDelayMs < 0 -> " – obraz jde napřed"
+                else -> ""
+            }
+        }
+        fun set(ms: Int) {
+            audioDelayMs = ms.coerceIn(lowest, highest)   // přehrávač si hodnotu čte průběžně: platí hned
+            audioDelays.put(audioMode, audioDelayMs)
+            Api.send("audio_delay_set", JSONObject().put("mode", audioMode).put("ms", audioDelayMs))
+            show()
+        }
+        later.setOnClickListener { set(audioDelayMs + step) }
+        sooner.setOnClickListener { set(audioDelayMs - step) }
+        none.setOnClickListener { set(0) }
+        val content = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(padding, padding / 2, padding, 0)
+            val spaced = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = padding / 2 }
+            addView(value)
+            addView(later, spaced)
+            addView(sooner, spaced)
+            addView(none, spaced)
+        }
+        show()
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Posun zvuku · " + audioOutputTitle(audioMode).substringBefore(" –"))
+            .setView(content)
+            .setPositiveButton("Hotovo", null)
+            .create()
+        // okno u kraje a bez ztmavení obrazu, aby bylo vidět na ústa
+        dialog.window?.setGravity(android.view.Gravity.BOTTOM or android.view.Gravity.END)
+        dialog.window?.setDimAmount(0f)
+        dialog.show()
+        Dialogs.polish(dialog)
+        later.requestFocus()
     }
 
     /** Sestaví přehrávač znovu (jiný výstup zvuku) a pokračuje tam, kde se hrálo. */

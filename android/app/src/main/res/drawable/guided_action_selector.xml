@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vybraný řádek v Nastavení a v průvodci: stejné zvýraznění jako v nabídkách (rumělkový pruh
+     vlevo a tónovaný podklad). Knihovna ho jinak jen zesvětlí, a to na světlém papíře není vidět. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/dialog_item_selector" android:state_focused="true" />
+    <item android:drawable="@android:color/transparent" />
+</selector>

@@ -417,6 +417,9 @@ def subtitle_style(params):
             # výstup zvuku patří k přehrávači stejně jako vzhled titulků: načítá se jedním dotazem
             "audio_output": settings.get("audio_output") if settings.get("audio_output") in AUDIO_OUTPUTS else "auto",
             "audio_outputs": [{"id": name, "title": title, "note": note} for name, title, note in AUDIO_OUTPUT_CHOICES],
+            # posun zvuku vůči obrazu (ms) pro každý výstup zvlášť: soundbar zpožďuje předaný a dekódovaný zvuk různě
+            "audio_delays": _audio_delays(settings),
+            "audio_delay": {"min": AUDIO_DELAY_MIN, "max": AUDIO_DELAY_MAX, "step": AUDIO_DELAY_STEP},
             "scale": next(scale for name, _title, scale in SUBTITLE_SIZES if name == size),
             "sizes": [{"id": name, "title": title, "scale": scale} for name, title, scale in SUBTITLE_SIZES],
             "backgrounds": [{"id": name, "title": title} for name, title in SUBTITLE_BACKGROUNDS]}
@@ -430,6 +433,42 @@ AUDIO_OUTPUT_CHOICES = (
     ("stereo", "Stereo", "Dva kanály, výraznější řeč, bez basového kanálu"),
 )
 AUDIO_OUTPUTS = tuple(name for name, _title, _note in AUDIO_OUTPUT_CHOICES)
+
+
+AUDIO_DELAY_MIN, AUDIO_DELAY_MAX, AUDIO_DELAY_STEP = -300, 600, 25   # ms; kladné = zvuk zní později než obraz
+
+
+def _audio_delays(settings):
+    saved = settings.get("audio_delays")
+    saved = saved if isinstance(saved, dict) else {}
+    delays = {}
+    for mode in AUDIO_OUTPUTS:
+        value = saved.get(mode)
+        value = value if isinstance(value, int) and not isinstance(value, bool) else 0
+        delays[mode] = max(AUDIO_DELAY_MIN, min(AUDIO_DELAY_MAX, value))
+    return delays
+
+
+def audio_delay_set(params):
+    """Posun zvuku vůči obrazu pro daný výstup zvuku (platí pro celé zařízení, jako výstup sám).
+
+    Kladná hodnota znamená, že zvuk ze soundbaru zní později než obraz: přehrávač o tolik pozdrží
+    obraz i titulky. Záporná naopak."""
+    mode = params.get("mode")
+    try:
+        value = int(params.get("ms"))
+    except (TypeError, ValueError):
+        value = None
+    if mode in AUDIO_OUTPUTS and value is not None:
+        value = max(AUDIO_DELAY_MIN, min(AUDIO_DELAY_MAX, value))
+
+        def change(settings):
+            delays = _audio_delays(settings)
+            delays[mode] = value
+            settings["audio_delays"] = delays
+
+        api._change_settings(change)
+    return {"audio_delays": _audio_delays(api._settings())}
 
 
 def audio_output_set(params):
@@ -533,5 +572,5 @@ ACTIONS = {
     "profile_rename": profile_rename, "profile_avatar": profile_avatar, "profile_delete": profile_delete,
     "profile_switch": profile_switch, "watch_next": watch_next, "track_prefs": track_prefs,
     "download_season": download_season, "subtitle_style": subtitle_style, "subtitle_style_set": subtitle_style_set,
-    "audio_output_set": audio_output_set,
+    "audio_output_set": audio_output_set, "audio_delay_set": audio_delay_set,
 }

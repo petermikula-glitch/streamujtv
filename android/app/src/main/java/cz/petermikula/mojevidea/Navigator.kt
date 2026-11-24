@@ -79,6 +79,7 @@ object Navigator {
                 else openOutside(activity, target.params)
             }
             "storage" -> chooseStorage(activity, onChanged)
+            "backup" -> Backup.open(activity, onChanged)
             "move" -> planMove(activity, target, onChanged)
             "input" -> askText(activity, title, target, onChanged)
             "choices" -> showChoices(activity, target, onChanged)

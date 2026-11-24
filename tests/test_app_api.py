@@ -30,6 +30,7 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(app_api.app_discover, "GENTLE_PACE", 0)
     app_api.app_discover._PACE.update(interval=0, next=0, gentle=0)
     app_api.app_discover._LIMITED.update(until=0.0, wait=0, last=0.0, hits=0)   # Přehraj.to dotazy neomezuje
+    app_api.app_index._CRAWL["stop"] = False                                    # (obnova ze zálohy plnění seznamu zastavuje)
     service = FakeService()
     monkeypatch.setattr(ivysilani.urllib.request, "build_opener", lambda *handlers: service)
     monkeypatch.setattr(app_api.provider, "make_client",
@@ -117,7 +118,7 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
                                                     "params": {"cid": "3976"}, "title": "Seriály"}
     tools = _section(api, "tools")["Nástroje"]
     assert [item["target"]["type"] for item in tools] == ["search", "list", "command", "command", "settings",
-                                                          "choices", "list", "diagnostics"]
+                                                          "choices", "list", "backup", "diagnostics"]
     assert tools[5]["title"] == "Jazyk a kvalita přehrávání" and tools[5]["subtitle"] == "Český nebo slovenský dabing · Nejvyšší dostupná"
     assert tools[6]["title"] == "Profil: Hlavní profil" and tools[6]["image"] == "res:avatar_clapper"
     assert tools[1]["target"]["call"] == "downloads"
@@ -3276,6 +3277,82 @@ def test_viewed_list_is_not_given_up_when_the_crawl_holds_the_check(api, monkeyp
     discover._VERIFY["thread"].join(10)
     listing = api("discover", kind="movie", category="popular")
     assert _titles(listing["items"]) == ["Filtr", "Film 0"] and "status" not in listing
+
+
+def test_audio_delay_is_kept_for_each_output(api):
+    style = api("subtitle_style")
+    assert style["audio_delays"] == {"auto": 0, "pcm": 0, "pcm_soft": 0, "stereo": 0}
+    assert style["audio_delay"] == {"min": -300, "max": 600, "step": 25}
+    assert api("audio_delay_set", mode="auto", ms=125)["audio_delays"]["auto"] == 125
+    assert api("audio_delay_set", mode="pcm", ms=5000)["audio_delays"]["pcm"] == 600      # v mezích
+    assert api("audio_delay_set", mode="stereo", ms=-999)["audio_delays"]["stereo"] == -300
+    assert api("audio_delay_set", mode="nesmysl", ms=50)["audio_delays"] == api("subtitle_style")["audio_delays"]
+    assert api("audio_delay_set", mode="auto", ms="x")["audio_delays"]["auto"] == 125      # nesmysl nic nezmění
+    assert api("subtitle_style")["audio_delays"] == {"auto": 125, "pcm": 600, "pcm_soft": 0, "stereo": -300}
+
+
+def test_backup_and_restore_bring_everything_back(api, tmp_path, monkeypatch):
+    """Záloha nese katalog, historii, seznam dostupných titulů, nastavení, oblíbené i profily – jen ne heslo.
+    Obnova vrátí stav z doby zálohy a přihlášení v zařízení nechá být."""
+    import zipfile
+    discover, backup = app_api.app_discover, app_api.app_backup
+    monkeypatch.setattr(discover, "BACKGROUND", False)
+    _fill()
+    api("settings_set", username="ja@example.cz", password="tajne", prefer_quality="1080", min_quality="1080")
+    discover._remember_availability("movie", 11, 2, "", 1999, {"t": "Pelíšky", "d": "cz", "q": 1080, "s": 0})
+    discover._save_favorites({"movie:11": {"title": "Pelíšky"}})
+    api("profile_add", avatar="owl", text="Druhý")
+    api("progress_save", track=REF, position=600, total=6000, started=True)
+    disk = tmp_path / "usb" / "Promitarna"
+    saved = api("backup_export", dir=str(disk), version="0.24.1")
+    assert "Heslo k Přehraj.to v ní není" in saved["message"] and saved["path"].endswith(".zip")
+    with zipfile.ZipFile(saved["path"]) as archive:
+        names = set(archive.namelist())
+        settings = json.loads(archive.read("settings.json").decode("utf-8"))
+    assert {"backup.json", "catalog.db", "settings.json", "favorites.json", "profiles.json"} <= names
+    assert "password" not in settings and settings["username"] == "ja@example.cz"
+    assert not [name for name in os.listdir(str(disk)) if name.endswith(".tmp")]
+
+    listed = api("backup_list", dirs=[{"dir": str(disk), "label": "USB disk"}, {"dir": str(tmp_path / "neni")}])
+    assert [entry["path"] for entry in listed["backups"]] == [saved["path"]]
+    assert "verze 0.24.1" in listed["backups"][0]["title"] and listed["backups"][0]["title"].endswith("USB disk")
+
+    # po záloze se všechno změní nebo ztratí
+    with app_api._library() as lib, lib.conn:
+        lib.clear()
+        lib.conn.execute("DELETE FROM settings_kv WHERE k LIKE 'avail:%'")
+    discover._save_favorites({})
+    api("settings_set", password="nove-heslo", prefer_quality="best", min_quality="")
+    restored = api("backup_import", path=saved["path"])
+    assert restored["restart"] and "jsou obnovená" in restored["message"]
+    with app_api._library() as lib:
+        assert lib.count_videos() == 5 and lib.resume_points([REF])[REF][0] == 600
+        assert discover._known(lib, "movie", [11])["movie:11"]["n"] == 2
+    assert list(discover.load_favorites()) == ["movie:11"]
+    now = app_api._settings()
+    assert now["prefer_quality"] == "1080" and now["min_quality"] == "1080"
+    assert now["password"] == "nove-heslo" and now["username"] == "ja@example.cz"   # přihlášení v zařízení zůstalo
+    assert [profile["name"] for profile in app_api.app_extras._load()["profiles"]][-1] == "Druhý"
+
+    # co zálohou není, se odmítne a nic nezmění; cizí soubory v archivu se neobnovují
+    wrong = tmp_path / "promitarna-zaloha-x.zip"
+    with zipfile.ZipFile(str(wrong), "w") as archive:
+        archive.writestr("backup.json", json.dumps({"app": "neco-jineho"}))
+        archive.writestr("catalog.db", b"x")
+    assert api.raw("backup_import", path=str(wrong))["ok"] is False
+    assert api("backup_list", dirs=[{"dir": str(tmp_path)}])["backups"] == []
+    newer = tmp_path / "promitarna-zaloha-y.zip"
+    with zipfile.ZipFile(saved["path"]) as source, zipfile.ZipFile(str(newer), "w") as archive:
+        for name in source.namelist():
+            data = source.read(name)
+            if name == "backup.json":
+                data = json.dumps(dict(json.loads(data.decode("utf-8")), schema=999)).encode("utf-8")
+            archive.writestr(name, data)
+        archive.writestr("../evil.json", "{}")
+        archive.writestr("cookies.lwp", "x")
+    answer = api.raw("backup_import", path=str(newer))
+    assert answer["ok"] is False and "novější verze" in answer["error"]
+    assert not os.path.exists(str(tmp_path / "evil.json"))
 
 
 def test_found_title_survives_misses_that_come_together(api, monkeypatch):

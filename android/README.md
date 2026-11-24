@@ -244,14 +244,31 @@ možnosti dodává `subtitle_style` → `audio_outputs`): co se s prostorovým z
 a soundbaru.
 - **Prostorový – předat soundbaru** (`auto`, výchozí): Dolby a DTS se pošlou zakódované, dekóduje soundbar.
 - **Prostorový – dekóduje aplikace** (`pcm`): ven jde vícekanálový zvuk PCM (5.1 zůstává 5.1;
-  `PcmRenderersFactory` staví výstup jen pro PCM, nic se nepředává). Když předaný zvuk hučí, vypadává nebo mlčí.
+  `AudioRenderersFactory` staví výstup jen pro PCM, nic se nepředává). Když předaný zvuk hučí, vypadává nebo mlčí.
 - **Prostorový s tlumenými basy** (`pcm_soft`): totéž, basový kanál (LFE) hraje asi o 8 dB tišeji
   (`StereoAudio.bassTrim`) – pro filmy, které na soundbaru duní.
-- **Stereo** (`stereo`): prostorový zvuk se převede na dva kanály (`StereoRenderersFactory`,
+- **Stereo** (`stereo`): prostorový zvuk se převede na dva kanály (
   `ChannelMixingAudioProcessor`: střed s řečí do obou stran, zadní tišeji, basový kanál se vynechá).
 
 Přepnutí sestaví přehrávač znovu na stejném místě a zachová zvolenou stopu, titulky i to, jestli se hrálo
 nebo stálo; volba platí pro celé zařízení. Tlačítko zvuku je proto vidět i u videa s jedinou stopou.
+
+**Posun zvuku** (tlačítko v okně Výstup zvuku, `audio_delay_set`, nastavení `audio_delays`): soundbar zvuk
+zpracovává a ten pak zní později, než se hýbou ústa. Posun po krocích 25 ms (−300 až +600 ms) platí hned,
+takže se ladí při řeči na obraze, a pamatuje se pro každý výstup zvuku zvlášť (předaný a dekódovaný zvuk
+zpožďuje soundbar různě). Přehrávač se řídí časem zvuku; `ShiftedAudioSink` ten čas posune, a obraz
+i titulky se tak o zvolenou dobu pozdrží (kladný posun) nebo předběhnou (záporný).
+
+**Záloha a obnova** (dlaždice v Nástrojích, `app_backup.py`, `Backup.kt`): jeden soubor
+`promitarna-zaloha-<datum>.zip` s věrnou kopií katalogu (videa, metadata, historie, zhlédnuto, seznam
+dostupných titulů) a se soubory nastavení, oblíbených a profilů. Heslo k Přehraj.to v záloze není (soubor
+leží na disku, který jde odnést); při obnově zůstane přihlášení, které v zařízení je. Seznam stažených
+souborů se nezálohuje. Obnova nahradí katalog celý (přes zálohovací rozhraní SQLite, starší záloha se hned
+převede), přepíše soubory a aplikace začne znovu od hlavní obrazovky; záloha z novější verze aplikace se
+odmítne. Kam se zálohuje: bez zvláštního povolení jen do složky aplikace na disku – tu ale Android při
+odinstalaci smaže. Aby záloha odinstalaci přežila, nabídne okno „Povolit zálohu, která přežije odinstalaci“:
+otevře systémové povolení přístupu k souborům (`MANAGE_EXTERNAL_STORAGE`, uděluje ho uživatel sám) a zálohy
+pak jdou do složky `Promitarna` v kořeni disku. Aplikace to povolení k ničemu jinému nepoužívá.
 
 **Po dokoukání** (`play_next` v `app_discover.py`, panel v `PlayerActivity`): přehrávač se zeptá, co
 dál. U dílu seriálu je to další díl – z vlastního katalogu, jinak vyhledaný na Přehraj.to (u seriálu
@@ -347,7 +364,8 @@ díváte?“ a další díl už sám nepustí.
 
 **Nabídka karty** (podržení OK): u videa z Přehraj.to navíc „Označit jako zhlédnuté / nezhlédnuté“
 (`watched_set`) a u rozkoukaného „Odebrat z Rozkoukaných“ (`progress_remove`, i pro iVysílání). Že
-nabídka existuje, připomene aplikace při prvních třech spuštěních jednorázovým tipem (`Hints.kt`).
+nabídka existuje, připomene aplikace při prvních třech spuštěních jednorázovým tipem (`Hints.kt`). Zvlášť připomene,
+že se karta dá odebrat z Rozkoukaných – ve chvíli, kdy uživatel rozkoukané karty prochází.
 
 **Úvodní panel a lišta ikon** (`hero` v `app_extras.py`, `HeroPresenter`): sekce s rozkoukaným videem
 začíná velkým panelem s tlačítkem Pokračovat; obrázek je z metadat titulu, jinak výchozí ilustrace.

@@ -53,6 +53,8 @@
         <item name="guidanceDescriptionStyle">@style/Guidance.Description</item>
         <item name="guidanceBreadcrumbStyle">@style/Guidance.Breadcrumb</item>
         <item name="guidedActionItemChevronStyle">@style/Guidance.Chevron</item>
+        <!-- vybraný řádek musí být vidět: výchozí zesvětlení na světlém papíře zaniká -->
+        <item name="guidedActionsSelectorDrawable">@drawable/guided_action_selector</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="android:textColorHint">@color/text_secondary</item>
