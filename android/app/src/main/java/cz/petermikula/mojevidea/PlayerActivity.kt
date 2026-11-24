@@ -154,6 +154,9 @@ class PlayerActivity : FragmentActivity() {
             // kdo přejde na Zavřít, chce se rozhodnout sám: odpočet se zastaví
             setOnFocusChangeListener { _, focused -> if (focused) stopCountdown() }
         }
+        // Zvuk a titulky se volí tlačítky v horní liště; vestavěná tlačítka přehrávače dole (titulky
+        // a nabídka se zvukovou stopou) by byla totéž podruhé. Titulky vypíná rozvržení, nabídku tady.
+        playerView.findViewById<View>(androidx.media3.ui.R.id.exo_settings)?.visibility = View.GONE
         // horní lišta (název, čas konce, rychlé volby) se ukazuje spolu s ovládáním
         playerView.setControllerVisibilityListener(
             PlayerView.ControllerVisibilityListener { visibility ->

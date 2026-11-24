@@ -393,7 +393,8 @@ z katalogu, u videa puštěného ze stránky titulu z TMDB (titul si aplikace k 
 když titul obrázek na šířku nemá, ukáže se jeho plakát na výšku (neořezává se a nezvětšuje). Malý náhled
 z Přehraj.to zůstává až jako poslední možnost. Stejný obrázek na šířku má i úvodní panel Rozkoukané.
 
-**Přehrávač**: horní lišta s názvem, časem konce a rychlou volbou zvuku a titulků; volba se pamatuje
+**Přehrávač**: horní lišta s názvem, časem konce a rychlou volbou zvuku a titulků (vestavěná tlačítka
+přehrávače pro totéž dole jsou skrytá, aby nebyla dvakrát); volba se pamatuje
 pro celý seriál (`track_prefs`, klíč `tracks:<seriál>`) a ukládá se jen to, co uživatel opravdu změnil.
 Po chybě uprostřed přehrávání si přehrávač jednou řekne o novou adresu a naváže, kde byl – u souborů
 z Přehraj.to i u pořadů a živého vysílání z iVysílání (po dlouhé pauze se živé vysílání vrátí na živo).
