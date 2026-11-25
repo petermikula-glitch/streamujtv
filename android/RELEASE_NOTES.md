@@ -1,1 +1,1 @@
-Rozkoukané: díl nebo film vypnutý brzy po začátku se příště pustí tam, kde jste skončili – pozice se ukládá už po 15 sekundách přehrávání (dřív až po minutě, takže se krátce puštěný díl spouštěl znovu od začátku).
+Stránka filmu nebo seriálu: řada Hrají (herci, klepnutím na herce jeho další filmy) je nově hned nad Podobnými tituly, ne až úplně dole.
