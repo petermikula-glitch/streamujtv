@@ -80,6 +80,7 @@ class PlayerActivity : FragmentActivity() {
     private var lastStream: JSONObject? = null
     private var subtitleUrls = emptyList<String>()
     private var withoutSubtitles = false // titulky se nepodařilo načíst: video běží bez nich
+    private var subtitleSearch = false   // jde hledat titulky na OpenSubtitles (vyplněný klíč, video z Přehraj.to)
     private var unattended = 0           // kolik dílů po sobě se spustilo samo, aniž kdo sáhl na ovladač
 
     /** Přehrávání chvíli běží bez potíží: další výpadek má zase nárok na nový pokus. */
@@ -298,6 +299,8 @@ class PlayerActivity : FragmentActivity() {
         track = stream.optString("track")
         choice = stream.optString("choice").ifEmpty { params.optString("choice") }
         local = stream.optBoolean("local")  // soubor stažený na disku: cesta místo adresy
+        subtitleSearch = stream.optBoolean("subtitle_search") && !stream.optBoolean("live") &&
+            track.isNotEmpty() && !track.startsWith("ivys:")
         fun source(value: String): Uri = if (local) Uri.fromFile(File(value)) else Uri.parse(value)
         heading.text = stream.optString("title")
         live = stream.optBoolean("live")
@@ -322,7 +325,8 @@ class PlayerActivity : FragmentActivity() {
             urls.add(url)
             val mime = if (url.substringBefore('?').endsWith(".srt", true)) MimeTypes.APPLICATION_SUBRIP else MimeTypes.TEXT_VTT
             subtitles.add(
-                MediaItem.SubtitleConfiguration.Builder(source(url))
+                // titulky stažené z OpenSubtitles jsou soubor v zařízení (cesta), ostatní adresa
+                MediaItem.SubtitleConfiguration.Builder(if (url.startsWith("/")) Uri.fromFile(File(url)) else source(url))
                     .setMimeType(mime)
                     .setLanguage(languages?.optString(index).orEmpty().ifEmpty { "cs" })
                     .setSelectionFlags(if (index == 0) C.SELECTION_FLAG_DEFAULT else 0)
@@ -379,7 +383,7 @@ class PlayerActivity : FragmentActivity() {
         if (carriedTracks != null) userChangedTracks = carriedChanged
         carriedTracks = null
         audioButton.visibility = View.GONE
-        subtitleButton.visibility = View.GONE
+        subtitleButton.visibility = if (subtitleSearch) View.VISIBLE else View.GONE
         restartButton.visibility = if (live) View.GONE else View.VISIBLE
         player = exo
         playerView.player = exo
@@ -426,7 +430,8 @@ class PlayerActivity : FragmentActivity() {
                 // rychlé volby jen tam, kde je z čeho vybírat
                 // zvuk: i u jediné stopy, kvůli volbě výstupu (prostorový zvuk / stereo)
                 audioButton.visibility = if (groups(C.TRACK_TYPE_AUDIO).isNotEmpty()) View.VISIBLE else View.GONE
-                subtitleButton.visibility = if (groups(C.TRACK_TYPE_TEXT).isNotEmpty()) View.VISIBLE else View.GONE
+                subtitleButton.visibility =
+                    if (groups(C.TRACK_TYPE_TEXT).isNotEmpty() || subtitleSearch) View.VISIBLE else View.GONE
                 val (audio, subtitles) = selectedTracks()
                 if (userChangedTracks) {
                     userChangedTracks = false
@@ -598,13 +603,18 @@ class PlayerActivity : FragmentActivity() {
             chooseAudio(available)
             return
         }
-        val names = listOf("Vypnuto") + available.map { label(it) }
+        val search = if (subtitleSearch) listOf("Najít titulky (OpenSubtitles)…") else emptyList()
+        val names = listOf("Vypnuto") + available.map { label(it) } + search
         val current = available.indexOfFirst { it.isSelected } + 1
         AlertDialog.Builder(this)
             .setTitle("Titulky")
             .setNeutralButton("Velikost a pozadí") { _, _ -> chooseSubtitleStyle() }
             .setSingleChoiceItems(Dialogs.choices(this, names), current) { dialog, which ->
                 dialog.dismiss()
+                if (search.isNotEmpty() && which == names.size - 1) {
+                    findSubtitles()
+                    return@setSingleChoiceItems
+                }
                 // přehrávač se mezitím mohl vyměnit (další díl, nový pokus): volba patří tomu, který hraje
                 val playing = player ?: return@setSingleChoiceItems
                 val builder = playing.trackSelectionParameters.buildUpon()
@@ -620,6 +630,69 @@ class PlayerActivity : FragmentActivity() {
                 playing.trackSelectionParameters = builder.build()
             }
             .showStyled()
+    }
+
+    /** Titulky z OpenSubtitles: nabídka nalezených českých a slovenských, zvolené se stáhnou a hned zapnou. */
+    private fun findSubtitles() {
+        val searched = track
+        android.widget.Toast.makeText(this, "Hledám titulky na OpenSubtitles…", android.widget.Toast.LENGTH_SHORT).show()
+        Api.call("subtitles_search", JSONObject().put("track", searched)) { result ->
+            if (isFinishing || isDestroyed || track != searched) return@call
+            val data = result.data
+            val items = data?.optJSONArray("items")
+            if (data == null || items == null || items.length() == 0) {
+                val text = data?.optString("empty")?.ifEmpty { null } ?: result.error?.ifEmpty { null } ?: "Nic se nenašlo."
+                android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_LONG).show()
+                return@call
+            }
+            val list = (0 until items.length()).map { items.getJSONObject(it) }
+            AlertDialog.Builder(this)
+                .setTitle(data.optString("title"))
+                .setAdapter(Dialogs.items(this, list.map { it.optString("title") + "\n" + it.optString("subtitle") })) { _, which ->
+                    val item = list[which]
+                    val request = JSONObject().put("track", searched).put("file_id", item.optInt("file_id"))
+                        .put("lang", item.optString("lang"))
+                    Api.call("subtitles_download", request) { got ->
+                        if (isFinishing || isDestroyed || track != searched) return@call
+                        val file = got.data
+                        if (file == null) {
+                            android.widget.Toast.makeText(this, got.error ?: "Titulky se nepodařilo stáhnout.", android.widget.Toast.LENGTH_LONG).show()
+                            return@call
+                        }
+                        android.widget.Toast.makeText(this, file.optString("toast"), android.widget.Toast.LENGTH_LONG).show()
+                        addSubtitle(file.optString("path"), file.optString("lang").ifEmpty { "cs" })
+                    }
+                }
+                .showStyled()
+        }
+    }
+
+    /** Stažené titulky přidá k videu a pustí je od místa, kde se právě hraje (přehrávač se sestaví znovu). */
+    private fun addSubtitle(path: String, lang: String) {
+        val stream = lastStream ?: return
+        val exo = player ?: return
+        if (path.isEmpty()) return
+        val position = exo.currentPosition.coerceAtLeast(0)
+        val copy = JSONObject(stream.toString())
+        val subtitles = org.json.JSONArray().put(path)
+        val languages = org.json.JSONArray().put(lang)
+        val oldSubtitles = stream.optJSONArray("subtitles")
+        val oldLanguages = stream.optJSONArray("subtitle_langs")
+        for (index in 0 until (oldSubtitles?.length() ?: 0)) {
+            val url = oldSubtitles!!.optString(index)
+            if (url.isEmpty() || url == path) continue
+            subtitles.put(url)
+            languages.put(oldLanguages?.optString(index).orEmpty())
+        }
+        copy.put("subtitles", subtitles).put("subtitle_langs", languages)
+        // nové titulky jsou první a výchozí; jejich jazyk se zapamatuje k titulu
+        copy.put("tracks", (copy.optJSONObject("tracks") ?: JSONObject()).put("subs", lang))
+        if (tracksKey.isNotEmpty()) {
+            Api.send("track_prefs", JSONObject().put("key", tracksKey).put("audio", audioChoice).put("subs", lang))
+        }
+        carriedPlaying = exo.playWhenReady
+        withoutSubtitles = false
+        begin(copy, position)
     }
 
     /**

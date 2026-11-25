@@ -35,6 +35,9 @@ class SettingsFragment : GuidedStepSupportFragment() {
         const val STORAGE = 7L
         const val UPDATE = 8L
         const val CLEANUP = 11L
+        const val OS_KEY = 12L
+        const val OS_USER = 13L
+        const val OS_PASSWORD = 14L
     }
 
     override fun onCreateGuidance(savedInstanceState: Bundle?): GuidanceStylist.Guidance {
@@ -66,6 +69,26 @@ class SettingsFragment : GuidedStepSupportFragment() {
             GuidedAction.Builder(context).id(TMDB).title("Klíč TMDB (nepovinný)").description("")
                 .descriptionEditable(true)
                 .descriptionEditInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+                .build()
+        )
+        // titulky z OpenSubtitles.com: klíč k rozhraní (zdarma po registraci), jméno a heslo zvýší denní počet stažení
+        actions.add(
+            GuidedAction.Builder(context).id(OS_KEY).title("Klíč OpenSubtitles (pro hledání titulků)").description("")
+                .descriptionEditable(true)
+                .descriptionEditInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+                .build()
+        )
+        actions.add(
+            GuidedAction.Builder(context).id(OS_USER).title("Jméno na OpenSubtitles").description("")
+                .descriptionEditable(true)
+                .descriptionEditInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+                .build()
+        )
+        actions.add(
+            GuidedAction.Builder(context).id(OS_PASSWORD).title("Heslo na OpenSubtitles").description("")
+                .descriptionEditable(true)
+                .descriptionEditInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+                .descriptionInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
                 .build()
         )
         actions.add(GuidedAction.Builder(context).id(SAVE).title("Uložit a ověřit přihlášení").build())
@@ -129,6 +152,12 @@ class SettingsFragment : GuidedStepSupportFragment() {
             if (!isAdded || data == null) return@call
             setText(EMAIL, data.optString("username"))
             setText(TMDB, data.optString("tmdb_key"))
+            setText(OS_KEY, data.optString("os_key"))
+            setText(OS_USER, data.optString("os_user"))
+            if (data.optBoolean("has_os_password")) {
+                findActionById(OS_PASSWORD)?.title = "Heslo na OpenSubtitles (uložené)"
+                notifyActionChanged(findActionPositionById(OS_PASSWORD))
+            }
             downloadDir = data.optString("download_dir")
             showStorage()
             choices = data
@@ -153,8 +182,11 @@ class SettingsFragment : GuidedStepSupportFragment() {
 
     private fun save(done: () -> Unit) {
         val params = JSONObject().put("username", text(EMAIL)).put("tmdb_key", text(TMDB))
+            .put("os_key", text(OS_KEY)).put("os_user", text(OS_USER))
         val password = text(PASSWORD)
         if (password.isNotEmpty()) params.put("password", password)
+        val osPassword = text(OS_PASSWORD)
+        if (osPassword.isNotEmpty()) params.put("os_password", osPassword)
         Api.call("settings_set", params) { result ->
             if (!isAdded) return@call
             if (result.ok) done() else Toast.makeText(requireContext(), result.error, Toast.LENGTH_LONG).show()

@@ -1403,20 +1403,26 @@ def play(params):
         # zvuk a titulky se pamatují pro celý seriál (u filmu pro film)
         tracks = app_extras.tracks(lib, ":".join(choice.split(":")[:2]) if choice.startswith("tv:")
                                    else video["meta_key"])
+        own = app_subtitles.saved(lib, vid)        # titulky stažené dřív z OpenSubtitles: přidají se samy
     title = _video_title(video, meta)
     position = point[0] if point and not params.get("restart") else 0
+    search = app_subtitles.configured()            # přehrávač nabídne „Najít titulky (OpenSubtitles)“
     entry = _downloads().get(vid)
     if entry and entry.get("state") == "done" and os.path.exists(entry.get("path") or "") \
             and not params.get("online"):
         # stažený soubor: hraje z disku, bez internetu i bez přihlášení
+        files = [name for name in entry.get("subtitles") or [] if os.path.exists(name)]
         return {"url": entry["path"], "local": True, "headers": {},
-                "subtitles": [name for name in entry.get("subtitles") or [] if os.path.exists(name)],
-                "position": position, "title": title, "track": vid, "live": False, "hls": False, "tracks": tracks}
+                "subtitles": [path for path, _lang in own] + files,
+                "subtitle_langs": [lang for _path, lang in own] + ["cs"] * len(files),
+                "position": position, "title": title, "track": vid, "live": False, "hls": False, "tracks": tracks,
+                "subtitle_search": search}
     url, subtitles = _stream_link(vid, bool(params.get("fresh")))
     return {"url": url, "local": False, "headers": {"User-Agent": provider.USER_AGENT},
-            "subtitles": list(subtitles.values()), "subtitle_langs": [_subtitle_lang(key) for key in subtitles],
+            "subtitles": [path for path, _lang in own] + list(subtitles.values()),
+            "subtitle_langs": [lang for _path, lang in own] + [_subtitle_lang(key) for key in subtitles],
             "position": position, "title": title,
-            "track": vid, "live": False, "hls": False, "tracks": tracks}
+            "track": vid, "live": False, "hls": False, "tracks": tracks, "subtitle_search": search}
 
 
 def _episode_code(video, separator="×"):
@@ -1574,6 +1580,9 @@ def settings_get(params):
             "prefer_language": prefs["language"], "prefer_quality": prefs["quality"],
             "min_quality": prefs["minimum"],
             "delete_watched": bool(settings.get("delete_watched")),
+            # titulky z OpenSubtitles.com: klíč k rozhraní, jméno a heslo (heslo se nevrací)
+            "os_key": settings.get("os_key", ""), "os_user": settings.get("os_user", ""),
+            "has_os_password": bool(settings.get("os_password")),
             "languages": [{"id": key, "title": title} for key, title in LANGUAGE_CHOICES],
             "qualities": [{"id": key, "title": title} for key, title in QUALITY_CHOICES]}
 
@@ -1655,7 +1664,7 @@ def settings_set(params):
     def change(settings):
         before = (settings.get("username"), settings.get("password"))
         for key in ("username", "password", "tmdb_key", "download_dir", "prefer_language", "prefer_quality",
-                    "min_quality"):
+                    "min_quality", "os_key", "os_user", "os_password"):
             if key in params and params[key] is not None:
                 settings[key] = str(params[key]).strip()
         if params.get("min_quality") is not None:
@@ -2924,6 +2933,7 @@ import app_index  # noqa: E402
 import app_backup  # noqa: E402
 import app_health  # noqa: E402
 import app_guide  # noqa: E402
+import app_subtitles  # noqa: E402
 
 ACTIONS = dict(app_discover.ACTIONS)
 ACTIONS.update(app_extras.ACTIONS)
@@ -2931,6 +2941,7 @@ ACTIONS.update(app_index.ACTIONS)
 ACTIONS.update(app_backup.ACTIONS)
 ACTIONS.update(app_health.ACTIONS)
 ACTIONS.update(app_guide.ACTIONS)
+ACTIONS.update(app_subtitles.ACTIONS)
 ACTIONS.update({
     "downloads": downloads, "download_add": download_add, "download_next": download_next,
     "download_progress": download_progress, "download_finish": download_finish, "download_fail": download_fail,

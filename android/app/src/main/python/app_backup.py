@@ -27,7 +27,7 @@ MANIFEST = "backup.json"
 CATALOG = "catalog.db"
 # soubory s daty, které do zálohy patří (nastavení, oblíbené, profily a jejich uložený stav)
 FILES = re.compile(r"^(settings|favorites|profiles|profile_[A-Za-z0-9]+)\.json$")
-SECRET = ("password",)               # co se ze zálohy nastavení vynechává
+SECRET = ("password", "os_password")  # co se ze zálohy nastavení vynechává (hesla)
 LIMIT = 512 << 20                    # větší katalog v záloze není: taková záloha se neobnoví
 
 

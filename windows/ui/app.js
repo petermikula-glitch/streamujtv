@@ -592,13 +592,13 @@ async function renderSettings(screen) {
   const data = answer.data;
   const folder = await local("folder");
   const form = el("div", "form");
-  const field = (label, name, value, password) => {
+  const field = (label, name, value, password, saved) => {
     const wrap = el("label", "", label);
     const input = el("input", "f");
     input.name = name;
     input.type = password ? "password" : "text";
     input.value = value || "";
-    if (password && data.has_password) input.placeholder = "uložené – pro změnu napište nové";
+    if (password && (saved === undefined ? data.has_password : saved)) input.placeholder = "uložené – pro změnu napište nové";
     wrap.append(input);
     form.append(wrap);
     return input;
@@ -607,12 +607,18 @@ async function renderSettings(screen) {
   const password = field("Heslo k Přehraj.to", "password", "", true);
   const tmdb = field("Klíč TMDB (zdarma na themoviedb.org)", "tmdb_key", data.tmdb_key);
   const dir = field("Kam stahovat (složka)", "download_dir", data.download_dir || (folder.ok ? folder.data.download_dir : ""));
+  // titulky z OpenSubtitles.com: klíč k rozhraní dostanete zdarma po registraci „API consumer“ na opensubtitles.com
+  const osKey = field("Klíč k rozhraní OpenSubtitles (pro hledání titulků)", "os_key", data.os_key);
+  const osUser = field("Jméno na OpenSubtitles (víc stažení denně)", "os_user", data.os_user);
+  const osPassword = field("Heslo na OpenSubtitles", "os_password", "", true, data.has_os_password);
   const cleanup = el("button", "f btn", "Mazat stažené po dokoukání: " + (data.delete_watched ? "zapnuto" : "vypnuto"));
   cleanup.onclick = async () => { await api("settings_set", {delete_watched: !data.delete_watched}); renderSettings(screen); };
   const save = el("button", "f btn primary", "Uložit");
   save.onclick = async () => {
-    const params = {username: user.value, tmdb_key: tmdb.value, download_dir: dir.value};
+    const params = {username: user.value, tmdb_key: tmdb.value, download_dir: dir.value,
+                    os_key: osKey.value, os_user: osUser.value};
     if (password.value) params.password = password.value;
+    if (osPassword.value) params.os_password = osPassword.value;
     const saved = await api("settings_set", params);
     toast(saved.ok ? "Uloženo." : saved.error);
     if (saved.ok) loadHome();
@@ -777,13 +783,16 @@ async function fillOptions(screen) {
     await local("player_select", {kind: "audio", id: track.id});
     remember(langOf(track), subsOn ? langOf(subsOn) : "off");
   }})), tracks.audio.length ? "" : "Načítám stopy…");
+  const search = screen.stream.subtitle_search && screen.stream.track ? [{label: "🔍  Najít titulky (OpenSubtitles)…",
+    action: () => findSubtitles(screen, langOf(audioOn))}] : [];
   group("Titulky", [{label: "Vypnuté", on: !subsOn, action: async () => {
     await local("player_select", {kind: "subs", id: "no"});
     remember(langOf(audioOn), "off");
   }}].concat(tracks.subs.map((track) => ({label: track.title, on: track.selected, action: async () => {
     await local("player_select", {kind: "subs", id: track.id});
     remember(langOf(audioOn), langOf(track));
-  }}))));
+  }}))).concat(search), screen.stream.subtitle_search ? "" :
+    "České titulky z OpenSubtitles.com: vyplňte v Nastavení klíč k rozhraní OpenSubtitles.");
   const restyle = (change) => async () => { await api("subtitle_style_set", change); await local("player_style"); };
   group("Velikost titulků", (style.sizes || []).map((item) => ({label: item.title, on: item.id === style.size,
     action: restyle({size: item.id})})));
@@ -815,6 +824,25 @@ async function fillOptions(screen) {
   }}], "Tišší hlasité scény, hlasitější tiché, výraznější řeč.");
   const again = focused && [...box.querySelectorAll(".opt")].find((button) => button.dataset.key === focused);
   if (again) again.focus();
+}
+
+// Titulky z OpenSubtitles: nabídka nalezených, zvolené se stáhnou a hned zapnou (a příště přidají samy).
+async function findSubtitles(screen, audioLang) {
+  toast("Hledám titulky na OpenSubtitles…");
+  const found = await api("subtitles_search", {track: screen.stream.track});
+  if (!found.ok) { info("Titulky", found.error); return; }
+  const items = found.data.items || [];
+  if (!items.length) { info("Titulky", found.data.empty || "Nic se nenašlo."); return; }
+  dialog({title: found.data.title, buttons: [{label: "Zpět"}], items: items.map((item) => ({
+    label: item.title, note: item.subtitle, action: async () => {
+      const got = await api("subtitles_download", {track: screen.stream.track, file_id: item.file_id, lang: item.lang});
+      if (!got.ok) { info("Titulky", got.error); return; }
+      await local("player_subfile", {path: got.data.path});
+      const key = (screen.stream.tracks || {}).key;
+      if (key) api("track_prefs", {key, audio: audioLang, subs: got.data.lang});
+      toast(got.data.toast);
+      fillOptions(screen);
+    }}))});
 }
 
 // Nový výstup zvuku: přehrávač se spustí znovu na stejném místě.
