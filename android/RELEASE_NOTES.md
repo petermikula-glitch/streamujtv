@@ -1,1 +1,1 @@
-Stránka filmu nebo seriálu: řada Hrají (herci, klepnutím na herce jeho další filmy) je nově hned nad Podobnými tituly, ne až úplně dole.
+Nástroje: nová dlaždice Smazat historii. Po potvrzení smaže hledané výrazy a historii přehrávání aktuálního profilu – Rozkoukané, Naposledy přehrané, značky zhlédnuto, nabízené další díly a historii z iVysílání. Katalog, oblíbené, stažená videa, seznam dostupných titulů a nastavení zůstanou.
