@@ -1596,14 +1596,21 @@ def test_subtitle_style_belongs_to_the_profile(api):
     changed = api("subtitle_style_set", size="large", background="shade")
     assert (changed["size"], changed["background"], changed["scale"]) == ("large", "shade", 1.3)
     assert api("subtitle_style_set", size="obří", background="duha")["size"] == "large"    # neznámé hodnoty nic nezmění
+    assert (style["color"], style["rgb"]) == ("white", "#FFFFFF")          # barva písma (Windows verze)
+    assert [item["id"] for item in style["colors"]] == ["white", "yellow", "green", "cyan"]
+    colored = api("subtitle_style_set", color="yellow")
+    assert (colored["color"], colored["rgb"], colored["size"]) == ("yellow", "#FFE94D", "large")
+    assert api("subtitle_style_set", color="duha")["color"] == "yellow"
 
     api("profile_add", avatar="owl", text="Děti")               # jiný profil má vlastní vzhled titulků
     main, other = api("profiles")["items"][:2]
     api(other["target"]["call"], **other["target"]["params"])
     assert (api("subtitle_style")["size"], api("subtitle_style")["background"]) == ("normal", "solid")
+    assert api("subtitle_style")["color"] == "white"
     api("subtitle_style_set", size="huge")
     api(main["target"]["call"], **main["target"]["params"])
     assert (api("subtitle_style")["size"], api("subtitle_style")["background"]) == ("large", "shade")
+    assert api("subtitle_style")["color"] == "yellow"
     api(other["target"]["call"], **other["target"]["params"])
     assert api("subtitle_style")["size"] == "huge"
 

@@ -53,14 +53,37 @@ class Backend(object):
             self.closed = time.time()
             return {"ok": True}
         if action == "play":
-            audio = self.call("subtitle_style", {}) or {}
-            mode = audio.get("audio_output") or "auto"
-            settings = {"mode": mode, "night": bool(audio.get("audio_night")),
-                        "delay_ms": int((audio.get("audio_delays") or {}).get(mode) or 0)}
+            style = self.call("subtitle_style", {}) or {}
+            mode = style.get("audio_output") or "auto"
+            settings = {"mode": mode, "night": bool(style.get("audio_night")),
+                        "delay_ms": int((style.get("audio_delays") or {}).get(mode) or 0)}
             return {"ok": True, "data": self.player.start(params.get("stream") or {}, params.get("position") or 0,
-                                                          settings)}
+                                                          settings, style)}
         if action == "player":
             return {"ok": True, "data": self.player.status()}
+        # panel přehrávání (klávesa M v mpv): stopy, titulky a jejich vzhled, zvuk – mění se hned
+        if action == "player_tracks":
+            data = self.player.tracks()
+            data["position"] = self.player.position()
+            return {"ok": True, "data": data}
+        if action == "player_select":
+            return {"ok": self.player.select(params.get("kind"), params.get("id"))}
+        if action == "player_style":
+            return {"ok": self.player.style(self.call("subtitle_style", {}) or {})}
+        if action == "player_audio":
+            if "delay_ms" in params:
+                self.player.audio_delay(int(params.get("delay_ms") or 0))
+            if "night" in params:
+                self.player.night(bool(params.get("night")))
+            return {"ok": True}
+        if action == "player_subfile":
+            path = str(params.get("path") or "")
+            return {"ok": bool(path) and os.path.isfile(path) and self.player.add_subtitles(path)}
+        if action == "player_show":
+            return {"ok": self.player.show(params.get("visible", True) is not False)}
+        if action == "player_stop":
+            self.player.stop()
+            return {"ok": True}
         if action == "open":
             url = str(params.get("url") or "")
             if url.startswith(("http://", "https://")):

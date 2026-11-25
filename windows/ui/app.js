@@ -700,25 +700,132 @@ async function startPlayer(stream, position, title) {
   show({kind: "playing", title: stream.title || title, stream, since: Date.now()});
 }
 
+// Obrazovka během přehrávání = panel se zvukem a titulky. mpv hraje přes celou obrazovku; klávesou M
+// se zmenší a ukáže se tento panel (změny platí hned), „Zpět k filmu“ ho vrátí.
 function renderPlaying(screen) {
   const box = $("#screen");
   box.innerHTML = "";
-  const panel = el("div", "playing");
-  panel.append(el("div", "big", "▶  " + (screen.stream.title || "")),
-    el("div", "keys", "Přehrává se v okně přehrávače.\nMezerník – pauza · šipky – posun · # – zvuková stopa · J – titulky · F – celá obrazovka · Q – konec"));
-  const stop = el("button", "f btn", "Zpět do aplikace");
-  stop.onclick = back;
-  panel.append(stop);
+  const panel = el("div", "playing-panel");
+  panel.append(el("h1", "", screen.stream.title || ""),
+    el("div", "keys", "Film hraje v okně přehrávače. Klávesou M v přehrávači se sem vrátíte; mezerník – pauza, šipky – posun, F – celá obrazovka, Q – konec."));
+  const actions = el("div", "actions");
+  const resume = el("button", "f btn primary", "▶  Zpět k filmu");
+  resume.onclick = () => local("player_show", {visible: true});
+  const stop = el("button", "f btn", "Ukončit přehrávání");
+  stop.onclick = () => local("player_stop");
+  const leave = el("button", "f btn", "Zpět do aplikace");
+  leave.onclick = back;
+  actions.append(resume, stop, leave);
+  const options = el("div", "options");
+  panel.append(actions, options);
   box.append(panel);
-  stop.focus();
+  resume.focus();
+  screen.menu = screen.menu || 0;
+  screen.options = options;
+  fillOptions(screen);
   const poll = async () => {
     if (stack[stack.length - 1] !== screen) return;
     const status = await local("player");
     const state = (status.ok && status.data) || {};
-    if (state.playing !== false) { setTimeout(poll, 2000); return; }
-    afterPlayback(screen, state);
+    if (screen.restarting) { setTimeout(poll, 1500); return; }
+    if (state.playing === false) { afterPlayback(screen, state); return; }
+    if ((state.menu || 0) > screen.menu) {       // v přehrávači stiskli M: panel do popředí s čerstvými stopami
+      screen.menu = state.menu;
+      local("player_show", {visible: false});
+      window.focus();
+      fillOptions(screen);
+    } else if (!screen.tracksSeen) fillOptions(screen);   // stopy jsou známé až po načtení videa
+    setTimeout(poll, 1500);
   };
-  setTimeout(poll, 2000);
+  setTimeout(poll, 1500);
+}
+
+const langOf = (track) => (track && track.lang) || "";
+
+async function fillOptions(screen) {
+  const [tracksAnswer, styleAnswer] = await Promise.all([local("player_tracks"), api("subtitle_style")]);
+  if (stack[stack.length - 1] !== screen) return;
+  const tracks = (tracksAnswer.ok && tracksAnswer.data) || {audio: [], subs: []};
+  const style = (styleAnswer.ok && styleAnswer.data) || {};
+  if (tracks.audio.length || tracks.subs.length) screen.tracksSeen = true;
+  const focused = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.key;
+  const box = screen.options;
+  box.innerHTML = "";
+  const group = (title, entries, note) => {
+    const section = el("div", "option-group");
+    section.append(el("h2", "row", title));
+    const row = el("div", "opts");
+    for (const entry of entries) {
+      const button = el("button", "f opt" + (entry.on ? " on" : ""));
+      if (entry.swatch) { const dot = el("span", "swatch"); dot.style.background = entry.swatch; button.append(dot); }
+      button.append(document.createTextNode(entry.label));
+      button.dataset.key = title + "|" + entry.label;
+      button.onclick = async () => { await entry.action(); fillOptions(screen); };
+      row.append(button);
+    }
+    section.append(row);
+    if (note) section.append(el("div", "note", note));
+    box.append(section);
+  };
+  const remember = (audio, subs) => {
+    const key = (screen.stream.tracks || {}).key;
+    if (key) api("track_prefs", {key, audio, subs});
+  };
+  const audioOn = tracks.audio.find((track) => track.selected);
+  const subsOn = tracks.subs.find((track) => track.selected);
+  group("Zvuková stopa", tracks.audio.map((track) => ({label: track.title, on: track.selected, action: async () => {
+    await local("player_select", {kind: "audio", id: track.id});
+    remember(langOf(track), subsOn ? langOf(subsOn) : "off");
+  }})), tracks.audio.length ? "" : "Načítám stopy…");
+  group("Titulky", [{label: "Vypnuté", on: !subsOn, action: async () => {
+    await local("player_select", {kind: "subs", id: "no"});
+    remember(langOf(audioOn), "off");
+  }}].concat(tracks.subs.map((track) => ({label: track.title, on: track.selected, action: async () => {
+    await local("player_select", {kind: "subs", id: track.id});
+    remember(langOf(audioOn), langOf(track));
+  }}))));
+  const restyle = (change) => async () => { await api("subtitle_style_set", change); await local("player_style"); };
+  group("Velikost titulků", (style.sizes || []).map((item) => ({label: item.title, on: item.id === style.size,
+    action: restyle({size: item.id})})));
+  group("Barva titulků", (style.colors || []).map((item) => ({label: item.title, on: item.id === style.color,
+    swatch: item.rgb, action: restyle({color: item.id})})));
+  group("Pozadí titulků", (style.backgrounds || []).map((item) => ({label: item.title, on: item.id === style.background,
+    action: restyle({background: item.id})})));
+  const mode = style.audio_output || "auto";
+  group("Výstup zvuku", (style.audio_outputs || []).map((item) => ({label: item.title, on: item.id === mode,
+    action: async () => { if (item.id === mode) return; await api("audio_output_set", {mode: item.id}); await restartPlayer(screen); }})),
+    ((style.audio_outputs || []).find((item) => item.id === mode) || {}).note || "");
+  const delay = (style.audio_delays || {})[mode] || 0;
+  const limits = style.audio_delay || {min: -300, max: 600, step: 25};
+  const shift = (step) => async () => {
+    const value = Math.max(limits.min, Math.min(limits.max, delay + step));
+    await api("audio_delay_set", {mode, ms: value});
+    await local("player_audio", {delay_ms: value});
+  };
+  group("Posun zvuku: " + (delay > 0 ? "+" : "") + delay + " ms", [
+    {label: "− " + limits.step + " ms", action: shift(-limits.step)},
+    {label: "Bez posunu", on: delay === 0, action: shift(-delay)},
+    {label: "+ " + limits.step + " ms", action: shift(limits.step)}],
+    "Kladný posun pozdrží obraz, když zvuk ze soundbaru zní později než obraz.");
+  const night = !!style.audio_night;
+  group("Noční režim", [{label: night ? "Zapnutý" : "Vypnutý", on: night, action: async () => {
+    await api("audio_night_set", {on: !night});
+    if (mode === "auto") await restartPlayer(screen);   // předávaný zvuk zpracovat nejde: přehrávač se spustí znovu
+    else await local("player_audio", {night: !night});
+  }}], "Tišší hlasité scény, hlasitější tiché, výraznější řeč.");
+  const again = focused && [...box.querySelectorAll(".opt")].find((button) => button.dataset.key === focused);
+  if (again) again.focus();
+}
+
+// Nový výstup zvuku: přehrávač se spustí znovu na stejném místě.
+async function restartPlayer(screen) {
+  screen.restarting = true;
+  const now = await local("player_tracks");
+  const position = (now.ok && now.data && now.data.position) || 0;
+  await local("play", {stream: screen.stream, position});
+  screen.since = Date.now();
+  screen.tracksSeen = false;
+  setTimeout(() => { screen.restarting = false; }, 3000);
 }
 
 async function afterPlayback(screen, state) {

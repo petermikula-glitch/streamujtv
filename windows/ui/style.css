@@ -137,6 +137,17 @@ h2.row { font-size: 23px; font-weight: 500; margin: 22px 0 10px; color: var(--in
 .dialog pre { white-space: pre-wrap; font-size: 14px; max-height: 50vh; overflow: auto; background: var(--focused); padding: 12px; }
 #toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); background: var(--chip); color: var(--chip-text);
          padding: 12px 22px; border-radius: 22px; font-size: 17px; z-index: 60; max-width: 80vw; }
+.playing-panel { max-width: 1100px; margin: 10px 6px 40px; }
+.playing-panel h1 { font-size: 34px; font-weight: 500; margin: 6px 0 6px; }
+.playing-panel .keys { color: var(--ink-2); font-size: 16px; }
+.option-group h2.row { margin: 22px 0 8px; font-size: 20px; }
+.opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.opt { border: 2px solid transparent; background: var(--panel); border-radius: 22px; padding: 8px 16px; font-size: 16px; cursor: pointer;
+       display: inline-flex; align-items: center; gap: 8px; }
+.opt.on { background: var(--ink); color: var(--focused); }
+.opt:focus { border-color: var(--accent); outline: none; }
+.opt .swatch { width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgba(0,0,0,.4); }
+.option-group .note { font-size: 14px; color: var(--ink-3); margin-top: 6px; }
 .playing { display: grid; place-items: center; text-align: center; min-height: 60vh; gap: 14px; }
 .playing .big { font-size: 34px; }
 .playing .keys { color: var(--ink-2); font-size: 16px; line-height: 1.8; }

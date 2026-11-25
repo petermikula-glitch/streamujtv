@@ -23,7 +23,7 @@ KV_PREFIXES = ("choice:", "last_season:", "recent_series", "tracks:", "tprefs:")
 # Nejnižší kvalita mezi nimi není: určuje, co je ve společném seznamu dostupných titulů „k mání“,
 # a kdyby ji měl každý profil jinou, přepnutí profilu by seznam přepočítalo a začalo znovu ověřovat.
 SETTINGS = ("prefer_language", "prefer_quality", "search_history", "favorites_checked",
-            "subtitle_size", "subtitle_background")
+            "subtitle_size", "subtitle_background", "subtitle_color")
 LIVE = "profile_live"            # čí osobní stav je právě v katalogu (zapisuje se spolu s ním)
 TRACKS_PREFIX = "tracks:"        # zvuk a titulky naposledy zvolené u seriálu nebo filmu
 _LOCK = threading.Lock()
@@ -401,6 +401,9 @@ def track_prefs(params):
 SUBTITLE_SIZES = (("small", "Menší", 0.8), ("normal", "Běžná", 1.0), ("large", "Větší", 1.3),
                   ("huge", "Největší", 1.6))
 SUBTITLE_BACKGROUNDS = (("solid", "Černé"), ("shade", "Poloprůhledné"), ("outline", "Bez pozadí, jen obrys"))
+# barva písma titulků (#RRGGBB)
+SUBTITLE_COLORS = (("white", "Bílá", "#FFFFFF"), ("yellow", "Žlutá", "#FFE94D"), ("green", "Zelená", "#9CFF7A"),
+                   ("cyan", "Azurová", "#7AE6FF"))
 
 
 def subtitle_style(params):
@@ -410,7 +413,10 @@ def subtitle_style(params):
     size = size if size in {item[0] for item in SUBTITLE_SIZES} else "normal"
     background = settings.get("subtitle_background")
     background = background if background in dict(SUBTITLE_BACKGROUNDS) else "solid"
-    return {"size": size, "background": background,
+    color = settings.get("subtitle_color")
+    color = color if color in {item[0] for item in SUBTITLE_COLORS} else "white"
+    return {"size": size, "background": background, "color": color,
+            "rgb": next(rgb for name, _title, rgb in SUBTITLE_COLORS if name == color),
             # výstup zvuku patří k přehrávači stejně jako vzhled titulků: načítá se jedním dotazem
             "audio_output": settings.get("audio_output") if settings.get("audio_output") in AUDIO_OUTPUTS else "auto",
             "audio_outputs": [{"id": name, "title": title, "note": note} for name, title, note in AUDIO_OUTPUT_CHOICES],
@@ -421,7 +427,8 @@ def subtitle_style(params):
             "audio_delay": {"min": AUDIO_DELAY_MIN, "max": AUDIO_DELAY_MAX, "step": AUDIO_DELAY_STEP},
             "scale": next(scale for name, _title, scale in SUBTITLE_SIZES if name == size),
             "sizes": [{"id": name, "title": title, "scale": scale} for name, title, scale in SUBTITLE_SIZES],
-            "backgrounds": [{"id": name, "title": title} for name, title in SUBTITLE_BACKGROUNDS]}
+            "backgrounds": [{"id": name, "title": title} for name, title in SUBTITLE_BACKGROUNDS],
+            "colors": [{"id": name, "title": title, "rgb": rgb} for name, title, rgb in SUBTITLE_COLORS]}
 
 
 # Výstup zvuku přehrávače: co se s prostorovým zvukem (5.1, 7.1) stane, než odejde do televize a soundbaru.
@@ -491,6 +498,8 @@ def subtitle_style_set(params):
             settings["subtitle_size"] = params["size"]
         if params.get("background") in dict(SUBTITLE_BACKGROUNDS):
             settings["subtitle_background"] = params["background"]
+        if params.get("color") in {item[0] for item in SUBTITLE_COLORS}:
+            settings["subtitle_color"] = params["color"]
 
     api._change_settings(change)
     return subtitle_style({})

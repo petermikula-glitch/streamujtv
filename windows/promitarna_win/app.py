@@ -85,7 +85,7 @@ def main():
     import app_api   # logika aplikace (stejná jako na Android TV)
     app_api.configure(os.path.join(data, "aplikace"))
     backend = Backend(app_api, None, None, paths.ui_dir())
-    backend.player = Player(backend.call, paths.mpv_path())
+    backend.player = Player(backend.call, paths.mpv_path(), conf_dir=data)
     backend.downloads = Downloads(backend.call, os.path.join(data, "Stažené"))
     backend.keeper = Keeper(backend.call)
     backend.keeper.start()

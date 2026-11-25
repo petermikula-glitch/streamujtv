@@ -106,11 +106,20 @@ def test_mpv_command_line_follows_the_audio_settings():
     assert "--audio-delay=-0.100" in args                                  # zvuk ze soundbaru zní později
     assert "--input-ipc-server=/tmp/ipc" in args
     night = build_args("mpv", stream, 0, {"mode": "auto", "night": True})
-    assert "--af-append=%s" % NIGHT_FILTER in night and not any(arg.startswith("--audio-spdif") for arg in night)
+    assert "--af-append=@noc:%s" % NIGHT_FILTER in night and not any(arg.startswith("--audio-spdif") for arg in night)
     assert not any(arg.startswith("--start") for arg in night)
     assert "--audio-channels=stereo" in build_args("mpv", stream, 0, {"mode": "stereo"})
     live = build_args("mpv", dict(stream, live=True), 300, {})
     assert not any(arg.startswith("--start") for arg in live)              # živé vysílání od živého okraje
+    # vzhled titulků a zvuk/titulky naposledy zvolené u titulu
+    styled = build_args("mpv", dict(stream, tracks={"key": "movie:11", "audio": "en", "subs": "off"}), 0, {},
+                        style={"scale": 1.3, "rgb": "#FFE94D", "background": "shade"}, input_conf="/tmp/in.conf")
+    assert "--sub-scale=1.30" in styled and "--sub-color=#FFE94D" in styled
+    assert "--sub-border-style=background-box" in styled and "--sub-back-color=0.0/0.0/0.0/0.55" in styled
+    assert "--alang=en,eng,cs,cze,ces,sk,slk,slo" in styled and "--sid=no" in styled
+    assert "--input-conf=/tmp/in.conf" in styled
+    czech = build_args("mpv", dict(stream, tracks={"audio": "", "subs": "sk"}), 0, {})
+    assert "--slang=sk,slk,slo,cs,cze,ces,sk,slk,slo" in czech and "--sub-border-style=background-box" in czech
 
 
 FAKE_MPV = textwrap.dedent('''
@@ -258,3 +267,69 @@ def test_program_ends_soon_after_the_browser_window_is_closed(served):
     backend.alive = closed + 0.5                                    # obnovená stránka se ozvala
     assert window_open(backend, closed + CLOSE_GRACE + 0.1)
     assert not window_open(backend, backend.alive + 60)             # okno se dlouho nehlásí → konec
+
+
+FAKE_MPV_PANEL = textwrap.dedent("""
+    import json, socket, sys, time
+    path = [arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--input-ipc-server=")][0]
+    log = open(sys.argv[-1], "a")                # adresa videa = soubor se záznamem příkazů
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(path)
+    server.listen(1)
+    connection, _ = server.accept()
+    stream = connection.makefile("rwb", buffering=0)
+    def send(message):
+        stream.write((json.dumps(message) + "\\n").encode())
+    send({"event": "client-message", "args": ["promitarna-menu"]})          # uživatel stiskl M
+    tracks = [{"id": 1, "type": "audio", "lang": "cze", "title": "Dabing", "demux-channel-count": 6,
+               "codec": "ac3", "selected": True},
+              {"id": 2, "type": "audio", "lang": "eng", "selected": False},
+              {"id": 1, "type": "sub", "lang": "cze", "external": True, "selected": False},
+              {"id": 1, "type": "video", "selected": True}]
+    for line in stream:
+        message = json.loads(line.decode())
+        command = message.get("command") or []
+        log.write(json.dumps(command) + "\\n")
+        log.flush()
+        if command and command[0] == "quit":
+            break
+        if "request_id" in message:
+            data = tracks if command[:2] == ["get_property", "track-list"] else None
+            send({"request_id": message["request_id"], "error": "success", "data": data})
+""")
+
+
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="náhradní mpv potřebuje unixový soket")
+def test_player_panel_switches_tracks_and_subtitle_style(tmp_path):
+    """Panel během přehrávání (klávesa M): stopy z mpv, přepnutí, vzhled titulků, posun zvuku, titulky ze souboru."""
+    from promitarna_win.player import Player
+    script = tmp_path / "fake_mpv.py"
+    script.write_text(FAKE_MPV_PANEL, encoding="utf-8")
+    log = tmp_path / "commands.log"
+    launcher = tmp_path / "mpv"
+    launcher.write_text("#!/bin/sh\nexec %s %s \"$@\"\n" % (sys.executable, script), encoding="utf-8")
+    launcher.chmod(0o755)
+    player = Player(lambda action, params: None, str(launcher), conf_dir=str(tmp_path / "data"))
+    player.start({"url": str(log), "track": "1:pelisky:01", "title": "Pelíšky"}, 0, {}, {"scale": 1.0})
+    for _ in range(50):
+        if player.ipc is not None and player.status().get("menu"):
+            break
+        time.sleep(0.1)
+    assert player.status()["menu"] == 1                                    # stisk M se dostal do aplikace
+    conf = (tmp_path / "data" / "mpv-input.conf").read_text(encoding="utf-8")
+    assert "m script-message promitarna-menu" in conf
+    tracks = player.tracks()
+    assert [track["title"] for track in tracks["audio"]] == ["Dabing · CZE · 6 kanálů · ac3", "ENG"]
+    assert tracks["audio"][0]["selected"] and tracks["subs"][0]["title"] == "CZE · ze souboru"
+    assert player.select("audio", 2) and player.select("subs", "no")
+    assert player.style({"scale": 1.6, "rgb": "#FFE94D", "background": "outline"})
+    player.audio_delay(150)
+    assert player.add_subtitles("/tmp/cz.srt") and player.show(False)
+    player.stop()
+    commands = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert ["set_property", "aid", 2] in commands and ["set_property", "sid", "no"] in commands
+    assert ["set_property", "sub-scale", "1.60"] in commands and ["set_property", "sub-color", "#FFE94D"] in commands
+    assert ["set_property", "sub-border-style", "outline-and-shadow"] in commands
+    assert ["set_property", "audio-delay", -0.15] in commands
+    assert ["sub-add", "/tmp/cz.srt", "select"] in commands
+    assert ["set_property", "window-minimized", True] in commands
