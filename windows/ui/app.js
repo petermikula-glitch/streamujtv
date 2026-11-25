@@ -181,6 +181,7 @@ let section = 0;
 
 function setCrumbs() {
   $("#crumbs").textContent = stack.length ? stack[stack.length - 1].title || "" : "";
+  $("#back").hidden = !stack.length;      // tlačítko Zpět jen tam, kam se dá vrátit
 }
 
 function show(screen) {
@@ -242,19 +243,74 @@ async function loadHome() {
   if (!stack.length) renderHome(!first);
 }
 
+const DROP_ROW = 10;        // tolik položek jedné řady nejvýš v podnabídce
+
+function closeDrops(except) {
+  for (const item of document.querySelectorAll(".navitem.open")) if (item !== except) item.classList.remove("open");
+}
+
+// Podnabídka hesla: řady sekce (nadpis řady a pod ním její položky), jako na hlavní obrazovce sekce.
+function openDrop(navitem, index) {
+  const drop = navitem.querySelector(".drop");
+  const data = home && home.sections[index];
+  if (!data) return null;
+  drop.innerHTML = "";
+  const changed = () => loadHome();
+  if (data.hero && data.hero.target) {
+    const hero = el("button", "f drop-item", "▶  " + data.hero.title);
+    hero.onclick = () => openFromDrop(index, data.hero.target, data.hero.title, changed);
+    drop.append(el("div", "drop-head", "Pokračovat ve sledování"), hero);
+  }
+  for (const row of data.rows || []) {
+    const items = (row.items || []).filter((card) => card.target).slice(0, DROP_ROW);
+    if (!items.length) continue;
+    if (row.title) drop.append(el("div", "drop-head", row.title));
+    for (const card of items) {
+      const button = el("button", "f drop-item", card.title);
+      if (card.subtitle) button.title = card.subtitle;
+      button.onclick = () => openFromDrop(index, card.target, card.title, changed);
+      drop.append(button);
+    }
+  }
+  if (!drop.children.length) drop.append(el("div", "drop-empty", "Nic tu zatím není"));
+  const rect = navitem.querySelector("button").getBoundingClientRect();
+  drop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 390)) + "px";
+  drop.style.top = rect.bottom + "px";
+  closeDrops(navitem);
+  navitem.classList.add("open");
+  return drop;
+}
+
+function openFromDrop(index, target, title, changed) {
+  closeDrops();
+  section = index;
+  stack.length = 0;
+  setCrumbs();
+  renderHome();
+  openTarget(target, title, changed);
+}
+
 function renderSide() {
-  // Postranní nabídka se staví jednou: při pohybu šipkami se mění jen obsah sekce (překreslení
-  // nabídky by výběr ztratilo).
+  // Horní nabídka se staví jednou: při pohybu šipkami se mění jen obsah sekce (překreslení
+  // nabídky by výběr ztratilo). Každé heslo má podnabídku (``openDrop``).
   const side = $("#side");
   const titles = home.sections.map((item) => item.title).join("|");
   if (side.dataset.titles !== titles) {
     side.innerHTML = "";
     side.dataset.titles = titles;
     home.sections.forEach((item, index) => {
+      const navitem = el("div", "navitem");
       const button = el("button", "f");
       const icon = el("img");
       icon.src = "ui/assets/ic_" + item.icon + ".svg";
       button.append(icon, el("span", "", item.title));
+      button.index = index;
+      navitem.append(button, el("div", "drop"));
+      navitem.onmouseenter = () => { if (!dialogs.length) openDrop(navitem, index); };
+      navitem.onmouseleave = () => navitem.classList.remove("open");
+      navitem.addEventListener("focusout", (event) => {
+        if (!navitem.contains(event.relatedTarget)) navitem.classList.remove("open");
+      });
       // nabídka je vidět stále: z hlubší obrazovky klepnutí vede rovnou na sekci
       button.onclick = () => {
         section = index;
@@ -264,10 +320,10 @@ function renderSide() {
         if (first) first.focus();
       };
       button.onfocus = () => { if (!stack.length && section !== index) { section = index; renderHome(true); } };
-      side.append(button);
+      side.append(navitem);
     });
   }
-  [...side.children].forEach((button, index) => button.classList.toggle("current", index === section));
+  [...side.querySelectorAll(".navitem > button")].forEach((button, index) => button.classList.toggle("current", index === section));
 }
 
 function renderHome(keepFocus) {
@@ -750,9 +806,44 @@ function moveFocus(direction) {
   if (best) { best.focus(); best.scrollIntoView({block: "nearest", inline: "nearest"}); }
 }
 
+// Klávesnice v horní nabídce: šipka dolů na hesle rozbalí podnabídku, šipka nahoru z první položky
+// a Esc ji zase zavřou (výběr se vrátí na heslo).
+function dropKeys(event) {
+  const active = document.activeElement;
+  const navitem = active && active.closest && active.closest(".navitem");
+  if (!navitem || dialogs.length) return false;
+  const button = navitem.querySelector("button");
+  if (active === button && event.key === "ArrowDown") {
+    const drop = openDrop(navitem, button.index);
+    const first = drop && drop.querySelector(".drop-item");
+    if (first) first.focus();
+    return true;
+  }
+  if (active.classList.contains("drop-item")) {
+    const items = [...navitem.querySelectorAll(".drop-item")];
+    const at = items.indexOf(active);
+    if (event.key === "Escape" || (event.key === "ArrowUp" && at === 0) || event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      navitem.classList.remove("open");
+      button.focus();
+      return event.key === "Escape" || event.key === "ArrowUp";   // vlevo/vpravo: pak na vedlejší heslo
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      const next = items[at + (event.key === "ArrowDown" ? 1 : -1)];
+      if (next) { next.focus(); next.scrollIntoView({block: "nearest"}); return true; }
+      // pod poslední položkou: podnabídka se zavře a výběr přejde do obsahu obrazovky
+      navitem.classList.remove("open");
+      const content = $("#screen .f");
+      (content || button).focus();
+      return true;
+    }
+  }
+  return false;
+}
+
 let escapeHeld = 0;
 document.addEventListener("keydown", (event) => {
   const typing = event.target.tagName === "INPUT";
+  if (dropKeys(event)) { event.preventDefault(); return; }
   const keys = {ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down"};
   if (keys[event.key] && !(typing && (event.key === "ArrowLeft" || event.key === "ArrowRight"))) {
     event.preventDefault();
@@ -778,7 +869,9 @@ document.addEventListener("mousedown", (event) => {
   if (event.button === 3) back();     // tlačítko Zpět na myši
 });
 
+$("#back").onclick = () => back();
 $("#search").onclick = () => show({kind: "search", title: "Hledat"});
+window.addEventListener("resize", () => closeDrops());
 $("#profile").onclick = () => show({kind: "list", call: "profiles", params: {}, title: "Kdo se dívá?"});
 
 // okno se hlásí, že je otevřené (v prohlížeči podle toho aplikace pozná, že ji uživatel zavřel)

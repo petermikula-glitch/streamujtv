@@ -33,6 +33,18 @@ button { font: inherit; color: inherit; }
                border-radius: 24px; font-size: 19px; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
 #side button img { width: 24px; height: 24px; opacity: .75; }
 #side button:hover { background: rgba(255, 255, 255, .35); }
+/* Podnabídka sekce: rozbalí se pod heslem (myší najetím, klávesnicí šipkou dolů). Pozice je pevná,
+   protože lišta s hesly se při úzkém okně posouvá do strany a obsah by jinak ořízla. */
+.navitem { flex: 0 0 auto; }
+.drop { display: none; position: fixed; z-index: 40; min-width: 240px; max-width: 380px; max-height: 70vh; overflow-y: auto;
+        background: var(--panel); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.3); padding: 8px 0; }
+.navitem.open .drop { display: block; }
+.drop .drop-head { padding: 8px 18px 4px; font-size: 13px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
+.drop .drop-item { display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 8px 18px; font-size: 17px;
+                   cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 4px solid transparent; }
+.drop .drop-item:hover, .drop .drop-item:focus { background: #E9C3B6; border-left-color: var(--accent); outline: none; }
+.drop .drop-empty { padding: 8px 18px; color: var(--ink-3); font-size: 15px; }
+#back svg { color: var(--ink); }
 #side button.current { color: var(--ink); font-weight: 600; background: rgba(255, 255, 255, .45); }
 #side button.current img { opacity: 1; filter: invert(23%) sepia(86%) saturate(2400%) hue-rotate(352deg); }
 #screen { overflow-y: auto; overflow-x: hidden; padding: 4px 36px 60px; outline: none; scroll-behavior: smooth; }

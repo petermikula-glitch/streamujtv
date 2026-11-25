@@ -28,9 +28,11 @@ Zvuk v mpv podle nastavení z televize (`subtitle_style`): výstup „předat so
 kompresor `acompressor` (stejné hodnoty jako `NightAudioProcessor`).
 
 Hlavní nabídka je stále nahoře (sekce vedle sebe), obsah má celou šířku okna; dlaždice bez plakátu
-(kategorie, nástroje) jsou na šířku přes celé okno.
+(kategorie, nástroje) jsou na šířku přes celé okno. Každé heslo nabídky má rozbalovací podnabídku
+(řady dané sekce s jejich položkami): myší najetím, klávesnicí šipkou dolů. Na hlubší obrazovce je
+vlevo nahoře tlačítko Zpět.
 
-Ovládání: myš, nebo klávesnice – šipky, Enter, Esc (zpět), podržený Esc (hlavní nabídka), klávesa Menu,
+Ovládání: myš (boční tlačítko Zpět funguje), nebo klávesnice – šipky, Enter, Esc nebo Backspace (zpět), podržený Esc (hlavní nabídka), klávesa Menu,
 `m` nebo pravé tlačítko myši (nabídka karty), `/` (hledat). V mpv: mezerník, šipky, `#` zvuková stopa,
 `j` titulky, `f` celá obrazovka, `q` konec.
 
