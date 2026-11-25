@@ -97,7 +97,7 @@ Ovládání: myš, nebo klávesnice – šipky, Enter, Esc (zpět), podržený E
 klávesa Menu nebo pravé tlačítko myši (nabídka karty), lomítko (hledat).
 
 Videa hraje přibalený přehrávač mpv: mezerník pauza, šipky posun, # zvuková stopa, J titulky,
-F celá obrazovka, Q konec.
+F celá obrazovka, Q konec, M panel se zvukovou stopou, titulky a jejich vzhledem v okně aplikace.
 
 Chráněné pořady iVysílání (DRM) tahle verze nepřehrává – pusťte je na webu iVysílání.
 

@@ -22,6 +22,11 @@ přenést jinam (i na flashku). Do systému se nic nezapisuje.
 | Spuštění | `promitarna_win/app.py`, `Promitarna.py` | okno přes pywebview (WebView2), jinak Edge v režimu aplikace; po zavření okna skončí celý proces i s mpv a Edge (nic nedrží soubory) |
 | Sestavení | `build.py`, workflow `windows.yml` | PyInstaller + mpv → `dist/Promitarna-<verze>-windows.zip` |
 
+Během přehrávání: klávesa **M** v mpv film zmenší a v okně aplikace ukáže panel se zvukovou stopou,
+titulky (i „Najít titulky (OpenSubtitles)…“), velikostí, barvou a pozadím titulků a nastavením zvuku;
+změny se do mpv posílají hned přes IPC (`set_property`, `sub-add`, `af`), nový výstup zvuku přehrávání
+spustí znovu na stejném místě.
+
 Zvuk v mpv podle nastavení z televize (`subtitle_style`): výstup „předat soundbaru“ = `--audio-spdif`
 (passthrough Dolby/DTS přes HDMI), „dekóduje aplikace“ = dekóduje mpv, „s tlumenými basy“ = filtr
 `lowshelf`, „Stereo“ = `--audio-channels=stereo`; posun zvuku = `--audio-delay`; noční režim =
@@ -36,7 +41,7 @@ vlevo nahoře tlačítko Zpět.
 
 Ovládání: myš (boční tlačítko Zpět funguje), nebo klávesnice – šipky, Enter, Esc nebo Backspace (zpět), podržený Esc (hlavní nabídka), klávesa Menu,
 `m` nebo pravé tlačítko myši (nabídka karty), `/` (hledat). V mpv: mezerník, šipky, `#` zvuková stopa,
-`j` titulky, `f` celá obrazovka, `q` konec.
+`j` titulky, `f` celá obrazovka, `q` konec, `m` panel se zvukem a titulky v okně aplikace.
 
 ## Co tu není (oproti televizi)
 
