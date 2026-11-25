@@ -915,22 +915,40 @@ def _favorite_rows(lib, state):
 
 
 def _progress_rows(lib, state):
-    """Sekce Rozkoukané: nedokoukané filmy a díly seriálů, z Přehraj.to i z iVysílání pohromadě."""
+    """Sekce Rozkoukané: nedokoukané filmy a díly seriálů, z Přehraj.to i z iVysílání pohromadě.
+
+    Každý seriál má v řadě Seriály jen jednu kartu: díl, který je rozkoukaný (naposledy přehraný), a když
+    je dokoukaný, rovnou ten další – karta tak vždy pustí správný díl od místa, kde se skončilo. Seriály
+    z Objevuj, u kterých se pokračuje dalším dílem, jsou v řadě Další díly (vede na jejich stránku)."""
     rows = []
-    videos = lib.history_videos(in_progress=True, limit=2 * HOME_ROW, include_search=True)
+    videos = lib.history_videos(in_progress=True, limit=3 * HOME_ROW, include_search=True)
     metas = lib.get_metas(video["meta_key"] for video in videos)
-    television = lib.ivys_progress(2 * HOME_ROW)
+    television = lib.ivys_progress(3 * HOME_ROW)
+    following = app_discover.next_up_entries(lib, state)
     for name, episodes in (("Filmy", False), ("Seriály", True)):
-        found = [(video["last_played"] or 0, _resume_now(_video_card(video, metas.get(video["meta_key"]), state)))
+        found = [(video["last_played"] or 0,
+                  app_discover.series_key(lib, video) if episodes else video["id"],
+                  _resume_now(_video_card(video, metas.get(video["meta_key"]), state)))
                  for video in videos if (video["kind"] == "episode") == episodes]
-        found += [(row["last_played"] or 0, _ivys_progress_card(row)) for row in television
+        found += [(row["last_played"] or 0, "ivys:%s" % (row["show_id"] if episodes else row["idec"]),
+                   _ivys_progress_card(row)) for row in television
                   if _ivys_is_film(lib, row["show_id"], row["title"], row["show_title"]) != episodes]
+        if episodes:
+            found += [(entry["time"], entry["key"], entry["card"]) for entry in following if not entry["page"]]
         found.sort(key=lambda entry: -entry[0])   # naposledy přehrané první, ať jsou odkudkoli
-        if found:
-            rows.append({"title": name, "items": [card for _played, card in found[:HOME_ROW]]})
-    following = app_discover.next_up_cards(lib, state)
-    if following:
-        rows.append({"title": "Další díly", "items": following})
+        cards, seen = [], set()
+        for _played, key, card in found:
+            if key in seen:
+                continue                          # starší díl téhož seriálu: karta už je
+            seen.add(key)
+            cards.append(card)
+        if cards:
+            rows.append({"title": name, "items": cards[:HOME_ROW]})
+        if episodes:
+            shown = seen
+    pages = [entry["card"] for entry in following if entry["page"] and entry["key"] not in shown]
+    if pages:
+        rows.append({"title": "Další díly", "items": pages})
     if not rows:
         rows.append({"title": "Rozkoukané", "hint": True, "items": _hint(
             "Nic rozkoukaného", "Sem se uloží film nebo díl, který nedokoukáte", "history",

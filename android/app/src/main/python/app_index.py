@@ -40,6 +40,8 @@ CHUNK = 2                        # tolik titulů najednou…
 GAP = 2.0                        # …a pak tolik sekund pauza; dotazy samy drží rozestup ``discover.GENTLE_PACE``
 START_DELAY = 20                 # s po otevření aplikace, než se začne procházet
 FAILURES_MAX = 3                 # po tolika nepovedených dávkách za sebou se procházení odloží
+STUCK_MAX = 3                    # titul, jehož ověření tolikrát selže (služba přitom odpovídá), se v tomto průchodu přeskočí
+STUCK_OK_WITHIN = 1800           # „služba odpovídá“ = jiný titul se podařilo ověřit nejvýš před tolika sekundami
 FRESH_DAYS = 30                  # jak dlouho je titul „nově na Přehraj.to“
 FRESH_LIMIT = 60                 # tolik titulů nejvýš ve výpisu novinek
 # (parametry výpisu, kolik stránek) – nejdřív to, co je vidět na hlavní obrazovce a v novinkách
@@ -132,6 +134,7 @@ def step(limit=None):
             return {"done": True, "checked": 0, "failed": False}
         position = 0                       # nový průchod: co je ověřené a platí, se přeskočí
         state["started"] = int(time.time())
+        state["stuck"] = {}
     kind, params, page = plan[position]
     try:
         items, _pages = discover._list_items(dict(params, page=page))
@@ -141,7 +144,14 @@ def step(limit=None):
     with api._library() as lib:
         shared = api._state(lib)
         known = discover._known(lib, kind, [item["id"] for item in items])
-    todo = [item for item in items if _wanted(known, kind, item)]
+    # Titul, jehož ověření pokaždé selže, ačkoli Přehraj.to jinak odpovídá (podivný název, chyba na
+    # jeho stránce…), by jinak držel celé procházení na této stránce plánu: po STUCK_MAX pokusech se
+    # v tomto průchodu přeskočí a zkusí se zase v příštím.
+    stuck = dict(state.get("stuck") or {})
+    todo = [item for item in items if _wanted(known, kind, item)
+            and int(stuck.get("%s:%s" % (kind, item["id"])) or 0) < STUCK_MAX]
+    # tituly, které už selhaly, až nakonec: ostatní na stránce se mezitím ověří
+    todo.sort(key=lambda item: int(stuck.get("%s:%s" % (kind, item["id"])) or 0))
     room = max(0, DAILY_LIMIT - int(state.get("count") or 0))
     batch = todo[:min(room, limit) if limit is not None else room]
     checked, failed = 0, False
@@ -157,7 +167,15 @@ def step(limit=None):
         if len(done) < len(chunk) and busy() and not discover.search_paused():
             batch = batch[:start]          # ustoupilo se výpisu nebo hledání: stránka se dodělá potom
             break
-        if discover.search_paused() or any("%s:%s" % (kind, item["id"]) not in fresh for item in chunk):
+        missing = ["%s:%s" % (kind, item["id"]) for item in chunk if "%s:%s" % (kind, item["id"]) not in fresh]
+        if done:
+            state["ok_at"] = int(time.time())
+        if missing and not discover.limited() and time.time() - float(state.get("ok_at") or 0) < STUCK_OK_WITHIN:
+            # Selhal titul, ne služba: Přehraj.to neomezuje dotazy a jiné tituly se před chvílí ověřit
+            # podařilo. Počítá se, kolikrát už (po chybě si služba dá krátkou přestávku a zkusí se znovu).
+            for key in missing:
+                stuck[key] = int(stuck.get(key) or 0) + 1
+        if discover.search_paused() or missing:
             failed = True                  # služba neodpovídá nebo omezuje dotazy: nemá cenu pokračovat
             break
         if start + CHUNK < len(batch):
@@ -167,13 +185,14 @@ def step(limit=None):
         position += 1                      # stránka je hotová
         if position >= len(plan):
             state["finished"] = int(time.time())
+            stuck = {}                     # v příštím průchodu dostanou šanci znovu
     # Stav se mezitím mohl změnit (změna nastavení začíná průchod znovu): zapsat jen to, co se tu změnilo.
     latest = _state()
     if latest.get("restart") != state.get("restart"):
         position = int(latest.get("step") or 0)
     else:
         latest.update({name: state[name] for name in ("finished", "started") if name in state})
-    latest.update(day=state["day"], count=state["count"], step=position,
+    latest.update(day=state["day"], count=state["count"], step=position, stuck=stuck, ok_at=state.get("ok_at") or 0,
                   pace=round(discover.gentle_pace(recover=bool(checked) and not failed), 2))
     state = latest
     _save(state)

@@ -2,7 +2,9 @@ package cz.petermikula.mojevidea
 
 import android.content.Context
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.util.UnstableApi
@@ -10,6 +12,10 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
+import java.nio.ByteBuffer
+import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.pow
 
 /**
  * Výstup zvuku přehrávače podle volby uživatele (`mode`) a posun zvuku vůči obrazu (`shiftUs`).
@@ -23,11 +29,15 @@ import androidx.media3.exoplayer.audio.ForwardingAudioSink
  *
  * Posun: soundbar zvuk zpracovává a zní pak později než obraz (nebo naopak). Přehrávač se řídí
  * časem zvuku, a tak stačí ten čas posunout – obraz i titulky se o tolik pozdrží nebo předběhnou.
+ *
+ * Noční režim (`night`): hlasité scény tišeji, tiché hlasitěji, řeč výrazněji ([NightAudioProcessor]).
+ * Zvuk k tomu musí zpracovat aplikace, a tak se při výstupu `auto` dekóduje jako u `pcm`.
  */
 @OptIn(UnstableApi::class)
 class AudioRenderersFactory(
     context: Context,
     private val mode: String,
+    private val night: Boolean = false,
     private val shiftUs: () -> Long,
 ) : DefaultRenderersFactory(context) {
     @Suppress("DEPRECATION")  // sestavení bez kontextu je záměr: výstup pak umí jen PCM, žádné předávání formátů
@@ -36,14 +46,93 @@ class AudioRenderersFactory(
         enableFloatOutput: Boolean,
         enableAudioTrackPlaybackParams: Boolean,
     ): AudioSink? {
-        val sink = when (mode) {
-            "stereo" -> DefaultAudioSink.Builder().setAudioProcessors(arrayOf<AudioProcessor>(StereoAudio.mixer())).build()
-            "pcm" -> DefaultAudioSink.Builder().build()
-            "pcm_soft" -> DefaultAudioSink.Builder()
-                .setAudioProcessors(arrayOf<AudioProcessor>(StereoAudio.bassTrim(StereoAudio.SOFT_BASS))).build()
-            else -> super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+        val processors = when (mode) {
+            "stereo" -> listOf<AudioProcessor>(StereoAudio.mixer())
+            "pcm_soft" -> listOf<AudioProcessor>(StereoAudio.bassTrim(StereoAudio.SOFT_BASS))
+            else -> emptyList()
+        } + (if (night) listOf<AudioProcessor>(NightAudioProcessor()) else emptyList())
+        val sink = if (mode == "auto" && !night) {
+            super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
+        } else {
+            DefaultAudioSink.Builder().setAudioProcessors(processors.toTypedArray()).build()
         } ?: return null
         return ShiftedAudioSink(sink, shiftUs)
+    }
+}
+
+/**
+ * Noční režim: zúžení dynamiky (kompresor) – co je hlasitější než `THRESHOLD`, se ztiší v poměru
+ * `RATIO`, a všechno se pak zesílí o `MAKEUP`. Výbuch tak nevzbudí sousedy a šepot je slyšet. U zvuku
+ * s šesti a více kanály navíc středový kanál (řeč) hraje o něco hlasitěji a basový tišeji. Zpracovává
+ * 16bitový i plovoucí zvuk PCM; počet kanálů ani formát nemění.
+ */
+@OptIn(UnstableApi::class)
+class NightAudioProcessor : BaseAudioProcessor() {
+    private companion object {
+        const val THRESHOLD = 0.1f      // −20 dB plné úrovně
+        const val RATIO = 4f
+        const val MAKEUP = 2.5f         // +8 dB
+        const val ATTACK_S = 0.005
+        const val RELEASE_S = 0.3
+        const val CENTER_GAIN = 1.4f    // střed (řeč) asi o 3 dB hlasitěji
+        const val LFE_GAIN = 0.5f       // basy o 6 dB tišeji
+        const val CENTER = 2
+        const val LFE = 3
+    }
+
+    private var envelope = 0f
+    private var attack = 0f
+    private var release = 0f
+
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT && inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT) {
+            // jiný formát (24bitový…) projde beze změny: noční režim nesmí přehrávání shodit
+            return AudioProcessor.AudioFormat.NOT_SET
+        }
+        attack = exp(-1.0 / (inputAudioFormat.sampleRate * ATTACK_S)).toFloat()
+        release = exp(-1.0 / (inputAudioFormat.sampleRate * RELEASE_S)).toFloat()
+        return inputAudioFormat
+    }
+
+    override fun queueInput(inputBuffer: ByteBuffer) {
+        val format = inputAudioFormat
+        val channels = format.channelCount
+        val floats = format.encoding == C.ENCODING_PCM_FLOAT
+        val bytes = if (floats) 4 else 2
+        val frames = inputBuffer.remaining() / (bytes * channels)
+        val output = replaceOutputBuffer(frames * bytes * channels)
+        val frame = FloatArray(channels)
+        repeat(frames) {
+            var peak = 0f
+            for (channel in 0 until channels) {
+                var sample = if (floats) inputBuffer.float else inputBuffer.short / 32768f
+                if (channels >= 6) {
+                    if (channel == CENTER) sample *= CENTER_GAIN else if (channel == LFE) sample *= LFE_GAIN
+                }
+                frame[channel] = sample
+                peak = maxOf(peak, abs(sample))
+            }
+            envelope = if (peak > envelope) attack * envelope + (1 - attack) * peak
+            else release * envelope + (1 - release) * peak
+            val gain = MAKEUP * if (envelope > THRESHOLD) gainAbove(envelope) else 1f
+            for (channel in 0 until channels) {
+                val value = (frame[channel] * gain).coerceIn(-1f, 1f)
+                if (floats) output.putFloat(value) else output.putShort((value * 32767f).toInt().toShort())
+            }
+        }
+        inputBuffer.position(inputBuffer.limit())
+        output.flip()
+    }
+
+    /** Zesílení nad prahem: úroveň `level` se ztiší na `THRESHOLD * (level / THRESHOLD)^(1/RATIO)`. */
+    private fun gainAbove(level: Float): Float = THRESHOLD * (level / THRESHOLD).pow(1f / RATIO) / level
+
+    override fun onReset() {
+        envelope = 0f
+    }
+
+    override fun onFlush() {
+        envelope = 0f
     }
 }
 

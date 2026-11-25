@@ -72,6 +72,9 @@ class TitleActivity : FragmentActivity() {
         supportFragmentManager.beginTransaction().replace(R.id.title_rows, results).commit()
         val area = findViewById<View>(R.id.title_rows)
         window.decorView.viewTreeObserver.addOnGlobalFocusChangeListener { _, focused ->
+            // Než se stránka poprvé naplní, výběr skáče, jak přibývají tlačítka a řady: rozložení se
+            // podle něj nemění (dřív se stránka krátce ukázala v rozložení pro procházení karet).
+            if (!loadedOnce) return@addOnGlobalFocusChangeListener
             var view: View? = focused
             while (view != null && view !== area) view = view.parent as? View
             expand(view === area)
@@ -132,8 +135,24 @@ class TitleActivity : FragmentActivity() {
                 }
             }
             played = false
-            loadedOnce = true
+            if (!loadedOnce) {
+                loadedOnce = true
+                // řady si po naplnění umí vzít výběr samy: na první stránce má být na tlačítku Přehrát
+                window.decorView.post {
+                    if (isFinishing || isDestroyed || actions.childCount == 0) return@post
+                    if (currentFocus?.let { inside(it, findViewById(R.id.title_rows)) } == true) {
+                        actions.getChildAt(0)?.requestFocus()
+                    }
+                    expand(false)
+                }
+            }
         }
+    }
+
+    private fun inside(view: View, area: View): Boolean {
+        var current: View? = view
+        while (current != null && current !== area) current = current.parent as? View
+        return current === area
     }
 
     /** Stránka se vůbec nenačetla: chyba musí být vidět (popis se při výběru v řadách skrývá) a jít zopakovat. */

@@ -2268,9 +2268,17 @@ def play_next(params):
     return {"next": None}
 
 
-def next_up_cards(lib, state, limit=10):
-    """Karty „Další díly“: po dokoukaném dílu seriálu z katalogu ten následující, u seriálů z Objevuj stránka."""
-    cards, seen = [], set()
+def series_key(lib, video):
+    """Čím se pozná seriál, ke kterému díl patří: titul z Objevuj („tv:1399“), když se díl pustil odtamtud,
+    jinak seriál z katalogu (``meta_key``). Podle toho má každý seriál v Rozkoukaných jen jednu kartu."""
+    return api._title_of(lib.get_kv(api.ART_PREFIX + video["id"]) or "") or video.get("meta_key") or video["id"]
+
+
+def next_up_entries(lib, state, limit=10):
+    """Co nabídnout po dokoukaném dílu: ``[{"time", "key", "card", "page"}]``. U seriálu z katalogu je
+    karta rovnou další díl (``page`` False), u seriálu z Objevuj karta jeho stránky (``page`` True, stránka
+    sama nabídne díl, kterým se pokračuje). ``time`` je, kdy se hrál dokoukaný díl; ``key`` viz ``series_key``."""
+    entries, seen = [], set()
     hidden = {meta["key"] for meta in lib.hidden_progress()}   # seriály, u kterých si uživatel další díly nepřál
     for video in lib.history_videos(limit=40, include_search=True):
         if video["kind"] != "episode" or not video["episode"] or video["meta_key"] in seen:
@@ -2287,7 +2295,8 @@ def next_up_cards(lib, state, limit=10):
             card["subtitle"] = " · ".join(part for part in (note, card["subtitle"]) if part)
             card["menu"] = (card.get("menu") or []) + [{"title": "Nenabízet další díly", "target": api._target(
                 "command", "next_up_hide", {"key": video["meta_key"]})}]
-            cards.append(card)
+            entries.append({"time": video.get("last_played") or 0, "key": series_key(lib, video), "card": card,
+                            "page": False})
     for tmdb_id in _recent_series(lib):
         info = _title_info(lib, "tv", tmdb_id)
         if info:
@@ -2296,8 +2305,13 @@ def next_up_cards(lib, state, limit=10):
             card["subtitle"] = "Pokračovat ve sledování"
             card["menu"] = (card.get("menu") or []) + [{"title": "Nenabízet další díly", "target": api._target(
                 "command", "next_up_hide", {"tmdb": tmdb_id})}]
-            cards.append(card)
-    return cards[:limit]
+            entries.append({"time": 0, "key": "tv:%s" % tmdb_id, "card": card, "page": True})
+    return entries[:limit]
+
+
+def next_up_cards(lib, state, limit=10):
+    """Karty „Další díly“ (viz ``next_up_entries``)."""
+    return [entry["card"] for entry in next_up_entries(lib, state, limit)]
 
 
 def next_up_hide(params):

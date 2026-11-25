@@ -95,6 +95,8 @@ class PlayerActivity : FragmentActivity() {
     private var audioChoice = ""
     // výstup zvuku: auto (prostorový zvuk se předává) | pcm, pcm_soft (dekóduje aplikace, 5.1 zůstává) | stereo
     private var audioMode = "auto"
+    private var nightMode = false          // noční režim zvuku (viz NightAudioProcessor)
+    private var appliedNight = false
     // posun zvuku vůči obrazu (ms; kladné = zvuk zní později): pro každý výstup zvlášť, platí hned
     private var audioDelays = JSONObject()
     @Volatile private var audioDelayMs = 0
@@ -186,10 +188,11 @@ class PlayerActivity : FragmentActivity() {
             result.data?.let { style ->
                 applySubtitleStyle(style)
                 audioMode = style.optString("audio_output").ifEmpty { "auto" }
+                nightMode = style.optBoolean("audio_night")
                 audioDelays = style.optJSONObject("audio_delays") ?: JSONObject()
                 audioDelayMs = audioDelays.optInt(audioMode)
                 // přehrávač už mezitím hraje s jiným výstupem zvuku: sestavit ho znovu na stejném místě
-                if (player != null && audioMode != appliedAudioMode) rebuild()
+                if (player != null && (audioMode != appliedAudioMode || nightMode != appliedNight)) rebuild()
             }
         }
         resolve()
@@ -244,6 +247,15 @@ class PlayerActivity : FragmentActivity() {
     override fun onStart() {
         super.onStart()
         visible = true
+        // časovače zastavené při odchodu na pozadí (viz onStop) zase běží
+        if (player != null && !live) {
+            handler.removeCallbacks(saver)
+            handler.postDelayed(saver, SAVE_EVERY_MS)
+        }
+        if (playerView.isControllerFullyVisible) {
+            handler.removeCallbacks(clock)
+            handler.post(clock)
+        }
     }
 
     /** Rozkoukané video: zeptat se, jestli navázat, nebo začít znovu. */
@@ -337,7 +349,8 @@ class PlayerActivity : FragmentActivity() {
         // Ostatní výstupy zvuku: dekóduje vždy aplikace a ven jde PCM – 5.1 beze změny, s tišším basovým
         // kanálem, nebo převedené na dva kanály (viz StereoAudio.kt).
         appliedAudioMode = audioMode
-        val renderers = AudioRenderersFactory(this, audioMode) { audioDelayMs * 1000L }
+        appliedNight = nightMode
+        val renderers = AudioRenderersFactory(this, audioMode, nightMode) { audioDelayMs * 1000L }
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
         val exo = ExoPlayer.Builder(this, renderers)
@@ -609,22 +622,23 @@ class PlayerActivity : FragmentActivity() {
             .showStyled()
     }
 
-    /** Možnosti výstupu zvuku (název a krátké vysvětlení) tak, jak je dodala logika. */
     /**
-     * Zvuk: jazykové stopy a pod nimi dva řádky – Výstup zvuku (co se stane s prostorovým zvukem)
-     * a Posun zvuku. Dřív byly jen tlačítkem pod seznamem, které se na televizi snadno přehlédne.
+     * Zvuk: jazykové stopy a pod nimi řádky Výstup zvuku (co se stane s prostorovým zvukem), Posun
+     * zvuku a Noční režim. Dřív byly jen tlačítkem pod seznamem, které se na televizi snadno přehlédne.
      */
     private fun chooseAudio(available: List<Tracks.Group>) {
         val current = available.indexOfFirst { it.isSelected }
         val names = available.mapIndexed { index, group -> (if (index == current) "✓  " else "     ") + label(group) } +
             listOf("Výstup zvuku: " + audioOutputTitle(audioMode).substringBefore(" –") + "  ›",
-                "Posun zvuku: " + delayText(audioDelayMs) + "  ›")
+                "Posun zvuku: " + delayText(audioDelayMs) + "  ›",
+                "Noční režim: " + if (nightMode) "zapnutý" else "vypnutý")
         AlertDialog.Builder(this)
             .setTitle("Zvuk")
             .setAdapter(Dialogs.items(this, names)) { _, which ->
                 when (which) {
                     available.size -> chooseAudioOutput()
                     available.size + 1 -> chooseAudioDelay()
+                    available.size + 2 -> toggleNight()
                     else -> {
                         val playing = player ?: return@setAdapter
                         val group = available[which]
@@ -640,6 +654,19 @@ class PlayerActivity : FragmentActivity() {
             .showStyled()
     }
 
+    /**
+     * Noční režim zapnout nebo vypnout: přehrávač se sestaví znovu a naváže na stejném místě. Zvuk
+     * zpracovává aplikace, a tak se i u výstupu „předat soundbaru“ dekóduje v aplikaci (5.1 zůstává).
+     */
+    private fun toggleNight() {
+        nightMode = !nightMode
+        Api.send("audio_night_set", JSONObject().put("on", nightMode))
+        Toast.makeText(this, if (nightMode) "Noční režim zapnutý: hlasité scény tišeji, řeč výrazněji"
+            else "Noční režim vypnutý", Toast.LENGTH_LONG).show()
+        rebuild()
+    }
+
+    /** Možnosti výstupu zvuku (název a krátké vysvětlení) tak, jak je dodala logika. */
     private fun audioOutputs(): List<JSONObject> = subtitleStyle?.optJSONArray("audio_outputs")?.let { list ->
         (0 until list.length()).mapNotNull { list.optJSONObject(it) }
     }.orEmpty()
@@ -1018,6 +1045,11 @@ class PlayerActivity : FragmentActivity() {
         // ani to, které se stihlo spustit těsně předtím. Po návratu čeká pozastavené.
         if (!isFinishing) player?.pause()
         saveProgress(ended = false)
+        // Na pozadí nemají časovače co dělat: pozastavené video se nemusí každých 15 s ukládat a čas
+        // konce na liště nikdo nevidí. Dřív běžely dál, dokud systém aplikaci neukončil.
+        handler.removeCallbacks(saver)
+        handler.removeCallbacks(clock)
+        handler.removeCallbacks(healthy)
         WatchNext.sync(this, delayMs = 1500)  // až se uloží pozice
         if (isFinishing) release()
     }

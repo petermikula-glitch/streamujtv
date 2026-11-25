@@ -1027,11 +1027,16 @@ def test_next_episode_from_the_catalogue_follows_a_finished_one(api):
     assert api("play_next", track="")["next"] is None and api("play_next", track=REF)["next"] is None
 
     api("progress_save", track=first, position=1190, total=1200, ended=True)
-    row = _section(api, "progress")["Další díly"]                           # po dokoukání čeká další díl na hlavní obrazovce
+    # po dokoukání čeká další díl rovnou na kartě seriálu (jedna karta za seriál)
+    row = _section(api, "progress")["Seriály"]
     assert len(row) == 1 and row[0]["target"]["params"] == {"vid": second}
     assert row[0]["subtitle"].startswith("Další díl")
+    assert "Další díly" not in _section(api, "progress")
     api("progress_save", track=second, position=300, total=1200, started=True)
     assert "Další díly" not in _section(api, "progress")                    # rozkoukaný díl je už mezi rozkoukanými
+    api("progress_save", track=first, position=400, total=1200, started=False)   # starší díl znovu rozkoukaný…
+    api("progress_save", track=second, position=320, total=1200)
+    assert len(_section(api, "progress")["Seriály"]) == 1                    # …ale seriál má pořád jednu kartu
     # karta v Rozkoukaných naváže rovnou, bez dotazu „Pokračovat, nebo od začátku?“
     assert _section(api, "progress")["Seriály"][0]["target"]["params"] == {"vid": second, "resume": True}
 
@@ -2697,7 +2702,8 @@ def test_card_menu_marks_watched_and_clears_in_progress(api):
     mark = next(item for item in episode["menu"] if item["title"] == "Označit jako zhlédnuté")["target"]
     assert api(mark["call"], **mark["params"])["toast"] == "Označeno jako zhlédnuté."
     rows = _section(api, "progress")                                         # díl je zhlédnutý: nabízí se další
-    assert "Seriály" not in rows and rows["Další díly"][0]["target"]["params"] == {"vid": second}
+    assert rows["Seriály"][0]["target"]["params"] == {"vid": second}       # (karta seriálu teď nabízí další díl)
+    assert len(rows["Seriály"]) == 1 and "Další díly" not in rows
     card = next(item for item in api("show", key="show:archa")["items"] if item["target"].get("params") == {"vid": first})
     back = next(item for item in card["menu"] if item["title"] == "Označit jako nezhlédnuté")["target"]
     api(back["call"], **back["params"])
@@ -3838,6 +3844,44 @@ def test_list_of_available_titles_fills_in_the_background(api, monkeypatch):
     monkeypatch.setattr(index.time, "time", lambda: now + 13 * 86400)
     index._save(dict(index._state(), step=0))                                # znovu na stránce filmů
     assert index.step() == {"done": False, "checked": 0, "failed": True} and index._state()["step"] == 0
+
+
+def test_title_that_always_fails_does_not_hold_the_crawl(api, monkeypatch):
+    """Titul, jehož hledání pokaždé skončí chybou, ačkoli Přehraj.to jinak odpovídá, nesmí zadržet plnění
+    seznamu na jedné stránce plánu: po několika pokusech se v tomto průchodu přeskočí."""
+    index, discover = app_api.app_index, app_api.app_discover
+    api("settings_set", tmdb_key="k" * 32)
+    monkeypatch.setattr(index, "GAP", 0)
+    monkeypatch.setattr(index, "LISTS", (({"category": "popular"}, 1),))
+    monkeypatch.setattr(index, "GENRE_PAGES", 0)
+    monkeypatch.setattr(index, "YEARS_BACK", {"movie": 0, "tv": 0})
+    monkeypatch.setattr(index, "CZECHOSLOVAK_YEARS", 0)
+    monkeypatch.setattr(discover, "_ivys_match", lambda kind, names, year: "")
+    films = [{"id": 11, "title": "Pelíšky", "release_date": "1999-04-08"},
+             {"id": 12, "title": "Podivný", "release_date": "2001-01-01"}]
+    _fake_tmdb(monkeypatch, {"/movie/popular": {"results": films, "total_pages": 1},
+                             "/tv/popular": {"results": [], "total_pages": 1}})
+
+    def search(client, query, page, cursor):
+        if "Podivný" in query:
+            raise app_api.provider.ProviderError("chyba na stránce výsledků")
+        return [_web(32, "Pelisky.1999.CZ.1080p", 7000)] if "Pelíšky" in query else [], ""
+
+    monkeypatch.setattr(app_api.provider, "search_catalog", search)
+    results = [index.step() for _ in range(index.STUCK_MAX)]
+    assert all(result["failed"] for result in results) and index._state()["step"] == 0
+    assert index.step()["failed"] is False and index._state()["step"] >= 1     # stránka je hotová, jde se dál
+    assert index._state()["stuck"] == {"movie:12": index.STUCK_MAX}
+
+
+def test_night_mode_is_remembered_for_the_device(api):
+    assert api("subtitle_style")["audio_night"] is False
+    assert api("audio_night_set", on=True) == {"audio_night": True}
+    assert api("subtitle_style")["audio_night"] is True
+    api("profile_add", avatar="owl", text="Druhý")
+    api("profile_switch", id="p2")
+    assert api("subtitle_style")["audio_night"] is True                       # platí pro celé zařízení
+    assert api("audio_night_set", on=False) == {"audio_night": False}
 
 
 def test_playback_puts_background_checks_on_hold(api):

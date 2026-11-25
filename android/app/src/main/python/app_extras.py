@@ -416,6 +416,8 @@ def subtitle_style(params):
             "audio_outputs": [{"id": name, "title": title, "note": note} for name, title, note in AUDIO_OUTPUT_CHOICES],
             # posun zvuku vůči obrazu (ms) pro každý výstup zvlášť: soundbar zpožďuje předaný a dekódovaný zvuk různě
             "audio_delays": _audio_delays(settings),
+            # noční režim: tišší hlasité scény, hlasitější tiché, výraznější řeč (pro celé zařízení)
+            "audio_night": bool(settings.get("audio_night")),
             "audio_delay": {"min": AUDIO_DELAY_MIN, "max": AUDIO_DELAY_MAX, "step": AUDIO_DELAY_STEP},
             "scale": next(scale for name, _title, scale in SUBTITLE_SIZES if name == size),
             "sizes": [{"id": name, "title": title, "scale": scale} for name, title, scale in SUBTITLE_SIZES],
@@ -466,6 +468,13 @@ def audio_delay_set(params):
 
         api._change_settings(change)
     return {"audio_delays": _audio_delays(api._settings())}
+
+
+def audio_night_set(params):
+    """Noční režim zvuku zapnout (``on``) nebo vypnout; platí pro celé zařízení, jako výstup zvuku."""
+    on = bool(params.get("on"))
+    api._change_settings(lambda settings: settings.update(audio_night=on))
+    return {"audio_night": on}
 
 
 def audio_output_set(params):
@@ -569,5 +578,5 @@ ACTIONS = {
     "profile_rename": profile_rename, "profile_avatar": profile_avatar, "profile_delete": profile_delete,
     "profile_switch": profile_switch, "watch_next": watch_next, "track_prefs": track_prefs,
     "download_season": download_season, "subtitle_style": subtitle_style, "subtitle_style_set": subtitle_style_set,
-    "audio_output_set": audio_output_set, "audio_delay_set": audio_delay_set,
+    "audio_output_set": audio_output_set, "audio_delay_set": audio_delay_set, "audio_night_set": audio_night_set,
 }

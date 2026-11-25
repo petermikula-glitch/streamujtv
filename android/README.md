@@ -484,6 +484,24 @@ Tři tlačítka: znovu zkontrolovat, zkouška Přehraj.to a hlášení.
   k Přehraj.to (kód se ukazuje jen na televizi uživatele); když přihlašovací jméno e-mail není, je
   odkaz bez adresáta.
 
+**Rozkoukané – jedna karta za seriál** (`_progress_rows`, `app_discover.series_key`, `next_up_entries`):
+v řadě Seriály má každý seriál jedinou kartu – naposledy přehraný rozkoukaný díl, a když je dokoukaný,
+rovnou další díl z katalogu. Seriál se pozná podle titulu z Objevuj (`art:<video>`), jinak podle seriálu
+v katalogu; pořady z iVysílání podle pořadu. Seriály z Objevuj, u kterých se pokračuje dalším dílem,
+zůstávají v řadě Další díly (karta vede na jejich stránku, ta nabídne díl, kterým se pokračuje).
+
+**Noční režim zvuku** (`NightAudioProcessor` ve `StereoAudio.kt`, řádek v okně Zvuk, nastavení
+`audio_night` pro celé zařízení): kompresor dynamiky (práh −20 dB, poměr 4 : 1, zesílení +8 dB, náběh
+5 ms, doznění 300 ms), u zvuku s šesti a více kanály střed +3 dB a basy −6 dB. Zvuk musí zpracovat
+aplikace, a tak se při výstupu „předat soundbaru“ dekóduje jako u „dekóduje aplikace“; jiný formát než
+16bitový nebo plovoucí PCM projde beze změny.
+
+**Drobnosti z kontroly kódu (0.31.0):** přehrávač na pozadí zastaví časovače (ukládání pozice každých
+15 s, čas konce) a po návratu je spustí znovu; stránka titulu během prvního načítání nemění rozložení
+podle toho, kam zrovna skočí výběr, a po naplnění vrátí výběr na tlačítko Přehrát; titul, jehož ověření
+pokaždé selže, ačkoli jiné tituly se před chvílí ověřit podařilo a Přehraj.to neomezuje dotazy, se po
+`STUCK_MAX` pokusech v tomto průchodu plánu přeskočí (dřív dokázal zadržet plnění seznamu na jedné stránce).
+
 **Seznam se plní i při spořiči** (`IndexService.kt`): po otevření aplikace se spustí služba v popředí
 (typ `dataSync`, oznámení s nejnižší důležitostí, částečný wake lock nejvýš `MAX_HOURS` = 10 h). Bez ní
 Android 14 aplikaci, která běží jen na pozadí (spořič obrazovky, noc), po pár minutách zmrazí a procházení
@@ -660,11 +678,8 @@ na pozadí.
 
 Domluvené s vlastníkem, zatím neudělané (pořadí není závazné):
 
-- **Méně dotazů na jeden titul při ověřování.** Titul, který na Přehraj.to není, stojí až šest hledání
-  (`_count_versions`: tři pod českým a původním názvem, tři pod dalšími názvy z TMDB). Zkrátit na dvě až
-  tři podle toho, co ukáže Diagnostika o odmítaných dotazech (HTTP 429). Spolu s tím tři drobnosti
-  z kontroly kódu: časovače přehrávače běží i při pauze na pozadí, stránka titulu se krátce načítá ve
-  špatném rozložení, a titul, jehož hledání pokaždé skončí chybou, dokáže zadržet plnění seznamu na
-  jedné stránce plánu.
+- **Méně dotazů na jeden titul při ověřování.** Na pozadí stojí nenalezený titul už jen tři hledání
+  (0.30.0 vypustila další názvy z TMDB). Případně dál zkrátit podle toho, co ukáže Diagnostika
+  o odmítaných dotazech (HTTP 429). (Tři drobnosti z kontroly kódu, které tu byly, opravila verze 0.31.0.)
 - **Zkušební kanál aktualizací.** Každé vydání jde dnes rovnou do televize. Možnost označit vydání jako
   zkušební a instalovat ho jen na vyžádání; vyžaduje úpravu `.github/workflows/` (souhlas vlastníka).

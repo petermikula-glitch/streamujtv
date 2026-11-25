@@ -84,6 +84,9 @@ totéž s tlumenými basy, nebo stereo. Když film hučí nebo duní, zkuste „
 
 Posun zvuku – když zvuk nesedí na ústa. Posouvá se po 25 ms a změna platí hned.
 
+Noční režim – hlasité scény tišeji, tiché hlasitěji a řeč výrazněji, ať se v noci nemusí pořád \
+sahat na hlasitost. Zapíná se a vypíná klepnutím a platí pro všechna videa, dokud ho nevypnete.
+
 Titulky – výběr nebo vypnutí; „Velikost a pozadí“ mění jejich vzhled.
 
 Co zvolíte u jednoho dílu, platí pro celý seriál.
@@ -118,7 +121,8 @@ až se objeví.
 
 Rozkoukané: všechno, co jste nedokoukali, s ukazatelem, kde jste skončili. Nahoře je velký panel \
 s tím posledním. Klepnutí na kartu pustí film nebo díl rovnou od místa, kde jste skončili; od začátku \
-ho pustíte podržením OK → Přehrát od začátku.
+ho pustíte podržením OK → Přehrát od začátku. Každý seriál tu má jednu kartu: rozkoukaný díl, a když \
+jste díl dokoukali, rovnou ten další.
 
 Odebrat z Rozkoukaných: podržte OK na kartě a zvolte „Odebrat z Rozkoukaných“. Stejně jde video \
 označit jako zhlédnuté nebo nezhlédnuté.
