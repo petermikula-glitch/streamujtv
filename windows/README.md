@@ -15,16 +15,20 @@ přenést jinam (i na flashku). Do systému se nic nezapisuje.
 | Logika | `android/app/src/main/python/` a sdílené moduly doplňku pro Kodi | **stejné soubory jako na televizi** (při sestavení se zkopírují do `build/logic`) |
 | Server okna | `promitarna_win/server.py` | jen na `127.0.0.1`, s tajným klíčem v adrese; `POST /api/<akce>` = `app_api.call` |
 | Okno | `ui/index.html`, `ui/app.js`, `ui/style.css` | vykresluje obrazovky podle dat z logiky – cíle karet (`target.type`) jako `Navigator.kt` |
-| Ikony a malby | `build_assets.py` | vektorové ikony Androidu → SVG, malby `drawable-nodpi` beze změny (do `ui/assets`, negeneruje se do gitu) |
+| Ikony a malby | `build_assets.py` | vektorové ikony Androidu → SVG, malby `drawable-nodpi` beze změny, ikona programu ze znaku loga (do `ui/assets`, negeneruje se do gitu) |
 | Přehrávání | `promitarna_win/player.py` | přibalený **mpv**; pozice se ukládá do logiky (`progress_save`), po dokoukání `play_next` |
 | Stahování | `promitarna_win/downloads.py` | totéž co `DownloadService` na televizi (navazování `.part`, titulky) |
-| Spuštění | `promitarna_win/app.py`, `Promitarna.py` | okno přes pywebview (WebView2), jinak Edge v režimu aplikace |
+| Plnění na pozadí | `promitarna_win/background.py` | totéž co `IndexService` na televizi: každých 5 minut a po změně nastavení `index_keepalive`; počítač mezitím neusne (nejvýš 10 h) |
+| Spuštění | `promitarna_win/app.py`, `Promitarna.py` | okno přes pywebview (WebView2), jinak Edge v režimu aplikace; po zavření okna skončí celý proces i s mpv a Edge (nic nedrží soubory) |
 | Sestavení | `build.py`, workflow `windows.yml` | PyInstaller + mpv → `dist/Promitarna-<verze>-windows.zip` |
 
 Zvuk v mpv podle nastavení z televize (`subtitle_style`): výstup „předat soundbaru“ = `--audio-spdif`
 (passthrough Dolby/DTS přes HDMI), „dekóduje aplikace“ = dekóduje mpv, „s tlumenými basy“ = filtr
 `lowshelf`, „Stereo“ = `--audio-channels=stereo`; posun zvuku = `--audio-delay`; noční režim =
 kompresor `acompressor` (stejné hodnoty jako `NightAudioProcessor`).
+
+Hlavní nabídka je stále nahoře (sekce vedle sebe), obsah má celou šířku okna; dlaždice bez plakátu
+(kategorie, nástroje) jsou na šířku přes celé okno.
 
 Ovládání: myš, nebo klávesnice – šipky, Enter, Esc (zpět), podržený Esc (hlavní nabídka), klávesa Menu,
 `m` nebo pravé tlačítko myši (nabídka karty), `/` (hledat). V mpv: mezerník, šipky, `#` zvuková stopa,

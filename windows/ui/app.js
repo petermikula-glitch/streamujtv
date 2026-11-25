@@ -151,12 +151,16 @@ function cardNode(card, onOpen) {
   return node;
 }
 
+// řada jen z dlaždic bez plakátu (kategorie, nástroje): na šířku přes celé okno
+// (vlastní malby „res:“ jako avatar profilu se počítají k dlaždicím, plakát filmu ne)
+const onlyTiles = (cards) => cards.length > 0 && cards.every((card) => !card.image || card.image.startsWith("res:"));
+
 function rowsNode(rows, onOpen) {
   const box = el("div", "rows");
   for (const row of rows || []) {
     if (!row.items || !row.items.length) continue;
     box.append(el("h2", "row", row.title || ""));
-    const items = el("div", "row-items");
+    const items = el("div", onlyTiles(row.items) ? "tiles" : "row-items");
     for (const card of row.items) items.append(cardNode(card, onOpen));
     box.append(items);
   }
@@ -177,7 +181,6 @@ let section = 0;
 
 function setCrumbs() {
   $("#crumbs").textContent = stack.length ? stack[stack.length - 1].title || "" : "";
-  document.body.classList.toggle("wide", stack.length > 0);
 }
 
 function show(screen) {
@@ -252,8 +255,15 @@ function renderSide() {
       const icon = el("img");
       icon.src = "ui/assets/ic_" + item.icon + ".svg";
       button.append(icon, el("span", "", item.title));
-      button.onclick = () => { section = index; renderHome(); const first = $("#screen .f"); if (first) first.focus(); };
-      button.onfocus = () => { if (section !== index) { section = index; renderHome(true); } };
+      // nabídka je vidět stále: z hlubší obrazovky klepnutí vede rovnou na sekci
+      button.onclick = () => {
+        section = index;
+        if (stack.length) { stack.length = 0; setCrumbs(); }
+        renderHome();
+        const first = $("#screen .f");
+        if (first) first.focus();
+      };
+      button.onfocus = () => { if (!stack.length && section !== index) { section = index; renderHome(true); } };
       side.append(button);
     });
   }
@@ -306,7 +316,7 @@ async function renderList(screen) {
   const items = data.items || [];
   if (data.status) box.append(el("div", "status", data.status));
   if (!items.length) { box.append(el("div", "empty", data.empty || "Nic tu není.")); }
-  const grid = el("div", "grid" + (items.some((card) => card.wide) && items.every((card) => card.wide || !card.image) ? " wide" : ""));
+  const grid = el("div", onlyTiles(items) ? "tiles" : "grid" + (items.some((card) => card.wide) && items.every((card) => card.wide || !card.image) ? " wide" : ""));
   for (const card of items) grid.append(cardNode(card, open));
   box.append(grid);
   let next = data.next;
@@ -774,6 +784,10 @@ $("#profile").onclick = () => show({kind: "list", call: "profiles", params: {}, 
 // okno se hlásí, že je otevřené (v prohlížeči podle toho aplikace pozná, že ji uživatel zavřel)
 setInterval(() => local("alive"), 10000);
 local("alive");
+// zavřené okno prohlížeče: program skončí hned (ne až po 45 s), ať nedrží soubory ve složce
+window.addEventListener("pagehide", () => {
+  try { navigator.sendBeacon("/local/closed?t=" + encodeURIComponent(window.TOKEN), "{}"); } catch (error) { /* nic */ }
+});
 
 // --- start -------------------------------------------------------------------------------------------
 

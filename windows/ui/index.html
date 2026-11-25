@@ -5,17 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Promítárna</title>
 <link rel="stylesheet" href="ui/style.css">
-<link rel="icon" href="ui/assets/logo.png">
+<link rel="icon" href="ui/assets/icon.png">
 </head>
 <body>
 <div id="app">
   <header id="top">
     <button id="search" class="f orb" title="Hledat (/)" aria-label="Hledat"><img src="ui/assets/ic_tile_search.svg" alt=""></button>
     <button id="profile" class="f chip" title="Kdo se dívá"><img id="avatar" alt=""><span id="who"></span></button>
-    <div id="crumbs"></div>
+    <nav id="side"></nav>
     <div id="brand"><img src="ui/assets/logo.png" alt="Promítárna"></div>
   </header>
-  <nav id="side"></nav>
+  <div id="crumbs"></div>
   <main id="screen" tabindex="-1"></main>
 </div>
 <div id="overlay" hidden></div>

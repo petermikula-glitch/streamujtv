@@ -2,6 +2,7 @@
 
 - ``res/drawable/ic_*.xml`` (vektorové ikony Androidu) → ``ui/assets/ic_*.svg`` (barva ``currentColor``),
 - ``res/drawable-nodpi/*.webp|png`` (malby dlaždic, avatary, pozadí) → ``ui/assets/`` beze změny,
+- ``ui/assets/icon.png``: ikona programu (kruh s trojúhelníkem z loga na papírovém podkladu),
 - ``ui/assets/manifest.json``: seznam názvů, ať rozhraní ví, co je k dispozici.
 
 Zdroj je jen jeden (aplikace pro Android); složka ``ui/assets`` se vytváří při sestavení a do
@@ -80,9 +81,41 @@ def build(out=OUT):
         if name.endswith((".webp", ".png")):
             shutil.copyfile(os.path.join(RES, "drawable-nodpi", name), os.path.join(out, name))
             names["art"].append(name)
+    app_icon(os.path.join(out, "icon.png"))
     with open(os.path.join(out, "manifest.json"), "w", encoding="utf-8") as target:
         json.dump(names, target, ensure_ascii=False)
     return names
+
+
+ICON_SIZE = 256
+ICON_PAPER = (227, 219, 200, 255)   # @color/panel
+
+
+def app_icon(target):
+    """Ikona programu: znak z loga (kruh s červeným trojúhelníkem, bez nápisu – ten je v malé ikoně
+    nečitelný) na zaobleném papírovém čtverci, jako ikona aplikace na televizi. Bez knihovny Pillow
+    se použije celé logo."""
+    logo = os.path.join(RES, "drawable-nodpi", "logo.png")
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        shutil.copyfile(logo, target)
+        return False
+    source = Image.open(logo).convert("RGBA")
+    alpha = source.split()[3]
+    columns = [x for x in range(source.width) if alpha.crop((x, 0, x + 1, source.height)).getextrema()[1] > 20]
+    end = next((b for a, b in zip(columns, columns[1:]) if b - a > 5), None)   # mezera mezi znakem a nápisem
+    end = columns[columns.index(end) - 1] + 1 if end else source.width
+    mark = source.crop((0, 0, end, source.height))                     # znak vlevo, bez nápisu
+    mark = mark.crop(mark.getbbox() or (0, 0, mark.width, mark.height))
+    icon = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
+    ImageDraw.Draw(icon).rounded_rectangle((8, 8, ICON_SIZE - 9, ICON_SIZE - 9), radius=52, fill=ICON_PAPER)
+    side = int(ICON_SIZE * 0.74)
+    scale = float(side) / max(mark.width, mark.height)
+    mark = mark.resize((int(mark.width * scale), int(mark.height * scale)), Image.LANCZOS)
+    icon.alpha_composite(mark, ((ICON_SIZE - mark.width) // 2, (ICON_SIZE - mark.height) // 2))
+    icon.save(target)
+    return True
 
 
 if __name__ == "__main__":

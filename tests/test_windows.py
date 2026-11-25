@@ -216,3 +216,45 @@ def test_vector_icons_become_svg(tmp_path):
     svg = (tmp_path / "ic_tile_help.svg").read_text(encoding="utf-8")
     assert svg.startswith("<svg") and 'stroke="currentColor"' in svg and "<path" in svg
     assert json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8")) == names
+
+
+def test_background_listing_is_restarted_regularly_and_after_new_settings(served):
+    """Plnění seznamu na pozadí: když se po otevření okna nerozběhlo (chybělo přihlášení), spustí se
+    po změně nastavení a pak se pravidelně obnovuje – jako služba IndexService na televizi."""
+    from promitarna_win.background import Keeper
+    backend, url, api, _opened = served
+    api.answers["index_keepalive"] = {"active": True}
+    keeper = Keeper(backend.call, check_every=30, first_check=30)
+    backend.keeper = keeper
+    keeper.start()
+    try:
+        _post(url, "/api/home", backend.token, {})              # obyčejná akce nic nespouští
+        time.sleep(0.2)
+        assert [call for call in api.calls if call[0] == "index_keepalive"] == []
+        _post(url, "/api/settings_set", backend.token, {"tmdb_key": "x"})
+        for _ in range(50):
+            if keeper.active:
+                break
+            time.sleep(0.05)
+        assert keeper.active and ("index_keepalive", {}) in api.calls
+    finally:
+        keeper.stop()
+        keeper.thread.join(2)
+    assert not keeper.thread.is_alive()
+
+
+def test_program_ends_soon_after_the_browser_window_is_closed(served):
+    """Okno v Edge/prohlížeči ohlásí zavření: program skončí hned (nedrží soubory ve složce), ale
+    obnovená stránka, která se zase ozve, ho neukončí."""
+    from promitarna_win.app import CLOSE_GRACE, window_open
+    backend, url, _api, _opened = served
+    now = time.time()
+    backend.alive = now - 1
+    assert window_open(backend, now)
+    assert _post(url, "/local/closed", backend.token, {})[1]["ok"]
+    closed = backend.closed
+    assert window_open(backend, closed + 1)                         # chvíli se čeká (obnovení stránky)
+    assert not window_open(backend, closed + CLOSE_GRACE + 0.1)     # nikdo se neozval → konec
+    backend.alive = closed + 0.5                                    # obnovená stránka se ozvala
+    assert window_open(backend, closed + CLOSE_GRACE + 0.1)
+    assert not window_open(backend, backend.alive + 60)             # okno se dlouho nehlásí → konec

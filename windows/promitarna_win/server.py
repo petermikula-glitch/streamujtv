@@ -34,6 +34,8 @@ class Backend(object):
         self.token = secrets.token_urlsafe(16)
         self.alive = time.time()
         self.quit = threading.Event()
+        self.closed = 0.0          # kdy okno ohlásilo zavření (při obnovení stránky se zase ozve)
+        self.keeper = None         # plnění seznamu na pozadí (background.Keeper)
 
     def call(self, action, params):
         """Akce logiky; vrací data, nebo ``None`` při chybě (pro přehrávač a stahování)."""
@@ -46,6 +48,9 @@ class Backend(object):
             return {"ok": True}
         if action == "quit":
             self.quit.set()
+            return {"ok": True}
+        if action == "closed":
+            self.closed = time.time()
             return {"ok": True}
         if action == "play":
             audio = self.call("subtitle_style", {}) or {}
@@ -122,7 +127,11 @@ def make_handler(backend):
             except ValueError:
                 params = {}
             if path.startswith("/api/"):
-                return self._send(200, backend.api.call(path[len("/api/"):], json.dumps(params)))
+                action = path[len("/api/"):]
+                answer = backend.api.call(action, json.dumps(params))
+                if backend.keeper is not None:
+                    backend.keeper.kick(action)
+                return self._send(200, answer)
             if path.startswith("/local/"):
                 try:
                     answer = backend.local(path[len("/local/"):], params)

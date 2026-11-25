@@ -55,11 +55,11 @@ def main(mpv_dir=""):
                "--paths", HERE, "--paths", logic,
                "--add-data", "%s%slogic" % (logic, separator),
                "--add-data", "%s%sui" % (os.path.join(HERE, "ui"), separator),
-               "--icon", os.path.join(HERE, "ui", "assets", "logo.png") if os.name != "nt" else
+               "--icon", os.path.join(HERE, "ui", "assets", "icon.png") if os.name != "nt" else
                os.path.join(BUILD, "promitarna.ico"),
                os.path.join(HERE, "Promitarna.py")]
     if os.name == "nt":
-        _icon(os.path.join(HERE, "ui", "assets", "logo.png"), os.path.join(BUILD, "promitarna.ico"))
+        _icon(os.path.join(HERE, "ui", "assets", "icon.png"), os.path.join(BUILD, "promitarna.ico"))
     # logika se načítá až za běhu (podle cesty): PyInstaller musí moduly, které používá, přibalit sám
     for path in glob.glob(os.path.join(logic, "*.py")):
         command[-1:-1] = ["--hidden-import", os.path.splitext(os.path.basename(path))[0]]
@@ -80,7 +80,7 @@ def main(mpv_dir=""):
 
 
 def _icon(png, ico):
-    """Ikona programu z loga (Pillow je s PyInstallerem k dispozici)."""
+    """Ikona programu (``build_assets.app_icon``) ve velikostech pro Windows."""
     try:
         from PIL import Image
         Image.open(png).save(ico, sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
@@ -100,6 +100,9 @@ Videa hraje přibalený přehrávač mpv: mezerník pauza, šipky posun, # zvuko
 F celá obrazovka, Q konec.
 
 Chráněné pořady iVysílání (DRM) tahle verze nepřehrává – pusťte je na webu iVysílání.
+
+Nová verze: zip rozbalte přes tuhle složku (složka data zůstane). Smazání: zavřete okno programu
+(program pak skončí celý) a složku smažte; kdyby to nešlo, ukončete Promitarna ve Správci úloh.
 """
 
 

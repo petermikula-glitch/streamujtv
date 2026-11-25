@@ -5,4 +5,4 @@ okno ji volá přes místní server (``server.py``) a vykresluje stejné obrazov
 přehrává přibalený přehrávač mpv (``player.py``), stahování na disk obstarává ``downloads.py``.
 """
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"

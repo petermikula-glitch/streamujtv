@@ -14,32 +14,39 @@ html, body { margin: 0; height: 100%; background: linear-gradient(var(--bg-top),
 body { background-image: url("assets/app_background_image.webp"), linear-gradient(var(--bg-top), var(--bg-bottom));
        background-size: cover; background-attachment: fixed; overflow: hidden; }
 button { font: inherit; color: inherit; }
-#app { display: grid; grid-template-columns: var(--side) 1fr; grid-template-rows: 86px 1fr; height: 100vh; }
-#top { grid-column: 1 / 3; display: flex; align-items: center; gap: 16px; padding: 0 36px; }
-#brand { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 32px; font-weight: 300; }
-#brand img { height: 52px; }
-#crumbs { font-size: 22px; color: var(--ink-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Nahoře je stále vidět hlavní nabídka (sekce vedle sebe); obsah pod ní má celou šířku okna. */
+#app { display: grid; grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; height: 100vh; }
+#top { display: flex; align-items: center; gap: 16px; padding: 14px 36px 6px; min-width: 0; }
+#brand { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; }
+#brand img { height: 44px; }
+#crumbs { padding: 0 42px; font-size: 22px; color: var(--ink-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-height: 6px; }
+#crumbs:empty { min-height: 0; }
 .orb { width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--panel); box-shadow: 0 2px 6px rgba(0,0,0,.25);
        display: grid; place-items: center; cursor: pointer; }
 .orb img { width: 26px; height: 26px; }
 .chip { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; padding: 6px 10px; border-radius: 26px;
         font-size: 18px; cursor: pointer; }
 .chip img { width: 36px; height: 36px; border-radius: 50%; }
-#side { padding: 30px 0 0 24px; display: flex; flex-direction: column; gap: 6px; }
-#side button { display: flex; align-items: center; gap: 14px; border: 0; background: transparent; text-align: left; padding: 10px 12px;
-               border-radius: 8px; font-size: 21px; color: var(--ink-2); cursor: pointer; }
-#side button img { width: 26px; height: 26px; opacity: .75; }
-#side button.current { color: var(--ink); font-weight: 600; }
+#side { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none;
+        padding: 4px 6px; margin-left: 8px; }
+#side button { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; padding: 9px 14px;
+               border-radius: 24px; font-size: 19px; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+#side button img { width: 24px; height: 24px; opacity: .75; }
+#side button:hover { background: rgba(255, 255, 255, .35); }
+#side button.current { color: var(--ink); font-weight: 600; background: rgba(255, 255, 255, .45); }
 #side button.current img { opacity: 1; filter: invert(23%) sepia(86%) saturate(2400%) hue-rotate(352deg); }
-#side { grid-column: 1; grid-row: 2; }
-#screen { grid-column: 2; grid-row: 2; }
-body.wide #side { display: none; }
-body.wide #screen { grid-column: 1 / 3; padding-left: 36px; }
-#screen { overflow-y: auto; overflow-x: hidden; padding: 6px 36px 60px 20px; outline: none; scroll-behavior: smooth; }
+#screen { overflow-y: auto; overflow-x: hidden; padding: 4px 36px 60px; outline: none; scroll-behavior: smooth; }
+@media (max-width: 1400px) { #brand { display: none; } }
 h2.row { font-size: 23px; font-weight: 500; margin: 22px 0 10px; color: var(--ink-2); }
 .row-items { display: flex; gap: var(--gap); overflow-x: auto; padding: 8px 6px 12px; scroll-behavior: smooth; scrollbar-width: thin; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 22px var(--gap); padding: 8px 6px; }
 .grid.wide { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+/* Dlaždice bez plakátu (kategorie, nástroje): na šířku, přes celou šířku okna. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--gap); padding: 8px 6px 12px; overflow: visible; }
+.tiles .card, .tiles .card.wide { width: auto; }
+.tiles .card .art { aspect-ratio: auto; height: 170px; background-size: contain; background-position: right center; }
+.tiles .card .tile { background-size: auto 100%; background-position: right center; padding: 18px 22px; font-size: 23px; }
+.tiles .card:focus { transform: scale(1.03); }
 .card { position: relative; flex: 0 0 auto; width: 180px; border-radius: 6px; background: var(--panel); overflow: hidden; cursor: pointer;
         border: 2px solid transparent; transition: transform .12s ease, box-shadow .12s ease; }
 .grid .card { width: auto; }
