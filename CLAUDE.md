@@ -29,6 +29,10 @@ Jak je to nastavené teď (při změně workflow tento odstavec upravte):
   neruší novějším odesláním (přerušené nahrávání by nechalo vydání bez souboru).
 - `.github/scripts/overeno-v-pr.sh` – po sloučení zjistí, jestli stejný strom souborů už prošel
   v pull requestu. Pak se testy přeskočí, a když navíc není co vydat, i sestavení aplikace.
+- `windows.yml` – přenosná verze pro Windows (souhlas vlastníka 25. 11. 2026): pull request do `main`
+  a odeslání do `main`, jen při změně ve `windows/` nebo v souboru workflow. Běží na Windows (počítá se
+  dvojnásob): jeden běh asi 5 minut = 10 minut; po sloučení se nic nesestavuje, když stejný strom prošel
+  v pull requestu a vydání `win-v<verze>` už existuje.
 - Odeslání pracovní větve (`claude/…`, `codex/…`) nespouští nic: co má GitHub zkontrolovat, musí mít
   otevřený pull request do `main`.
 

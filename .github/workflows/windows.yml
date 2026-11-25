@@ -1,0 +1,113 @@
+# Přenosná verze pro Windows (složka windows/): sestaví zip s Promitarna.exe a přibaleným přehrávačem mpv
+# a na hlavní větvi ho vydá jako win-v<verze>. Verze je v windows/promitarna_win/__init__.py (VERSION),
+# text vydání v windows/RELEASE_NOTES.md.
+#
+# Šetření minut (CLAUDE.md): jen pull request do main a odeslání do main, jen při změně ve windows/
+# nebo v tomto souboru. Po sloučení se neopakuje, co prošlo v pull requestu se stejným stromem souborů,
+# pokud vydání té verze už existuje. Stroj s Windows se počítá dvojnásob: jeden běh asi 5 minut = 10 minut.
+name: Windows verze
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows.yml'
+      - '!**.md'
+  push:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows.yml'
+      - '!**.md'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  # Běh na main vydává: neruší se (přerušené nahrávání by nechalo vydání bez souboru).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verze
+        id: version
+        run: echo "name=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' windows/promitarna_win/__init__.py)" >> "$GITHUB_OUTPUT"
+
+      # Po sloučení do main: stejný strom souborů už prošel v pull requestu a vydání existuje → nic.
+      - name: Co je potřeba udělat
+        id: plan
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          verified="$(bash .github/scripts/overeno-v-pr.sh windows.yml)"
+          released=false
+          if gh release view "win-v$VERSION" >/dev/null 2>&1; then released=true; fi
+          build=true
+          if [ "$verified" = true ] && [ "$released" = true ]; then build=false; fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "Ověřeno v pull requestu: $verified · vydání win-v$VERSION existuje: $released · sestavení: $build"
+
+      - uses: actions/setup-python@v5
+        if: steps.plan.outputs.build != 'false'
+        with:
+          python-version: '3.11'
+
+      - name: Nástroje pro sestavení
+        if: steps.plan.outputs.build != 'false'
+        run: python -m pip install --quiet pyinstaller pywebview pillow
+
+      # Přehrávač mpv pro Windows z vydání projektu mpv-winbuild-cmake (64bitová verze).
+      - name: Přehrávač mpv
+        if: steps.plan.outputs.build != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$(gh api repos/shinchiro/mpv-winbuild-cmake/releases/latest --jq .tag_name)"
+          asset="$(gh api repos/shinchiro/mpv-winbuild-cmake/releases/latest --jq '.assets[].name' \
+            | grep -E '^mpv-x86_64-[0-9]{8}-git-[0-9a-f]+\.7z$' | head -1)"
+          if [ -z "$asset" ]; then
+            echo "::error::V posledním vydání mpv-winbuild-cmake chybí balíček mpv pro Windows."
+            gh api repos/shinchiro/mpv-winbuild-cmake/releases/latest --jq '.assets[].name'
+            exit 1
+          fi
+          gh release download "$tag" --repo shinchiro/mpv-winbuild-cmake --pattern "$asset" --dir mpv-download
+          7z x "mpv-download/$asset" -ompv > /dev/null
+          ls mpv
+
+      - name: Sestavení
+        if: steps.plan.outputs.build != 'false'
+        run: python windows/build.py mpv
+
+      - uses: actions/upload-artifact@v4
+        if: steps.plan.outputs.build != 'false'
+        with:
+          name: Promitarna-${{ steps.version.outputs.name }}-windows
+          path: windows/dist/Promitarna-${{ steps.version.outputs.name }}-windows.zip
+          retention-days: 7
+
+      - name: Vydání
+        if: github.ref == 'refs/heads/main' && steps.plan.outputs.build != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          tag="win-v$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Vydání $tag už existuje – pro nové vydání zvyšte VERSION."
+            exit 0
+          fi
+          gh release create "$tag" "windows/dist/Promitarna-$VERSION-windows.zip" --target "$GITHUB_SHA" \
+            --title "Promítárna pro Windows $VERSION" --notes-file windows/RELEASE_NOTES.md --latest=false

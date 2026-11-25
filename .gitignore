@@ -1,3 +1,10 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Windows verze: generované a stažené při sestavení, data při zkoušení ze zdrojů
+windows/ui/assets/
+windows/data/
+windows/mpv/
+windows/build/
+windows/dist/

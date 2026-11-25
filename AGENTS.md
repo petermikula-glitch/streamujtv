@@ -9,6 +9,7 @@ Tento soubor je společné zadání pro všechny, kdo na projektu pracují – l
 | --- | --- |
 | `plugin.video.prehrajto.mojevidea/` | doplněk pro Kodi 19+ (Python); popis v `README.md` |
 | `android/` | aplikace pro Android TV (Kotlin + Python přes Chaquopy); popis v `android/README.md` |
+| `windows/` | přenosná verze pro Windows (okno nad stejnou logikou, přehrávač mpv); popis v `windows/README.md` |
 | `tests/` | testy doplňku i logiky aplikace (pytest, bez Kodi a bez Androidu) |
 | `tools/build_zip.py` | sestavení Kodi repozitáře |
 | `repository.petermikula/`, `repo/`, `docs/` | Kodi repozitář a GitHub Pages – **generované soubory** |
