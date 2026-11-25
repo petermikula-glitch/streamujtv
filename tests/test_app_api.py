@@ -126,9 +126,10 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
     tools = _section(api, "tools")["Nástroje"]
     # Hledání (lupa je nahoře všude), synchronizace a doplnění hodnocení (běží samy; ručně v Nastavení) tu nejsou.
     assert _titles(tools) == ["Návod", "Stahování", "Nastavení a přihlášení", "Jazyk a kvalita přehrávání",
-                              "Profil: Hlavní profil", "Záloha a obnova", "Diagnostika"]
+                              "Profil: Hlavní profil", "Záloha a obnova", "Diagnostika",
+                              "Smazat historii"]
     assert [item["target"]["type"] for item in tools] == ["list", "list", "settings", "choices", "list", "backup",
-                                                          "diagnostics"]
+                                                          "diagnostics", "command"]
     assert tools[0]["target"]["call"] == "guide" and tools[1]["target"]["call"] == "downloads"
     assert tools[3]["subtitle"] == "Český nebo slovenský dabing · Nejvyšší dostupná"
     assert tools[4]["image"] == "res:avatar_clapper"
@@ -4139,3 +4140,29 @@ def test_background_plan_walks_year_by_year(api, monkeypatch):
     assert years[0] == ("movie", {"kind": "movie", "year": str(year)}, 1) and years[1][0] == "tv"   # od nejnovějších
     assert ("movie", {"kind": "movie", "year": str(year - 39)}, 3) in years
     assert ("tv", {"kind": "tv", "year": str(year - 30)}, 1) not in years and len(plan) == len(set(map(str, plan)))
+
+
+def test_clearing_history_forgets_searches_and_playback_but_keeps_the_rest(api, monkeypatch):
+    """Nástroje → Smazat historii: hledané výrazy, Rozkoukané, Naposledy přehrané, značky zhlédnuto
+    a iVysílání zmizí; katalog a oblíbené zůstanou."""
+    _fill(2)
+    with app_api._library() as lib:
+        videos = lib.count_videos(visible_only=True)
+    monkeypatch.setattr(app_api, "prehrajto_search", lambda params: {"items": [], "next": None})
+    api("search", q="pelisky")
+    api("progress_save", track=REF, position=600, total=6000, started=True)
+    episode = "11:archa:%016x" % 11
+    api("watched_set", vid=episode, watched=True)
+    with app_api._library() as lib:
+        lib.ivys_touch("777", "9", "Díl 3", "Vyprávěj", "")
+        lib.ivys_record_play("777", 300, 3000)
+        lib.set_kv(app_api.app_discover.RECENT_SERIES, "[1399]")
+    tile = next(card for card in _section(api, "tools")["Nástroje"] if card["title"] == "Smazat historii")
+    assert tile["target"]["call"] == "history_clear" and tile["target"]["confirm"]["title"] == "Smazat historii?"
+    assert api("history_clear")["toast"] == "Historie hledání a přehrávání je smazaná."
+    assert api("search_history") == {"rows": []}
+    assert list(_section(api, "progress")) == ["Rozkoukané"]                 # jen nápověda, ani Historie
+    with app_api._library() as lib:
+        assert lib.resume_points() == {} and lib.watched() == set() and lib.ivys_progress() == []
+        assert lib.get_kv(app_api.app_discover.RECENT_SERIES) == "[]"
+        assert lib.count_videos(visible_only=True) == videos                # katalog zůstal

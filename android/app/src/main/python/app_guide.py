@@ -181,6 +181,10 @@ Záloha a obnova (Nástroje): uloží katalog, historii, oblíbené, profily, na
 dostupných titulů do jednoho souboru na disk a umí je vrátit. Heslo k Přehraj.to v záloze není. \
 Aby záloha přežila odinstalaci aplikace, zvolte v okně zálohy „Povolit zálohu, která přežije odinstalaci“.
 
+Smazat historii (Nástroje): po potvrzení smaže hledané výrazy a historii přehrávání tohoto profilu \
+(Rozkoukané, Naposledy přehrané, značky zhlédnuto, nabízené další díly, iVysílání). Katalog, oblíbené, \
+stažená videa a nastavení zůstanou.
+
 Aktualizace: aplikace se na novou verzi zeptá sama po spuštění. Ručně: Nastavení a přihlášení → \
 Zkontrolovat aktualizace.
 

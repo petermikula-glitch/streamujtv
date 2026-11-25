@@ -785,6 +785,7 @@ def home(params):
               icon="folder:history"),
         _card("Diagnostika", _target("diagnostics"), "Stav účtu, připojení a poslední chyby",
               icon="settings:history"),
+        _card("Smazat historii", _history_clear_target(), "Hledané výrazy a historie přehrávání", icon="history"),
     ]}]
     # "pending": ve frontě něco čeká – aplikace po startu znovu spustí službu stahování
     sections = [{"id": "favorites", "title": "Oblíbené", "icon": "section_favorites", "rows": own["favorites"]},
@@ -1188,6 +1189,32 @@ def _remember_search(query):
         settings["search_history"] = ([query] + history)[:12]
 
     _change_settings(change)
+
+
+def _history_clear_target():
+    target = _target("command", "history_clear", {})
+    target["confirm"] = {"title": "Smazat historii?", "text": (
+        "Smažou se hledané výrazy a historie přehrávání tohoto profilu: Rozkoukané, Naposledy přehrané, "
+        "značky zhlédnuto, nabízené další díly a historie z iVysílání.\n\n"
+        "Katalog, oblíbené, stažená videa, seznam dostupných titulů a nastavení zůstanou.")}
+    return target
+
+
+def history_clear(params):
+    """Smaže historii hledání a přehrávání aktuálního profilu (dlaždice Smazat historii v Nástrojích).
+
+    Katalog, oblíbené, stažená videa, seznam dostupných titulů a nastavení zůstávají."""
+    def change(settings):
+        settings.pop("search_history", None)
+
+    _change_settings(change)
+    with _library() as lib:
+        lib.remove_history()            # Přehraj.to: pozice, Rozkoukané, Naposledy přehrané
+        lib.ivys_remove_history()       # iVysílání
+        lib.clear_watched_marks()
+        lib.clear_search_history()
+        lib.set_kv(app_discover.RECENT_SERIES, "[]")   # seriály z Objevuj v řadě Další díly
+    return {"message": "", "toast": "Historie hledání a přehrávání je smazaná."}
 
 
 def search_history(params):
@@ -2914,7 +2941,7 @@ ACTIONS.update({
     "downloads_pending": downloads_pending,
     "home": home, "discover_home": discover_home, "movies": movies, "shows": shows, "show": show, "played": played,
     "search": search,
-    "prehrajto_search": prehrajto_search, "search_history": search_history, "play_failed": play_failed,
+    "prehrajto_search": prehrajto_search, "search_history": search_history, "history_clear": history_clear, "play_failed": play_failed,
     "play": play, "progress_save": progress_save, "link_failed": link_failed, "video_size": video_size,
     "settings_get": settings_get, "settings_set": settings_set, "account_status": account_status,
     "progress": progress, "sync": sync, "quick_sync": quick_sync, "enrich": enrich,

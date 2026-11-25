@@ -1376,6 +1376,15 @@ class Library(object):
         self.conn.execute("DELETE FROM search_history WHERE query=?", (query,))
         self.conn.commit()
 
+    def clear_search_history(self):
+        with self.conn:
+            self.conn.execute("DELETE FROM search_history")
+
+    def clear_watched_marks(self):
+        """Ruční značky „zhlédnuto“ (ke smazání celé historie přehrávání)."""
+        with self.conn:
+            self.conn.execute("DELETE FROM watched_marks")
+
     def stats(self):
         c = self.conn
         return {
