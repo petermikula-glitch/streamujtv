@@ -44,6 +44,11 @@ button { font: inherit; color: inherit; }
                    cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 4px solid transparent; }
 .drop .drop-item:hover, .drop .drop-item:focus { background: #E9C3B6; border-left-color: var(--accent); outline: none; }
 .drop .drop-empty { padding: 8px 18px; color: var(--ink-3); font-size: 15px; }
+.drop .drop-item.more { padding-right: 34px; position: relative; }
+.drop .drop-item.more::after { content: "›"; position: absolute; right: 14px; top: 50%; transform: translateY(-52%); font-size: 22px; color: var(--ink-3); }
+.drop .drop-item.opened { background: rgba(191, 51, 39, .12); }
+.drop .drop-item.all { color: var(--accent); font-weight: 600; }
+.drop.sub { width: 340px; max-width: 340px; }
 #back svg { color: var(--ink); }
 #side button.current { color: var(--ink); font-weight: 600; background: rgba(255, 255, 255, .45); }
 #side button.current img { opacity: 1; filter: invert(23%) sepia(86%) saturate(2400%) hue-rotate(352deg); }

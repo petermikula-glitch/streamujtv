@@ -1618,12 +1618,7 @@ def _related_rows(kind, params, info, state):
                     card["subtitle"] = " · ".join(text for text in ("Právě otevřený", card["subtitle"]) if text)
                 cards.append(card)
             rows.append({"title": "Celá série", "items": cards})
-    try:
-        similar = client.recommendations(kind, tmdb_id)
-    except TmdbError:
-        similar = []
-    if similar:
-        rows.append({"title": "Podobné tituly", "items": [_item_card(item, kind, state) for item in similar[:20]]})
+    # herci před podobnými tituly: klepnutí na herce vede na jeho další filmy
     try:
         people = client.cast(tmdb_id, want_series=kind == "tv")
     except TmdbError:
@@ -1634,6 +1629,12 @@ def _related_rows(kind, params, info, state):
                                                   "Filmy – %s" % person["name"]),
                       person["character"], person["photo"], wide=not person["photo"], icon="movies")
             for person in people]})
+    try:
+        similar = client.recommendations(kind, tmdb_id)
+    except TmdbError:
+        similar = []
+    if similar:
+        rows.append({"title": "Podobné tituly", "items": [_item_card(item, kind, state) for item in similar[:20]]})
     return rows
 
 

@@ -244,9 +244,95 @@ async function loadHome() {
 }
 
 const DROP_ROW = 10;        // tolik položek jedné řady nejvýš v podnabídce
+const SUB_ITEMS = 12;       // tolik položek výpisu nejvýš v podnabídce další úrovně (pak „Zobrazit vše“)
+const DROP_DEPTH = 4;       // úrovně podnabídek (např. Objevuj → Filmy → Podle žánru → Akční → filmy)
+const SUB_TTL = 5 * 60 * 1000;
+const subCache = new Map();
+let hoverTimer = 0;
 
 function closeDrops(except) {
   for (const item of document.querySelectorAll(".navitem.open")) if (item !== except) item.classList.remove("open");
+}
+
+const panelItems = (panel) => [...panel.querySelectorAll(":scope > .drop-item")];
+// rozbalit jde stránka nebo výpis (ne přehrání, příkaz ani nic, co se nejdřív potvrzuje)
+const expandable = (target) => !!target && (target.type === "page" || target.type === "list") && !target.confirm;
+
+// Položky podnabídky: {head}, {card} nebo {all} (celý výpis) a {note}.
+function fillPanel(panel, entries, index, depth) {
+  const changed = () => loadHome();
+  for (const entry of entries) {
+    if (entry.head) { panel.append(el("div", "drop-head", entry.head)); continue; }
+    if (entry.note) { panel.append(el("div", "drop-empty", entry.note)); continue; }
+    const card = entry.card || {title: "Zobrazit vše", target: entry.all};
+    const button = el("button", "f drop-item" + (entry.all ? " all" : ""), card.title);
+    if (card.subtitle) button.title = card.subtitle;
+    if (!entry.all && depth < DROP_DEPTH && expandable(card.target)) {
+      button.classList.add("more");
+      button.sub = card.target;
+    }
+    button.onclick = () => openFromDrop(index, card.target, card.title, changed);
+    button.onmouseenter = () => {
+      clearTimeout(hoverTimer);
+      if (button.classList.contains("opened")) return;
+      hoverTimer = setTimeout(() => { closeSubs(panel); if (button.sub) openSub(button, panel, index, depth); }, 140);
+    };
+    panel.append(button);
+  }
+  if (!panel.querySelector(".drop-item, .drop-empty")) panel.append(el("div", "drop-empty", "Nic tu zatím není"));
+}
+
+function closeSubs(panel) {
+  for (const sub of panel.querySelectorAll(":scope > .drop.sub")) sub.remove();
+  for (const item of panelItems(panel)) item.classList.remove("opened");
+}
+
+// Obsah další úrovně: stránka = její řady, výpis = prvních pár položek a „Zobrazit vše“.
+async function subEntries(target) {
+  const key = target.call + "|" + JSON.stringify(target.params || {});
+  const cached = subCache.get(key);
+  if (cached && Date.now() - cached.at < SUB_TTL) return cached.entries;
+  const answer = await api(target.call, target.params || {});
+  if (!answer.ok) return [{note: answer.error}];
+  const entries = [];
+  if (target.type === "page") {
+    for (const row of answer.data.rows || []) {
+      const items = (row.items || []).filter((card) => card.target).slice(0, DROP_ROW);
+      if (!items.length) continue;
+      if (row.title) entries.push({head: row.title});
+      for (const card of items) entries.push({card});
+    }
+  } else {
+    const items = (answer.data.items || []).filter((card) => card.target && card.target.type !== "filter");
+    for (const card of items.slice(0, SUB_ITEMS)) entries.push({card});
+    if (items.length > SUB_ITEMS || answer.data.next) entries.push({all: target});
+  }
+  if (!entries.length) entries.push({note: answer.data.empty || "Nic tu zatím není"});
+  if (!answer.data.refresh) subCache.set(key, {at: Date.now(), entries});   // plnící se výpis se načte příště znovu
+  return entries;
+}
+
+// Podnabídka další úrovně vedle položky (vpravo, u kraje okna vlevo).
+async function openSub(button, panel, index, depth) {
+  closeSubs(panel);
+  const sub = el("div", "drop sub");
+  const rect = button.getBoundingClientRect();
+  const width = 340;
+  const left = rect.right + width > window.innerWidth ? panel.getBoundingClientRect().left - width : rect.right - 2;
+  sub.style.left = Math.max(4, left) + "px";
+  sub.style.top = Math.max(8, Math.min(rect.top - 8, window.innerHeight - 160)) + "px";
+  sub.append(el("div", "drop-empty", "Načítám…"));
+  panel.append(sub);
+  button.classList.add("opened");
+  const entries = await subEntries(button.sub);
+  if (!sub.isConnected) return null;          // mezitím se ukázalo jinam
+  sub.innerHTML = "";
+  fillPanel(sub, entries, index, depth + 1);
+  const bottom = sub.getBoundingClientRect().bottom;
+  if (bottom > window.innerHeight - 8) {
+    sub.style.top = Math.max(8, parseFloat(sub.style.top) - (bottom - window.innerHeight + 8)) + "px";
+  }
+  return sub;
 }
 
 // Podnabídka hesla: řady sekce (nadpis řady a pod ním její položky), jako na hlavní obrazovce sekce.
@@ -255,24 +341,17 @@ function openDrop(navitem, index) {
   const data = home && home.sections[index];
   if (!data) return null;
   drop.innerHTML = "";
-  const changed = () => loadHome();
+  const entries = [];
   if (data.hero && data.hero.target) {
-    const hero = el("button", "f drop-item", "▶  " + data.hero.title);
-    hero.onclick = () => openFromDrop(index, data.hero.target, data.hero.title, changed);
-    drop.append(el("div", "drop-head", "Pokračovat ve sledování"), hero);
+    entries.push({head: "Pokračovat ve sledování"}, {card: {title: "▶  " + data.hero.title, target: data.hero.target}});
   }
   for (const row of data.rows || []) {
     const items = (row.items || []).filter((card) => card.target).slice(0, DROP_ROW);
     if (!items.length) continue;
-    if (row.title) drop.append(el("div", "drop-head", row.title));
-    for (const card of items) {
-      const button = el("button", "f drop-item", card.title);
-      if (card.subtitle) button.title = card.subtitle;
-      button.onclick = () => openFromDrop(index, card.target, card.title, changed);
-      drop.append(button);
-    }
+    if (row.title) entries.push({head: row.title});
+    for (const card of items) entries.push({card});
   }
-  if (!drop.children.length) drop.append(el("div", "drop-empty", "Nic tu zatím není"));
+  fillPanel(drop, entries, index, 1);
   const rect = navitem.querySelector("button").getBoundingClientRect();
   drop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 390)) + "px";
   drop.style.top = rect.bottom + "px";
@@ -282,6 +361,7 @@ function openDrop(navitem, index) {
 }
 
 function openFromDrop(index, target, title, changed) {
+  clearTimeout(hoverTimer);
   closeDrops();
   section = index;
   stack.length = 0;
@@ -806,38 +886,68 @@ function moveFocus(direction) {
   if (best) { best.focus(); best.scrollIntoView({block: "nearest", inline: "nearest"}); }
 }
 
-// Klávesnice v horní nabídce: šipka dolů na hesle rozbalí podnabídku, šipka nahoru z první položky
-// a Esc ji zase zavřou (výběr se vrátí na heslo).
+// Klávesnice v horní nabídce: šipka dolů na hesle rozbalí podnabídku; v ní šipka vpravo otevře další
+// úroveň (položka s ›), šipka vlevo nebo Esc ji zavře; v první úrovni šipka nahoru z první položky
+// a Esc podnabídku zavřou (výběr se vrátí na heslo).
 function dropKeys(event) {
   const active = document.activeElement;
   const navitem = active && active.closest && active.closest(".navitem");
   if (!navitem || dialogs.length) return false;
-  const button = navitem.querySelector("button");
+  const button = navitem.querySelector(":scope > button");
   if (active === button && event.key === "ArrowDown") {
     const drop = openDrop(navitem, button.index);
     const first = drop && drop.querySelector(".drop-item");
     if (first) first.focus();
     return true;
   }
-  if (active.classList.contains("drop-item")) {
-    const items = [...navitem.querySelectorAll(".drop-item")];
-    const at = items.indexOf(active);
-    if (event.key === "Escape" || (event.key === "ArrowUp" && at === 0) || event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      navitem.classList.remove("open");
-      button.focus();
-      return event.key === "Escape" || event.key === "ArrowUp";   // vlevo/vpravo: pak na vedlejší heslo
-    }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      const next = items[at + (event.key === "ArrowDown" ? 1 : -1)];
-      if (next) { next.focus(); next.scrollIntoView({block: "nearest"}); return true; }
-      // pod poslední položkou: podnabídka se zavře a výběr přejde do obsahu obrazovky
-      navitem.classList.remove("open");
-      const content = $("#screen .f");
-      (content || button).focus();
+  if (!active.classList.contains("drop-item")) return false;
+  const panel = active.parentElement;
+  const nested = panel.classList.contains("sub");
+  const items = panelItems(panel);
+  const at = items.indexOf(active);
+  if (event.key === "ArrowRight" && active.sub) {
+    clearTimeout(hoverTimer);
+    openSub(active, panel, button.index, nestedDepth(panel)).then((sub) => {
+      const first = sub && sub.querySelector(".drop-item");
+      if (first) first.focus();
+    });
+    return true;
+  }
+  if (nested && (event.key === "ArrowLeft" || event.key === "Escape")) {
+    const owner = panelItems(panel.parentElement).find((item) => item.classList.contains("opened"));
+    if (owner) owner.focus();              // nejdřív výběr ven: odstranění vybrané položky by nabídku zavřelo
+    closeSubs(panel.parentElement);
+    return true;
+  }
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const next = items[at + (event.key === "ArrowDown" ? 1 : -1)];
+    if (next) {
+      closeSubs(panel);
+      next.focus();
+      next.scrollIntoView({block: "nearest"});
       return true;
     }
+    if (nested) return true;                 // v další úrovni se z ní šipkami neodchází
+    navitem.classList.remove("open");
+    if (event.key === "ArrowUp") { button.focus(); return true; }
+    const content = $("#screen .f");     // pod poslední položkou: do obsahu obrazovky
+    (content || button).focus();
+    return true;
+  }
+  if (nested) return event.key === "ArrowRight";
+  if (event.key === "Escape" || event.key === "ArrowLeft" || event.key === "ArrowRight") {
+    navitem.classList.remove("open");
+    button.focus();
+    return event.key === "Escape";           // vlevo/vpravo: pak na vedlejší heslo
   }
   return false;
+}
+
+// úroveň podnabídky (1 = pod heslem)
+function nestedDepth(panel) {
+  let depth = 1;
+  for (let node = panel; node && node.classList.contains("sub"); node = node.parentElement) depth += 1;
+  return depth;
 }
 
 let escapeHeld = 0;

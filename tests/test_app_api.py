@@ -809,7 +809,7 @@ def test_title_page_offers_the_series_similar_titles_cast_and_csfd(api, monkeypa
         "/discover/movie": {"results": [{"id": 31, "title": "Dědictví", "release_date": "1992-01-01"}], "total_pages": 1},
     })
     rows = {row["title"]: row["items"] for row in api("discover_title", **FILM)["rows"]}
-    assert list(rows) == ["Celá série", "Podobné tituly", "Hrají"]
+    assert list(rows) == ["Celá série", "Hrají", "Podobné tituly"]     # herci nad podobnými tituly
     assert _titles(rows["Celá série"]) == ["Pelíšky", "Pelíšky 2"]             # v pořadí uvedení
     assert rows["Celá série"][0]["subtitle"].startswith("Právě otevřený")
     assert rows["Celá série"][1]["target"]["params"]["id"] == 12 and rows["Celá série"][1]["target"]["type"] == "title"
