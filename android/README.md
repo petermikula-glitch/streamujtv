@@ -458,7 +458,7 @@ přehrávače pro totéž dole jsou skrytá, aby nebyla dvakrát); volba se pama
 pro celý seriál (`track_prefs`, klíč `tracks:<seriál>`) a ukládá se jen to, co uživatel opravdu změnil.
 Po chybě uprostřed přehrávání si přehrávač jednou řekne o novou adresu a naváže, kde byl – u souborů
 z Přehraj.to i u pořadů a živého vysílání z iVysílání (po dlouhé pauze se živé vysílání vrátí na živo).
-U videa rozkoukaného déle než minutu se přehrávač zeptá, jestli navázat, nebo začít znovu (ne
+U videa rozkoukaného déle než 15 sekund se přehrávač zeptá, jestli navázat, nebo začít znovu (ne
 u tlačítka Pokračovat). Ikony ovládání přebíjejí výchozí ikony Media3 (`res/values/player_icons.xml`).
 
 **Návod** (první dlaždice v Nástrojích, `app_guide.py`, akce `guide`): témata o tom, co aplikace umí a jak

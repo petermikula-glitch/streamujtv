@@ -287,6 +287,11 @@ def test_playback_resolves_remembers_link_and_tracks_progress(api, monkeypatch):
     assert api("progress_save", track=REF, position=1500, total=6000, started=True) == {"saved": True}
     assert api("play", vid=REF)["position"] == 1500
     assert api("play", vid=REF, restart=True)["position"] == 0
+    # vypnuto brzy po začátku: i tak se příště naváže (jen pár vteřin se bere jako omyl)
+    api("progress_save", track=REF, position=40, total=6000)
+    assert api("play", vid=REF)["position"] == 40
+    api("progress_save", track=REF, position=8, total=6000)
+    assert api("play", vid=REF)["position"] == 0
     assert api("progress_save", track=REF, position=5990, total=6000, ended=True) == {"saved": True}
     with app_api._library() as lib:
         assert lib.watched() == {REF} and lib.resume_points() == {}
@@ -2421,12 +2426,12 @@ def test_downloaded_films_are_listed_with_their_posters(api, monkeypatch, tmp_pa
     assert app_api._downloads()[second["id"]]["poster"].endswith("/k.jpg")
 
 
-def test_unfinished_videos_count_after_a_minute_and_mix_both_sources(api, monkeypatch):
+def test_unfinished_videos_count_after_15_seconds_and_mix_both_sources(api, monkeypatch):
     _fill(2)
     episode = "11:archa:%016x" % 11
-    api("progress_save", track=REF, position=25, total=6000, started=True)   # krátké puštění: jen do historie
+    api("progress_save", track=REF, position=10, total=6000, started=True)   # krátké puštění: jen do historie
     assert list(_section(api, "progress")) == ["Rozkoukané", "Historie"]
-    api("progress_save", track=REF, position=65, total=12000)                # po minutě už je rozkoukané
+    api("progress_save", track=REF, position=65, total=12000)                # po 15 s už je rozkoukané
     api("progress_save", track=episode, position=90, total=1200, started=True)
     rows = _section(api, "progress")
     assert _titles(rows["Filmy"]) == ["Pelíšky"] and _titles(rows["Seriály"]) == ["Archa 1x01"]

@@ -209,8 +209,9 @@ def _row(row):
     return d
 
 
-# rozpracované = přehráno aspoň minutu a méně než tento podíl délky
-IN_PROGRESS_MIN = 60
+# rozpracované = přehráno aspoň 15 s a méně než tento podíl délky (i díl vypnutý brzy po začátku
+# se pak pustí tam, kde se skončilo; kratší pokus se bere jako omyl)
+IN_PROGRESS_MIN = 15
 IN_PROGRESS_MAX = 0.92
 
 
