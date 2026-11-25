@@ -659,8 +659,13 @@ async function renderDiagnostics(screen) {
   box.append(buttons, lines);
   if ((answer.data.errors || []).length) {
     box.append(el("h2", "row", "Poslední chyby"));
-    const errors = el("div", "lines");
-    for (const error of answer.data.errors) errors.append(el("div", "", error));
+    // každá chyba na jednom řádku přes celou šířku; celý text v bublině po najetí myší
+    const errors = el("div", "errors");
+    for (const error of answer.data.errors) {
+      const row = el("div", "", error);
+      row.title = error;
+      errors.append(row);
+    }
     box.append(errors);
   }
   again.focus();

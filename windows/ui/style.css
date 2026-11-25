@@ -115,6 +115,9 @@ h2.row { font-size: 23px; font-weight: 500; margin: 22px 0 10px; color: var(--in
 .lines { display: grid; gap: 6px; margin: 10px 6px; }
 .lines div { display: grid; grid-template-columns: 26px 260px 1fr; gap: 10px; font-size: 16px; }
 .lines .bad { color: var(--accent); }
+.errors { margin: 6px 6px 20px; }
+.errors div { font-size: 15px; color: var(--ink-2); padding: 5px 0; border-bottom: 1px solid rgba(29, 27, 24, .08);
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .search-box { display: flex; gap: 12px; margin: 8px 6px 4px; }
 .search-box input { flex: 1; }
 #overlay { position: fixed; inset: 0; background: rgba(29, 27, 24, .45); display: grid; place-items: center; z-index: 50; }
