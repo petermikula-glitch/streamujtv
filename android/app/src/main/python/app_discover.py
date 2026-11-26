@@ -918,12 +918,15 @@ def discover(params):
     with api._library() as lib:
         state = api._state(lib)
     sort = _explicit_sort(params)
-    if sort and not everything:
-        # Seřazený výpis: tytéž tituly jako bez řazení (prvních ``SORT_PAGES`` stránek v původním
-        # pořadí), jen jinak seřazené. Dřív se řazení posílalo TMDB, a to vrátilo úplně jiný výběr
-        # (třeba nejnovější premiéry, které na Přehraj.to ještě nejsou) – z dlouhého výpisu zbyly dva filmy.
+    total = None
+    if not everything:
+        # Výpis „jen dostupné“: tituly k mání z prvních ``SORT_PAGES`` stránek seznamu v jeho výchozím
+        # pořadí – s řazením i bez něj tytéž, jen jinak seřazené, a výpis zná jejich počet (ukazuje ho
+        # dlaždice Seřadit). Dřív se řazení posílalo TMDB, a to vrátilo úplně jiný výběr (třeba nejnovější
+        # premiéry, které na Přehraj.to ještě nejsou) – z dlouhého výpisu zbyly dva filmy.
         offset = api._offset(params)
         found = _collect_sorted(params, state, sort)
+        total = len(found)
         cards = [_item_card(item, kind, state) for item in found[offset:offset + SORT_WINDOW]]
         following = {"call": "discover", "params": dict(params, offset=offset + SORT_WINDOW)} \
             if offset + SORT_WINDOW < len(found) else None
@@ -944,6 +947,8 @@ def discover(params):
         # Místo filtru jen řazení (žánr, rok, dabing a země mají vlastní dlaždice): vždy první, i u prázdného výběru
         base = {key: value for key, value in params.items() if key not in ("page", "offset")}
         current = dict(SORTER).get(base.get("sort") or _default_sort(base), "")
+        if total is not None:
+            current = "%s · %s" % (current, count_text(total, bool(state.get("checking"))))
         cards.insert(0, api._card("Seřadit", {"type": "filter", "call": "discover_sorts", "params": base},
                                   current, icon="settings:search"))
     return dict(_checking_note(state), items=cards, next=following,
@@ -1066,6 +1071,12 @@ def discover_sorts(params):
     return sort_choices(params, SORTER, _default_sort(params))
 
 
+def count_text(count, growing=False):
+    """„142 titulů“ (česky skloňované); ``growing``: výpis se ještě doplňuje (ověřování)."""
+    word = "titul" if count == 1 else "tituly" if 2 <= count <= 4 else "titulů"
+    return "%s%d %s" % ("zatím " if growing else "", count, word)
+
+
 def _explicit_sort(params):
     """Řazení, které si uživatel vybral a které se liší od výchozího pořadí výpisu (jinak ``""``)."""
     sort = str(params.get("sort") or "")
@@ -1134,7 +1145,8 @@ def _collect_sorted(params, state, sort):
     _mark_known(state, known)
     found = [item for item in unique if _there(known, kind, item)
              and (not params.get("dub") or _dubbed(known, kind, item))]
-    return sort_items(found, sort)
+    # bez vybraného řazení zůstává pořadí výpisu, jen v jazyce podle předvolby napřed
+    return sort_items(found, sort) if sort else _preferred_first(found, kind, state)
 
 
 def _list_items(params):

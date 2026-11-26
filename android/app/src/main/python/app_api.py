@@ -828,6 +828,7 @@ def _discover_rows(newcomer):
               "Novinky, žánry, stažené a moje filmy", icon="movies"),
         _card("Seriály", _target("page", "discover_home", {"kind": "tv"}, "Seriály"),
               "Novinky, žánry, stažené díly a moje seriály", icon="series"),
+    ] + ([app_index.everything_tile()] if _tmdb().enabled else []) + [
         _card("Hledat", _target("search"), "Film, seriál, herec nebo režisér", icon="search"),
     ])
     if _tmdb().enabled:

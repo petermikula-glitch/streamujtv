@@ -43,14 +43,16 @@ Sekce Objevuj nabízí filmy a seriály podle databáze TMDB. Potřebuje klíč 
 v Nastavení).
 
 Dlaždice Filmy a Seriály vedou na výpisy: Vše na Přehraj.to, Nově na Přehraj.to, S dabingem, Novinky, \
-Populární, Nejlépe hodnocené, Podle roku, Podle žánru a Československé.
+Populární, Nejlépe hodnocené, Podle roku, Podle žánru a Československé. Dlaždice Všechny filmy a seriály \
+ukáže všechno, co aplikace na Přehraj.to a v iVysílání našla, dohromady.
 
 Výpisy ukazují jen tituly, které opravdu jsou k mání na Přehraj.to nebo v iVysílání. Aplikace to \
 ověřuje na pozadí, proto se nový výpis chvíli plní – řádek dole říká, kolik titulů zbývá ověřit. \
 Co se jednou ověří, zůstává.
 
-První karta každého výpisu je Filtr: žánr, období, hodnocení, jen s dabingem – a také „Všechny tituly“, \
-když chcete vidět i to, co k mání není.
+První karta každého výpisu je Seřadit: podle hodnocení, roku nebo oblíbenosti (u novinek podle data \
+přidání). Výpis se jen přeskládá, tituly v něm zůstávají tytéž. Na kartě je i počet titulů ve výpisu – \
+„zatím“, dokud se ještě ověřuje.
 
 Přehraj.to počet dotazů omezuje. Když jich je moc, ověřování si dá přestávku a pokračuje samo; \
 výpis i Diagnostika to napíšou."""),
