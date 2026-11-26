@@ -182,7 +182,9 @@ let section = 0;
 let homeStale = false;      // na hlubší obrazovce se mohlo něco změnit (oblíbené, zhlédnuté, stažené…)
 
 function setCrumbs() {
-  $("#crumbs").textContent = stack.length ? stack[stack.length - 1].title || "" : "";
+  const top = stack.length ? stack[stack.length - 1] : null;
+  // počet titulů ve výpisu (Objevuj, Vše a Nově na Přehraj.to) za nadpisem: „Seriály · 142 titulů“
+  $("#crumbs").textContent = top ? [top.title, top.count].filter(Boolean).join(" · ") : "";
   $("#back").hidden = !stack.length;      // tlačítko Zpět jen tam, kam se dá vrátit
   if (!stack.length && homeStale) {
     // zpátky na hlavní obrazovce: data se načtou znovu (jako na televizi po návratu), jinak by
@@ -485,7 +487,9 @@ async function renderList(screen) {
   box.innerHTML = "";
   if (!answer.ok) { box.append(el("div", "empty", answer.error)); return; }
   const data = answer.data;
-  if (data.title && !screen.title) { screen.title = data.title; setCrumbs(); }
+  if (data.title && !screen.title) screen.title = data.title;
+  screen.count = data.count || "";
+  setCrumbs();
   const changed = () => render(true);
   const open = (card) => {
     if (card.target.type === "filter") return showFilters(card.target, screen);

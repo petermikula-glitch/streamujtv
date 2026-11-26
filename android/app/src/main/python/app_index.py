@@ -531,11 +531,11 @@ def _sorted_rows(rows, sort):
     return rows
 
 
-def _sort_card(call, params, sorter, current, count):
-    """Dlaždice Seřadit na začátku výpisu (stejná jako v Objevuj): jak je seřazeno a kolik titulů výpis má."""
+def _sort_card(call, params, sorter, current):
+    """Dlaždice Seřadit na začátku výpisu (stejná jako v Objevuj): jak je právě seřazeno."""
     base = {key: value for key, value in params.items() if key != "offset"}
     return api._card("Seřadit", {"type": "filter", "call": call, "params": base},
-                     "%s · %s" % (dict(sorter).get(current, ""), discover.count_text(count)), icon="settings:search")
+                     dict(sorter).get(current, ""), icon="settings:search")
 
 
 def fresh_sorts(params):
@@ -570,9 +570,10 @@ def discover_fresh(params):
     kind = params.get("kind") if params.get("kind") in ("movie", "tv") else None
     sort = params.get("sort") if params.get("sort") in dict(FRESH_SORTER) else FRESH_SORTER[0][0]
     cards = _fresh_cards(kind, sort=sort)
+    count = len(cards)
     if cards:
-        cards.insert(0, _sort_card("fresh_sorts", params, FRESH_SORTER, sort, len(cards)))
-    return {"items": cards, "next": None,
+        cards.insert(0, _sort_card("fresh_sorts", params, FRESH_SORTER, sort))
+    return {"items": cards, "next": None, "count": discover.count_text(count),
             "empty": "Zatím tu nic není. Seznam se plní sám na pozadí – nové tituly se objeví, "
                      "jakmile je aplikace na Přehraj.to najde."}
 
@@ -632,8 +633,8 @@ def discover_index(params):
     following = {"call": "discover_index", "params": dict(params, offset=offset + INDEX_PAGE)} \
         if offset + INDEX_PAGE < len(rows) else None
     if offset == 0 and cards:
-        cards.insert(0, _sort_card("index_sorts", params, INDEX_SORTER, sort, len(rows)))
-    return {"items": cards, "next": following,
+        cards.insert(0, _sort_card("index_sorts", params, INDEX_SORTER, sort))
+    return {"items": cards, "next": following, "count": discover.count_text(len(rows)),
             "empty": "Zatím tu nic není. Seznam se plní sám na pozadí, když je aplikace otevřená – "
                      "první tituly se objeví během pár minut."}
 

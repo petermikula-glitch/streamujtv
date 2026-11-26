@@ -100,7 +100,8 @@ class ListFragment : VerticalGridSupportFragment() {
         super.onCreate(savedInstanceState)
         call = arguments?.getString(Navigator.EXTRA_CALL).orEmpty()
         params = JSONObject(arguments?.getString(Navigator.EXTRA_PARAMS) ?: "{}")
-        title = arguments?.getString(Navigator.EXTRA_TITLE).orEmpty()
+        baseTitle = arguments?.getString(Navigator.EXTRA_TITLE).orEmpty()
+        title = baseTitle
         // plakáty: 5 sloupců; náhledy na šířku: 4 sloupce – dané předem, za běhu se nemění
         presenter.poster = arguments?.getBoolean(ARG_POSTER) ?: false
         // bez ztmavení nevybraných karet: obrázky a názvy zůstanou čitelné v celé mřížce
@@ -140,6 +141,7 @@ class ListFragment : VerticalGridSupportFragment() {
     }
 
     private var resumed = false
+    private var baseTitle = ""      // nadpis výpisu bez počtu titulů
 
     override fun onResume() {
         super.onResume()
@@ -244,7 +246,10 @@ class ListFragment : VerticalGridSupportFragment() {
             (activity as? ListActivity)?.show(!presenter.poster, data, params)
             return
         }
-        data.optString("title").takeIf { it.isNotEmpty() && title.isNullOrEmpty() }?.let { title = it }
+        data.optString("title").takeIf { it.isNotEmpty() && baseTitle.isEmpty() }?.let { baseTitle = it }
+        // počet titulů ve výpisu (Objevuj, Vše a Nově na Přehraj.to) patří do nadpisu: „Seriály · 142 titulů“
+        val count = data.optString("count")
+        title = if (count.isEmpty()) baseTitle else if (baseTitle.isEmpty()) count else "$baseTitle · $count"
         data.optString("empty").takeIf { it.isNotEmpty() }?.let { emptyText = it }
         data.optString("empty_art").takeIf { it.isNotEmpty() }?.let { emptyArt = it }
         // výpis, který se mění sám (stahování), si říká o obnovení po pár sekundách

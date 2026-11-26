@@ -948,11 +948,11 @@ def discover(params):
         # Místo filtru jen řazení (žánr, rok, dabing a země mají vlastní dlaždice): vždy první, i u prázdného výběru
         base = {key: value for key, value in params.items() if key not in ("page", "offset")}
         current = dict(SORTER).get(base.get("sort") or _default_sort(base), "")
-        if total is not None:
-            current = "%s · %s" % (current, count_text(total, bool(state.get("checking"))))
         cards.insert(0, api._card("Seřadit", {"type": "filter", "call": "discover_sorts", "params": base},
                                   current, icon="settings:search"))
-    return dict(_checking_note(state), items=cards, next=following,
+    # počet titulů ve výpisu: obrazovka ho ukáže v nadpisu („Československé seriály · 142 titulů“)
+    counted = {"count": count_text(total, bool(state.get("checking")))} if total is not None else {}
+    return dict(_checking_note(state), items=cards, next=following, **counted,
                 empty="V tomto výběru TMDB nic nenabízí." if everything else
                 "Z tohoto výběru teď není nic na Přehraj.to ani v iVysílání.")
 

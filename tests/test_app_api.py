@@ -2025,8 +2025,10 @@ def test_discover_lists_can_be_filtered(api, monkeypatch):
         "/discover/movie": {"results": [film], "total_pages": 1},
         "/genre/movie/list": {"genres": [{"id": 35, "name": "Komedie"}, {"id": 18, "name": "Drama"}]},
     })
-    card = api("discover", kind="movie", category="top_rated")["items"][0]
-    assert (card["title"], card["subtitle"], card["target"]["call"]) == ("Seřadit", "Podle hodnocení · 0 titulů", "discover_sorts")
+    top = api("discover", kind="movie", category="top_rated")
+    card = top["items"][0]
+    assert (card["title"], card["subtitle"], card["target"]["call"]) == ("Seřadit", "Podle hodnocení", "discover_sorts")
+    assert top["count"] == "0 titulů"                                        # počet titulů do nadpisu výpisu
     sorts = api(card["target"]["call"], **card["target"]["params"])
     assert [(option["title"], option["current"]) for option in sorts["filters"][0]["options"]] == [
         ("Podle hodnocení", True), ("Podle roku (nejnovější)", False), ("Podle oblíbenosti", False)]
@@ -2053,7 +2055,7 @@ def test_discover_lists_can_be_filtered(api, monkeypatch):
 
     chosen = dict(genre["params"], year="1990s", rating="70", origin="CZ|SK|XC", sort="new")
     listing = api("discover", **chosen)
-    assert listing["items"][0]["subtitle"] == "Podle roku (nejnovější) · 0 titulů"   # řazení a počet titulů
+    assert (listing["items"][0]["subtitle"], listing["count"]) == ("Podle roku (nejnovější)", "0 titulů")
     path, sent = calls[-1]
     assert (sent["primary_release_date.gte"], sent["primary_release_date.lte"]) == ("1990-01-01", "1999-12-31")
     # TMDB dostane výběr ve výchozím pořadí výpisu (tady nejlépe hodnocené); podle roku se řadí až v aplikaci
@@ -2560,7 +2562,7 @@ def test_discover_offers_only_titles_available_on_prehrajto_or_ivysilani(api, mo
     listing = api("discover", kind="movie", category="popular")
     assert _titles(listing["items"]) == ["Seřadit", "Pelíšky"]                 # co není nikde, v nabídce není
     assert listing["items"][1]["badges"] == ["Přehraj.to", "CZ"] and listing["next"] is None   # je tam i český dabing
-    assert listing["items"][0]["subtitle"] == "Podle oblíbenosti · 1 titul"   # kolik titulů výpis má
+    assert (listing["items"][0]["subtitle"], listing["count"]) == ("Podle oblíbenosti", "1 titul")   # kolik titulů výpis má
     count = len(asked)
     api("discover", kind="movie", category="popular")
     assert len(asked) == count                                               # ověřené si aplikace pamatuje
@@ -2717,7 +2719,7 @@ def test_available_only_list_keeps_looking_and_missing_series_favourite_says_so(
     monkeypatch.setattr(app_api.app_discover, "_ivys_match", lambda kind, names, year: "")
     listing = api("discover", kind="movie", category="recent")               # celý výběr prošel a nic k mání
     assert _titles(listing["items"]) == ["Seřadit"] and listing["next"] is None
-    assert listing["items"][0]["subtitle"] == "Podle oblíbenosti · 0 titulů"
+    assert (listing["items"][0]["subtitle"], listing["count"]) == ("Podle oblíbenosti", "0 titulů")
     assert sorted({params.get("page") or 1 for path, params in calls if path == "/discover/movie"}) == list(range(1, 10))
     assert "primary_release_date.gte" in calls[0][1] and calls[0][1].get("sort_by") in (None, "popularity.desc")
 
@@ -3111,7 +3113,7 @@ def test_listing_fills_step_by_step_and_does_not_run_ahead(api, monkeypatch):
 
     listing = api("discover", kind="movie", category="popular")
     assert _titles(listing["items"]) == ["Seřadit"] and listing["next"] is None and listing["refresh"] == 2
-    assert listing["items"][0]["subtitle"] == "Podle oblíbenosti · zatím 0 titulů"
+    assert listing["count"] == "zatím 0 titulů"                              # ještě se ověřuje
     assert listing["status"].endswith("zbývá ověřit 4") and sorted(set(pages)) == [1, 2, 3, 4]
     settle()
     assert not any("Samot" in query or "Musíme" in query for query, _page in asked)   # jen první dávka
@@ -3120,7 +3122,7 @@ def test_listing_fills_step_by_step_and_does_not_run_ahead(api, monkeypatch):
     settle()
     done = api("discover", kind="movie", category="popular")                 # vše ověřené
     assert _titles(done["items"]) == ["Seřadit", "Pelíšky", "Samotáři"] and "refresh" not in done
-    assert done["items"][0]["subtitle"] == "Podle oblíbenosti · 2 tituly" and done["next"] is None
+    assert done["count"] == "2 tituly" and done["next"] is None
 
 
 def test_missing_titles_are_rechecked_sooner_when_they_are_new(api, monkeypatch):
@@ -3867,14 +3869,17 @@ def test_list_of_available_titles_fills_in_the_background(api, monkeypatch):
     assert "refresh" not in listing
     assert [card["badges"] for card in listing["items"][1:]] == [["Přehraj.to", "CZ"], ["Přehraj.to", "SK", "4K"]]
     assert _titles(api("discover", kind="tv", category="popular")["items"]) == ["Seřadit", "Archa"]   # seriál podle dílu
-    dubbed = api("discover", kind="movie", category="popular", dub="1")["items"]
-    assert _titles(dubbed) == ["Seřadit", "Pelíšky", "Novinka"] and dubbed[0]["subtitle"] == "Podle oblíbenosti · 2 tituly"
+    dubbed_list = api("discover", kind="movie", category="popular", dub="1")
+    dubbed = dubbed_list["items"]
+    assert _titles(dubbed) == ["Seřadit", "Pelíšky", "Novinka"] and dubbed_list["count"] == "2 tituly"
     assert index.step() == {"done": True, "checked": 0, "failed": False}     # do dalšího dne se neprochází znovu
 
     # novinka je „nově na Přehraj.to“; starý film nalezený poprvé ne
-    fresh = api("discover_fresh")["items"]
+    fresh_list = api("discover_fresh")
+    fresh = fresh_list["items"]
     assert _titles(fresh) == ["Seřadit", "Novinka"] and fresh[1]["target"]["params"]["id"] == 13
-    assert (fresh[0]["subtitle"], fresh[0]["target"]["call"]) == ("Podle data přidání · 1 titul", "fresh_sorts")
+    assert (fresh[0]["subtitle"], fresh[0]["target"]["call"]) == ("Podle data přidání", "fresh_sorts")
+    assert fresh_list["count"] == "1 titul"
     sorts = api("fresh_sorts", **fresh[0]["target"]["params"])["filters"][0]["options"]
     assert [option["title"] for option in sorts] == ["Podle data přidání", "Podle hodnocení", "Podle roku (nejnovější)"]
     assert _titles(api("discover_fresh", **sorts[1]["params"])["items"]) == ["Seřadit", "Novinka"]
@@ -4160,11 +4165,12 @@ def test_dubbed_titles_come_first_and_everything_found_can_be_browsed(api, monke
 
     # seřazeno podle hodnocení: přesně podle procent na kartách, předvolba jazyka do toho nemluví;
     # a tytéž tituly jako bez řazení (dřív řazení vracelo z TMDB úplně jiný výběr)
-    rated = api("discover", kind="movie", category="popular", sort="rating")["items"]
+    rated_list = api("discover", kind="movie", category="popular", sort="rating")
+    rated = rated_list["items"]
     assert _titles(rated) == ["Seřadit", "Anglicky", "Titulky", "Dabing", "Hvězda"]
     assert [card["subtitle"] for card in rated[1:]] == ["2020 · 90 % · film", "2020 · 80 % · film",
                                                        "2020 · 60 % · film", "2020 · 50 % · film"]
-    assert rated[0]["subtitle"] == "Podle hodnocení · 4 tituly"
+    assert (rated[0]["subtitle"], rated_list["count"]) == ("Podle hodnocení", "4 tituly")
 
     everything = api("discover_index", kind="movie")                         # vše, co se našlo: i od nejlepší kvality
     assert _titles(everything["items"]) == ["Seřadit", "Hvězda", "Dabing", "Titulky", "Anglicky"]
@@ -4181,7 +4187,8 @@ def test_dubbed_titles_come_first_and_everything_found_can_be_browsed(api, monke
     assert _titles(tiles) == ["Filmy", "Seriály", "Všechny filmy a seriály", "Hledat"]
     assert tiles[2]["subtitle"] == "K mání 5 · seřadit podle hodnocení nebo roku"
     assert (tiles[2]["target"]["call"], tiles[2]["target"]["params"]) == ("discover_index", {})
-    assert api("discover_index")["items"][0]["subtitle"] == "Doporučené (jazyk a kvalita) · 5 titulů"
+    everything_list = api("discover_index")
+    assert (everything_list["items"][0]["subtitle"], everything_list["count"]) == ("Doporučené (jazyk a kvalita)", "5 titulů")
     monkeypatch.setattr(index, "INDEX_PAGE", 3)
     first = api("discover_index", kind="movie")
     assert len(first["items"]) == 4 and first["next"]["params"] == {"kind": "movie", "offset": 3}   # + Seřadit
@@ -4350,7 +4357,7 @@ def test_newest_titles_join_a_list_chosen_by_country(api, monkeypatch):
                                     "Novinka": [_web(3, "Novinka S01E01 CZ", 3000)]})
     listing = api("discover", kind="tv", origin="CZ|SK|XC")
     assert _titles(listing["items"]) == ["Seřadit", "Vyprávěj", "Novinka", "Arabela"]   # podle oblíbenosti
-    assert listing["items"][0]["subtitle"] == "Podle oblíbenosti · 3 tituly"
+    assert (listing["items"][0]["subtitle"], listing["count"]) == ("Podle oblíbenosti", "3 tituly")
     assert any(params.get("first_air_date.lte") for params in asked)         # jen uvedené do dneška
     newest = api("discover", kind="tv", origin="CZ|SK|XC", sort="new")
     assert _titles(newest["items"])[1] == "Novinka"
