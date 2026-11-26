@@ -1,8 +1,7 @@
-"""Sdílené pomocné funkce testů Přehraj.to."""
+"""Sdílené pomocné funkce testů (klient Přehraj.to)."""
 
 import base64
 import http.cookiejar
-import importlib
 import json
 import time
 
@@ -46,8 +45,3 @@ class Fake(prehrajto.PrehrajtoClient):
                 text, final, location, status = resp
                 return text, final or url, location, status
         return "", prehrajto.BASE + "/", "", 200
-
-
-def view(name):
-    """Modul obrazovek (pro monkeypatch funkcí, které volají jiné obrazovky)."""
-    return importlib.import_module(name)

@@ -14,7 +14,7 @@
 Odkaz na video v katalogu má tvar ``<id>:<slug>:<hash>`` (id může chybět) – stránka
 videa je ``https://prehraj.to/<slug>/<hash>``.
 
-Modul nesmí importovat nic z Kodi, aby šel testovat mimo něj.
+Modul nezávisí na Androidu ani na Windows, aby šel testovat samostatně.
 """
 import base64
 import html

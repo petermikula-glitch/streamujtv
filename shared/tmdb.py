@@ -80,7 +80,7 @@ class Tmdb(object):
 
     def _fetch(self, path, timeout, params):
         params = dict(params)
-        headers = {"Accept": "application/json", "User-Agent": "Kodi addon"}
+        headers = {"Accept": "application/json", "User-Agent": "Promitarna"}
         if len(self.key) > 40:  # v4 token
             headers["Authorization"] = "Bearer " + self.key
         else:

@@ -15,7 +15,7 @@ class ApiResult(val data: JSONObject?, val error: String?, val offline: Boolean 
 }
 
 /**
- * Most k logice v Pythonu (modul app_api, sdílený s doplňkem pro Kodi).
+ * Most k logice v Pythonu (modul app_api, sdílený s Windows verzí).
  * Všechna volání běží mimo hlavní vlákno; výsledek se vrací na hlavním vlákně.
  */
 object Api {

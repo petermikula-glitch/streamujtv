@@ -7,12 +7,12 @@
   HLS streamu a titulky; živé vysílání ``…/playlist-live/v1/stream-data/channel/<kanál>``.
   Ověřeno proti živému webu 2026-11.
 
-Chráněný obsah (DRM) doplněk pro Kodi nepřehrává: o stream žádá s ``canPlayDrm=false`` a když ho
-Česká televize odmítne vydat (práva, území), předá uživateli její vysvětlení. Aplikace pro Android TV
+Běžně se o stream žádá s ``canPlayDrm=false`` (Windows verze chráněný obsah nepřehrává) a když ho
+Česká televize odmítne vydat (práva, území), předá se uživateli její vysvětlení. Aplikace pro Android TV
 může požádat i o chráněný stream (``vod(idec, drm=True)``) a přehrát ho vestavěným Widevine zařízení –
 výhradně s adresou licence, kterou rozhraní samo vrátí. Územní omezení se neobchází.
 
-Modul nesmí importovat nic z Kodi, aby šel testovat mimo něj.
+Modul nezávisí na Androidu ani na Windows, aby šel testovat samostatně.
 """
 import calendar
 import http.client
@@ -27,7 +27,7 @@ API = "https://api.ceskatelevize.cz"
 GRAPHQL = API + "/graphql/"
 VOD = API + "/video/v1/playlist-vod/v1/stream-data/media/external/%s"
 LIVE = API + "/video/v1/playlist-live/v1/stream-data/channel/%s"
-USER_AGENT = "Kodi add-on plugin.video.prehrajto.mojevidea (iVysilani)"
+USER_AGENT = "Promitarna (aplikace pro Android TV a Windows; +https://github.com/petermikula-glitch/streamujtv)"
 TIMEOUT = 20
 PAGE = 40  # tolik položek na dotaz web povoluje
 LISTING_PAGE = 80  # úplný výpis kategorie stránkuje web po osmdesáti

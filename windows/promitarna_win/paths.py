@@ -46,7 +46,7 @@ def logic_dirs():
         return [packed]
     repo = repo_dir()
     return [os.path.join(repo, "android", "app", "src", "main", "python"),
-            os.path.join(repo, "plugin.video.prehrajto.mojevidea", "resources", "lib")]
+            os.path.join(repo, "shared")]
 
 
 def use_logic():

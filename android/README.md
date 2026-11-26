@@ -3,15 +3,15 @@
 Aplikace se dříve jmenovala „Moje videa“. Vnitřní označení (`cz.petermikula.mojevidea`) a název
 instalačního souboru (`MojeVidea-<verze>.apk`) zůstávají, aby aktualizace navazovaly.
 
-Samostatná aplikace pro Android TV, která dělá totéž co doplněk pro Kodi: katalog videí
-z vašeho účtu Přehraj.to a sekce iVysílání České televize. Kodi k ní není potřeba.
+Samostatná aplikace pro Android TV: filmy a seriály z Přehraj.to, objevování podle TMDB
+a sekce iVysílání České televize. (Dřívější doplněk pro Kodi už se nevyvíjí a z repozitáře byl odstraněn.)
 
 ## Jak je postavená
 
-- **Logika je sdílená s doplňkem.** Moduly `prehrajto.py`, `ivysilani.py`, `db.py`, `catalog.py`,
+- **Logika je sdílená s Windows verzí.** Moduly `prehrajto.py`, `ivysilani.py`, `db.py`, `catalog.py`,
   `nameparser.py`, `tmdb.py`, `csfd.py`, `provider.py` a `search_results.py` se při sestavení
-  kopírují z `plugin.video.prehrajto.mojevidea/resources/lib` a v aplikaci běží v Pythonu 3.11
-  ([Chaquopy](https://chaquo.com/chaquopy/)). Oprava v doplňku se tak projeví i v aplikaci.
+  kopírují ze složky `shared/` v kořeni repozitáře a v aplikaci běží v Pythonu 3.11
+  ([Chaquopy](https://chaquo.com/chaquopy/)). Oprava v nich se projeví v obou verzích.
 - **`app/src/main/python/app_api.py`** je jediné rozhraní mezi aplikací a logikou. Aplikace volá
   `call(akce, parametry)` a dostane JSON s kartami; každá karta nese cíl (výpis, přehrání, příkaz).
   O navigaci tedy rozhoduje Python a testuje se bez Androidu (`tests/test_app_api.py`).
@@ -136,7 +136,7 @@ první sekce, ve které něco je (`start`: Oblíbené, jinak Rozkoukané, jinak 
   (ty mají v popisku „iVysílání“).
 - **Rozkoukané** – nahoře panel s naposledy rozkoukaným videem, řady Filmy a Seriály (obě služby
   pohromadě, naposledy přehrané první), Další díly a dlaždice Naposledy přehrané. Video se sem zařadí
-  po minutě přehrávání (`IN_PROGRESS_MIN` v `db.py`, stejně jako v doplňku pro Kodi); kratší puštění
+  po minutě přehrávání (`IN_PROGRESS_MIN` v `db.py`); kratší puštění
   je jen v Naposledy přehraných.
 - **Objevuj** – velké dlaždice Filmy, Seriály a Hledat a pod nimi řady právě populárních filmů
   a seriálů. Ty mají v datech místo karet `call` a aplikace si je donačte sama až po zobrazení sekce,
@@ -432,7 +432,7 @@ a pozadí“ – čtyři velikosti a pozadí černé, poloprůhledné, nebo jen 
 titulcích pod oknem a ukládá se k profilu.
 
 **Profily** (`app_extras.py`): každý profil má vlastní Rozkoukané, Oblíbené, Moje pořady z iVysílání
-a předvolby jazyka a kvality přehrávání. Tabulky katalogu se nemění (sdílí je doplněk pro Kodi): osobní stav patří
+a předvolby jazyka a kvality přehrávání. Tabulky katalogu se nemění (jsou ve sdíleném `db.py`): osobní stav patří
 vždy aktivnímu profilu a při přepnutí se uloží do `profile_<id>.json` a nahradí stavem druhého
 profilu. Katalog, stažené soubory a přihlášení jsou společné, stejně jako seznam dostupných titulů
 a nejnižší kvalita, podle které se sestavuje (`min_quality` není v `app_extras.SETTINGS`). Dřív ji

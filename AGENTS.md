@@ -7,13 +7,13 @@ Tento soubor je společné zadání pro všechny, kdo na projektu pracují – l
 
 | Složka | Obsah |
 | --- | --- |
-| `plugin.video.prehrajto.mojevidea/` | doplněk pro Kodi 19+ (Python); popis v `README.md` |
+| `shared/` | sdílená logika obou verzí (Python): Přehraj.to, iVysílání, katalog, TMDB, ČSFD |
 | `android/` | aplikace pro Android TV (Kotlin + Python přes Chaquopy); popis v `android/README.md` |
 | `windows/` | přenosná verze pro Windows (okno nad stejnou logikou, přehrávač mpv); popis v `windows/README.md` |
-| `tests/` | testy doplňku i logiky aplikace (pytest, bez Kodi a bez Androidu) |
-| `tools/build_zip.py` | sestavení Kodi repozitáře |
-| `repository.petermikula/`, `repo/`, `docs/` | Kodi repozitář a GitHub Pages – **generované soubory** |
-| `.github/workflows/` | testy a automatické vydávání aplikace |
+| `tests/` | testy sdílené logiky, aplikace i Windows verze (pytest, bez Androidu a bez Windows) |
+| `.github/workflows/` | testy a automatické vydávání aplikace a Windows verze |
+
+Doplněk pro Kodi se už nevyvíjí (rozhodnutí vlastníka, 26. 11. 2026) a z repozitáře byl odstraněn.
 
 ## Spolupráce více autorů
 
@@ -36,7 +36,6 @@ Cíl: nikdo nepřepíše práci někoho jiného.
 
 ```bash
 python3 -m pytest -q -p no:cacheprovider tests      # musí projít celé
-python3 tools/build_zip.py --check                   # Kodi repozitář odpovídá zdrojům
 ```
 
 Při změně v `android/` navíc sestavení (`cd android && gradle assembleDebug lintDebug`, postup
@@ -48,11 +47,11 @@ Testy se neobcházejí: nepřeskakují se, nemažou a neupravují jen proto, aby
 ## Sdílená logika
 
 Moduly `catalog.py`, `csfd.py`, `db.py`, `ivysilani.py`, `nameparser.py`, `prehrajto.py`,
-`provider.py`, `search_results.py` a `tmdb.py` v `plugin.video.prehrajto.mojevidea/resources/lib/`
-používá doplněk **i** aplikace (kopírují se do ní při sestavení). Proto:
+`provider.py`, `search_results.py` a `tmdb.py` ve složce `shared/` používá aplikace pro Android TV
+**i** Windows verze (kopírují se do nich při sestavení). Proto:
 
-- nesmějí záviset na Kodi (žádný `import xbmc…`) ani na Androidu,
-- musejí běžet v Pythonu 3.7 (Kodi) i 3.11 (aplikace) – žádná novější syntaxe,
+- nesmějí záviset na Androidu ani na Windows,
+- musejí běžet v Pythonu 3.11 (obě verze ho přibalují) – nic novějšího,
 - změna tabulek v `db.py` znamená zvýšit `SCHEMA_VERSION` a doplnit převod starých dat,
 - změna chování se projeví na obou místech – spusťte všechny testy, ne jen „ty své“.
 
@@ -68,17 +67,15 @@ v `tests/test_app_api.py`.
   v `android/RELEASE_NOTES.md`. Jakmile se nová verze dostane do `main`, GitHub ji sám sestaví,
   vydá (`app-v<verze>`) a aplikace ji nabídne vlastníkovi k instalaci. Rozpracované změny proto
   verzi nemění.
-- **Doplněk pro Kodi:** `version` a `<news>` v `addon.xml`, popis v `README.md`, pak
-  `python3 tools/build_zip.py`. Skript přebalí i nezměněné balíčky – ty vraťte
-  (`git checkout -- repo/zips/repository.petermikula docs/repository.petermikula-*.zip`)
-  a ověřte `python3 tools/build_zip.py --check`. Soubory v `repo/` a `docs/` ručně neupravujte.
+- **Windows:** `VERSION` ve `windows/promitarna_win/__init__.py` a text ve `windows/RELEASE_NOTES.md`.
+  Nová verze v `main` se sama sestaví a vydá jako `win-v<verze>`.
 
 ## Bez souhlasu vlastníka neměnit
 
 - `android/signing/` a nastavení podpisu – jiným klíčem by nešla nainstalovat aktualizace,
 - `.github/workflows/` – automatické vydávání,
-- `applicationId` aplikace a `id` doplňků,
-- adresy, odkud se berou aktualizace (GitHub vydání, Kodi repozitář).
+- `applicationId` aplikace,
+- adresy, odkud se berou aktualizace (GitHub vydání).
 
 Do repozitáře nepatří přihlašovací údaje, tokeny ani soukromá data vlastníka (ani v testech).
 
@@ -87,7 +84,7 @@ Do repozitáře nepatří přihlašovací údaje, tokeny ani soukromá data vlas
 - **Přehraj.to:** jen vlastní účet uživatele a to, co mu web sám nabízí.
 - **iVysílání ČT:** poctivá hlavička `User-Agent`, žádné předstírání původu požadavku
   (`Origin`/`Referer`), žádné obcházení omezení (ani územního) a žádné stahování pořadů.
-- **Chráněné pořady (DRM):** doplněk pro Kodi je nepřehrává. Aplikace pro Android TV je smí přehrát
+- **Chráněné pořady (DRM):** Windows verze je nepřehrává. Aplikace pro Android TV je smí přehrát
   jen vestavěným Widevine zařízení a jen s adresou licence, kterou rozhraní ČT samo vrátí
   (rozhodnutí vlastníka). Do kódu nepatří tokeny ani adresy opsané z oficiálního přehrávače,
   ukládání chráněného obsahu ani jakékoli odstraňování ochrany.

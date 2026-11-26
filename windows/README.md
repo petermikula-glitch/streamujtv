@@ -12,7 +12,7 @@ přenést jinam (i na flashku). Do systému se nic nezapisuje.
 
 | Část | Soubor | Co dělá |
 | --- | --- | --- |
-| Logika | `android/app/src/main/python/` a sdílené moduly doplňku pro Kodi | **stejné soubory jako na televizi** (při sestavení se zkopírují do `build/logic`) |
+| Logika | `android/app/src/main/python/` a sdílené moduly ze složky `shared/` | **stejné soubory jako na televizi** (při sestavení se zkopírují do `build/logic`) |
 | Server okna | `promitarna_win/server.py` | jen na `127.0.0.1`, s tajným klíčem v adrese; `POST /api/<akce>` = `app_api.call` |
 | Okno | `ui/index.html`, `ui/app.js`, `ui/style.css` | vykresluje obrazovky podle dat z logiky – cíle karet (`target.type`) jako `Navigator.kt` |
 | Ikony a malby | `build_assets.py` | vektorové ikony Androidu → SVG, malby `drawable-nodpi` beze změny, ikona programu ze znaku loga (do `ui/assets`, negeneruje se do gitu) |

@@ -1090,7 +1090,7 @@ class Library(object):
             "FROM meta m LEFT JOIN (SELECT meta_key, GROUP_CONCAT(search_name, ' ') AS label "
             "FROM videos WHERE hidden=0 GROUP BY meta_key) names ON names.meta_key=m.key) "
             "SELECT key FROM candidates WHERE " + conditions, words)]
-        # Starší SQLite v Kodi může mít nízký limit vázaných parametrů.
+        # Starší SQLite může mít nízký limit vázaných parametrů.
         if len(keys) > 500:
             matches = set(keys)
             return ([m for m in self.movies() if m["key"] in matches],
@@ -1190,20 +1190,6 @@ class Library(object):
         state["updated"] = max(state["last_played"], mark[0] if mark else 0)
         state["watched"] = bool(mark or (state["total"] and state["position"] >= state["total"] * IN_PROGRESS_MAX))
         return state
-
-    def import_kodi_history(self, vid, position, total, watched, updated):
-        with self.conn:
-            self.conn.execute("BEGIN IMMEDIATE")
-            local = self.playback_history(vid)
-            if local["updated"] >= updated:
-                return False
-            self.conn.execute("INSERT OR REPLACE INTO history VALUES (?, ?, ?, ?, ?)",
-                              (vid, updated, position, total, local["plays"]))
-            if watched:
-                self.conn.execute("INSERT OR REPLACE INTO watched_marks VALUES (?, ?)", (vid, updated))
-            else:
-                self.conn.execute("DELETE FROM watched_marks WHERE vid=?", (vid,))
-        return True
 
     def resume_points(self, vids=None):
         """{vid: (pozice, délka)} jen pro rozkoukaná videa."""

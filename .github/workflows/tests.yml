@@ -1,4 +1,4 @@
-# Pojistka: testy logiky a shoda Kodi repozitáře se zdroji. Hlavní kontrola se dělá před odesláním
+# Pojistka: testy logiky. Hlavní kontrola se dělá před odesláním
 # (AGENTS.md), tady jen u pull requestu do main a po sloučení – a po sloučení se znovu nekontroluje
 # obsah, který už prošel v pull requestu. Pravidla šetření minut: CLAUDE.md.
 name: Testy
@@ -49,7 +49,3 @@ jobs:
             "$python" -m pip install --quiet pytest
             "$python" -m pytest -q -p no:cacheprovider tests
           done
-
-      - name: Kodi repozitář odpovídá zdrojům
-        if: steps.known.outputs.verified != 'true'
-        run: python3.11 tools/build_zip.py --check

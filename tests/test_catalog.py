@@ -70,157 +70,21 @@ def test_existing_duplicates_merged_on_open(tmp_path):
     assert [r[0] for r in lib.conn.execute("SELECT id FROM videos")] == [REF]
 
 
-def test_incomplete_account_listing_cannot_remove_saved_video(plugin, monkeypatch):
+def test_incomplete_account_listing_cannot_remove_saved_video(tmp_path, monkeypatch):
     import catalog
 
     old_ref = ":older-video:12345678abcdef00"
     client = Fake({"/profil/nahrana-videa": (fixture("uploads_synthetic.html"), None, "", 200)})
     monkeypatch.setattr(client, "my_videos", lambda progress: client.fetch_listing(
         prehrajto.UPLOADS_PATH, max_pages=1, progress=progress, delay=0))
-    with plugin.open_library() as lib:
-        lib.upsert_video(old_ref, "Starší film", "account", catalog._parsed("Starší film"), now=1)
-        lib.set_kv("last_sync", 1)
-        stats = catalog.sync_account(client, lib)
-        assert stats["incomplete"] and stats["total"] == 2 and stats["removed"] == 0
-        assert lib.get_video(old_ref)
-        assert lib.get_kv("last_sync") == "1"
-
-
-def test_catalogue_backup_round_trip_and_rollback(plugin, tmp_path):
-    import sqlite3
-
-    import catalog
-    import xbmcgui
-
-    with plugin.open_library() as lib:
-        lib.upsert_video(REF, "Pelíšky", "account", catalog._parsed("Pelíšky"))
-        lib.create_collection("Moje kolekce")
-        lib.set_kv("link:" + REF, "https://cdn.example/signed-secret")
-        snapshot = lib.export_backup(plugin.ADDON_ID)
-    xbmcgui.BROWSE_ANSWERS.append(str(tmp_path))
-    plugin.backup_catalog({})
-    backup = next(tmp_path.glob("*.json"))
-    assert "signed-secret" not in backup.read_text()
-    assert json.loads(backup.read_text()) == snapshot
-    with plugin.open_library() as lib:
-        lib.clear()
-    xbmcgui.BROWSE_ANSWERS.append(str(backup))
-    xbmcgui.YESNO_ANSWERS.append(True)
-    plugin.restore_catalog({})
-    with plugin.open_library() as lib:
-        assert lib.export_backup(plugin.ADDON_ID) == snapshot
-        assert lib.get_kv("link:" + REF) is None
-        snapshot["tables"]["videos"].append(snapshot["tables"]["videos"][0])
-        with pytest.raises(sqlite3.IntegrityError):
-            lib.restore_backup(snapshot, plugin.ADDON_ID)
-        assert lib.get_video(REF)
-
-
-def test_sync_announces_new_episode_once_per_number(plugin):
-    from urllib.parse import parse_qsl, urlsplit
-
-    import catalog
-    import nameparser
-    import xbmcplugin
-
-    class Client:
-        listing_complete = True
-
-        def __init__(self, videos):
-            self.videos = videos
-
-        def my_videos(self, progress):
-            return self.videos
-
-    titles = ["Archa.S01E01.CZ", "Archa.S01E02.CZ", "Archa.S01E02.EN",
-              "Archa.S02E01.CZ", "Archa.S02E02.CZ"]
-    ids = ["%d:archa:%016x" % (i, i) for i in range(1, len(titles) + 1)]
-    items = [{"id": vid, "title": title} for vid, title in zip(ids, titles)]
-    with plugin.open_library() as lib:
-        lib.upsert_video(ids[0], titles[0], "account", nameparser.parse(titles[0]))
-        key = lib.get_video(ids[0])["meta_key"]
-        assert not lib.unread_episode_counts()
-        catalog.sync_account(Client(items[:-1]), lib, remove_missing=False)
-        catalog.sync_account(Client(items[:-1]), lib, remove_missing=False)
-        assert lib.unread_episode_counts() == {key: 2}
-
-    plugin.shows({})
-    assert "Nové díly (2)" in xbmcplugin.ITEMS[0][1].label
-    xbmcplugin.ITEMS.clear()
-    plugin.show({"key": key})
-    url, item, _ = xbmcplugin.ITEMS[0]
-    assert item.label == "Nové díly (2)"
-    with plugin.open_library() as lib:
-        assert not lib.unread_episode_counts()
-        catalog.sync_account(Client(items), lib, remove_missing=False)
-        assert lib.unread_episode_counts() == {key: 1}
-    xbmcplugin.ITEMS.clear()
-    plugin.new_episodes(dict(parse_qsl(urlsplit(url).query)))
-    assert len(xbmcplugin.ITEMS) == 2
-    assert [item.label.split(" · ")[0] for _, item, _ in xbmcplugin.ITEMS] == ["S01E02", "S02E01"]
-
-
-def test_watchlist_ready_uses_local_matches_and_skips_ambiguity(plugin):
-    import nameparser
-    import xbmcplugin
-
-    with plugin.open_library() as lib:
-        for vid, title, tmdb_id in [
-            (REF, "Pelisky.1999.CZ", 10),
-            ("2:archa:aaaaaaaaaaaaaaaa", "Archa.S01E01.CZ", 20),
-            ("3:film:bbbbbbbbbbbbbbbb", "Film.2001.CZ", 30),
-            ("4:film:cccccccccccccccc", "Jiny.Film.2001.CZ", 30),
-        ]:
-            lib.upsert_video(vid, title, "account", nameparser.parse(title))
-            key = lib.get_video(vid)["meta_key"]
-            lib.update_meta(key, {"tmdb_id": tmdb_id})
-        lib.watchlist_add("movie", 10, "Pelíšky", 1999, "")
-        lib.watchlist_add("tv", 20, "Archa", 2020, "")
-        lib.watchlist_add("movie", 30, "Film", 2001, "")
-        lib.watchlist_add("movie", 40, "Jinde", 2020, "")
-    plugin.watchlist({})
-    assert xbmcplugin.ITEMS[0][1].label == "Připravené k přehrání"
-    assert len(xbmcplugin.ITEMS) == 5
-    xbmcplugin.ITEMS.clear()
-    plugin.watchlist({"ready": "1"})
-    assert len(xbmcplugin.ITEMS) == 3
-    title_cards = {item.label: (url, folder) for url, item, folder in xbmcplugin.ITEMS[1:]}
-    assert title_cards["Pelíšky (1999) · Přehrát z katalogu"] == (plugin.url_for("play", vid=REF), False)
-    assert any("action=show" in url and folder for url, folder in title_cards.values())
-
-
-def test_batch_episode_assignment_keeps_progress_and_rolls_back_on_stale_selection(plugin, monkeypatch):
-    from db import meta_key_for
-
-    import nameparser
-    import xbmc
-    import xbmcgui
-
-    second = "2:archiv:bbbbbbbbbbbbbbbb"
-    with plugin.open_library() as lib:
-        for vid, title in [(REF, "Archiv.A.S01E02.CZ"), (second, "Archiv.B.CZ")]:
-            lib.upsert_video(vid, title, "account", nameparser.parse(title))
-        lib.record_play(REF, 150, 360)
-        cid = lib.create_collection("Archiv")
-        lib.add_to_collection(cid, lib.get_video(REF)["meta_key"])
-    monkeypatch.setattr(xbmcgui.Dialog, "multiselect", lambda *_args: [0, 1], raising=False)
-    xbmc.KEYBOARD_INPUT.extend(["Archiv", "Archa"])
-    xbmcgui.NUMERIC_ANSWERS.extend(["2", "3"])
-    choices = iter((2, 0))
-    monkeypatch.setattr(plugin.ui, "select", lambda *_args: next(choices))
-    plugin.batch_episodes({})
-
-    key = meta_key_for("episode", "Archa", 0)
-    with plugin.open_library() as lib:
-        applied = lib.videos_for_meta(key)
-        assert [(video["season"], video["episode"], video["locked"]) for video in applied] == [(2, 2, 1), (2, 3, 1)]
-        assert lib.resume_points()[REF] == (150, 360)
-        assert lib.collection_targets(cid) == [key]
-        lib.edit_video(second, "episode", "Změněno", season=1, episode=1)
-        with pytest.raises(ValueError, match="changed"):
-            lib.edit_episodes([(applied[0], 8), (applied[1], 9)], "Elsewhere", 3)
-        assert lib.get_video(REF)["meta_key"] == key
-        assert lib.get_video(REF)["episode"] == 2
+    lib = _lib(tmp_path)
+    lib.upsert_video(old_ref, "Starší film", "account", catalog._parsed("Starší film"), now=1)
+    lib.set_kv("last_sync", 1)
+    stats = catalog.sync_account(client, lib)
+    assert stats["incomplete"] and stats["total"] == 2 and stats["removed"] == 0
+    assert lib.get_video(old_ref)
+    assert lib.get_kv("last_sync") == "1"
+    lib.close()
 
 
 def test_stale_account_sync_cannot_restore_removed_videos(tmp_path):
@@ -233,37 +97,6 @@ def test_stale_account_sync_cannot_restore_removed_videos(tmp_path):
     assert lib.apply_account_snapshot([second], started + 3, True, True) == (0, 1)
     assert lib.apply_account_snapshot([first], started + 2, True, True) is None
     assert lib.get_video(REF) is None and lib.get_video(second["id"])
-
-
-def test_watchlist_notifies_only_after_complete_sync_and_remembers_acknowledgement(plugin, monkeypatch):
-    import xbmcgui
-    import xbmcplugin
-
-    with plugin.open_library() as lib:
-        lib.watchlist_add("movie", 10, "Pelíšky", 1999, "")
-
-    class Client:
-        listing_complete = False
-
-        def my_videos(self, progress):
-            return [{"id": REF, "title": "Pelisky.1999.CZ"}]
-
-    client = Client()
-    monkeypatch.setattr(plugin.ui, "make_client", lambda: client)
-    plugin.run_sync(background=True)
-    with plugin.open_library() as lib:
-        assert not lib.fresh_watchlist()
-    client.listing_complete = True
-    plugin.run_sync(background=True)
-    assert "Nově dostupné tituly z Chci vidět (1)" in xbmcgui.NOTIFICATIONS
-    plugin.watchlist({})
-    assert xbmcplugin.ITEMS[1][0] == plugin.url_for("play", vid=REF)
-    assert "Nově dostupný" in xbmcplugin.ITEMS[1][1].label
-    plugin.watchlist_acknowledge({"kind": "movie", "tmdb_id": 10})
-    plugin.run_sync(background=True)
-    assert xbmcgui.NOTIFICATIONS.count("Nově dostupné tituly z Chci vidět (1)") == 1
-    with plugin.open_library() as lib:
-        assert not lib.fresh_watchlist()
 
 
 def test_library_response_cache_expiry_and_trim(tmp_path):
@@ -471,54 +304,6 @@ def test_parallel_enrichment_stops_on_cancel_and_on_invalid_key(tmp_path):
     statuses = [lib.get_meta(meta["key"])["status"] for meta in metas]
     assert statuses[2] == "error" and set(statuses[catalog.TMDB_WORKERS * 2:]) == {"blocked"}
     lib.close()
-
-
-def test_quick_sync_stops_at_known_page_and_never_prunes(plugin, monkeypatch):
-    import xbmcaddon
-
-    def page(ids, next_page=None):
-        items = "".join('<div data-video-id="%d"><a href="/film-%d/%016x" title="Film %d 2001 CZ">Film %d</a></div>'
-                        % (i, i, i, i, i) for i in ids)
-        link = '<ul class="pagination"><li><a href="/profil/nahrana-videa?videoListing-page=%d">x</a></li></ul>' \
-            % next_page if next_page else ""
-        return "<html>%s%s</html>" % (items, link)
-
-    pages = {1: page([9, 8, 7], 2), 2: page([6, 5, 4], 3), 3: page([3, 2, 1])}
-
-    class Client(Fake):
-        def _request(self, url, data=None, headers=None, follow=True):
-            if "/profil/nahrana-videa" in url:
-                self.calls.append((url, data, follow))
-                number = int(url.rsplit("page=", 1)[1]) if "page=" in url else 1
-                return pages[number], url, "", 200
-            return super()._request(url, data, headers, follow)
-
-    client = Client({"/profil": ("ok", None, "", 200)})
-    client.sleep = lambda seconds: None
-    monkeypatch.setattr(plugin.ui, "make_client", lambda: client)
-
-    def listing_requests():
-        return sum(1 for url, _data, _follow in client.calls if "nahrana-videa" in url)
-
-    assert plugin.run_sync(background=True)["total"] == 9 and listing_requests() == 3
-    xbmcaddon.SETTINGS.update(quick_sync="true", remove_missing="true")
-    # nové video na první stránce, jedno starší mezitím z účtu zmizelo
-    pages[1], pages[3] = page([10, 9, 8], 2), page([3, 2])
-    pages[2] = page([7, 6, 5, 4], 3)
-    client.calls.clear()
-    stats = plugin.run_sync(background=True)
-    assert stats["quick"] and not stats["incomplete"] and stats["new"] == 1 and stats["removed"] == 0
-    assert listing_requests() == 2  # skončila na druhé stránce, kde už nebylo nic nového
-    with plugin.open_library() as lib:
-        assert lib.count_videos() == 10
-        full = int(lib.get_kv("last_full_sync"))
-        lib.set_kv("last_full_sync", full - 25 * 3600)
-
-    client.calls.clear()
-    stats = plugin.run_sync(background=True)  # po dni zase úplná: projde vše a odebere smazané
-    assert not stats["quick"] and listing_requests() == 3 and stats["removed"] == 1
-    client.calls.clear()
-    assert not plugin.run_sync(background=False)["quick"] and listing_requests() == 3  # ruční je vždy úplná
 
 
 def _snapshot(lib, names, started, durations=None):

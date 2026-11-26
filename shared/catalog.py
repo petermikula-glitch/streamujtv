@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Logika katalogu nezávislá na Kodi: synchronizace s účtem, import odkazů,
+"""Logika katalogu: synchronizace s účtem, import odkazů,
 doplnění metadat z ČSFD/TMDB."""
 import hashlib
 import re

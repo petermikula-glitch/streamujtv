@@ -13,7 +13,7 @@ on:
     branches: [main]
     paths:
       - 'android/**'
-      - 'plugin.video.prehrajto.mojevidea/resources/lib/**'
+      - 'shared/**'
       - 'tests/**'
       - '.github/workflows/android.yml'
       - '!**.md'
@@ -22,7 +22,7 @@ on:
     branches: [main]
     paths:
       - 'android/**'
-      - 'plugin.video.prehrajto.mojevidea/resources/lib/**'
+      - 'shared/**'
       - 'tests/**'
       - '.github/workflows/android.yml'
       - '!**.md'

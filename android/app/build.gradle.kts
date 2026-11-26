@@ -4,9 +4,9 @@ plugins {
     id("com.chaquo.python")
 }
 
-// Logika aplikace je sdílená s doplňkem pro Kodi: tyto moduly na Kodi nezávisí
-// a kopírují se do aplikace při každém sestavení (jeden zdroj pravdy, stejné testy).
-val pluginLib = rootProject.file("../plugin.video.prehrajto.mojevidea/resources/lib")
+// Sdílená logika (složka shared, používá ji i Windows verze): moduly se kopírují do aplikace
+// při každém sestavení (jeden zdroj pravdy, stejné testy).
+val pluginLib = rootProject.file("../shared")
 val pluginModules = listOf(
     "catalog.py", "csfd.py", "db.py", "ivysilani.py", "nameparser.py", "prehrajto.py", "provider.py",
     "search_results.py", "tmdb.py",

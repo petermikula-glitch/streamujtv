@@ -24,7 +24,7 @@ REPO = os.path.dirname(HERE)
 BUILD = os.path.join(HERE, "build")
 DIST = os.path.join(HERE, "dist")
 SHARED = ("catalog.py", "csfd.py", "db.py", "ivysilani.py", "nameparser.py", "prehrajto.py", "provider.py",
-          "search_results.py", "tmdb.py")   # sdílené moduly doplňku pro Kodi (jako v android/app/build.gradle.kts)
+          "search_results.py", "tmdb.py")   # sdílené moduly ze složky shared (jako v android/app/build.gradle.kts)
 
 
 def version():
@@ -40,7 +40,7 @@ def copy_logic(target):
     for path in glob.glob(os.path.join(REPO, "android", "app", "src", "main", "python", "*.py")):
         shutil.copy(path, target)
     for name in SHARED:
-        shutil.copy(os.path.join(REPO, "plugin.video.prehrajto.mojevidea", "resources", "lib", name), target)
+        shutil.copy(os.path.join(REPO, "shared", name), target)
 
 
 def main(mpv_dir=""):

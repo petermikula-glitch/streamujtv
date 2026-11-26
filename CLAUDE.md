@@ -39,5 +39,5 @@ Jak je to nastavené teď (při změně workflow tento odstavec upravte):
 Pro orientaci: repozitář je veřejný a běhy na standardních strojích se u veřejných repozitářů do limitu
 nepočítají (GitHub u nich vykazuje 0 účtovaných minut). Pravidlo platí i tak – kdyby se repozitář
 změnil na soukromý, počítal by se každý běh. Jeden běh `tests.yml` odpovídá 1 minutě, `android.yml`
-se sestavením 3 minutám; sestavení stránek GitHub Pages po každé změně `main` (spravuje GitHub,
-hostuje Kodi repozitář) 1 minutě.
+se sestavením 3 minutám. GitHub Pages (dříve Kodi repozitář) se už nepoužívají – v nastavení
+repozitáře mají být vypnuté, jinak by se po každé změně `main` zkoušely sestavit.

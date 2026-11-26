@@ -21,7 +21,7 @@ import urllib.request
 from nameparser import normalize
 
 BASE = "https://www.csfd.cz"
-USER_AGENT = "Kodi addon (+https://github.com/petermikula-glitch/streamujtv)"
+USER_AGENT = "Promitarna (+https://github.com/petermikula-glitch/streamujtv)"
 TIMEOUT = 20
 MIN_DELAY = 1.5   # s – ohleduplné tempo dotazů
 

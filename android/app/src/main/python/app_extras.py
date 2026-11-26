@@ -2,7 +2,7 @@
 """Pohodlí kolem katalogu: profily, úvodní panel, pokračování na domovské obrazovce televize,
 stažení celé řady a zapamatovaná zvuková stopa.
 
-Profily nemění tabulky katalogu (ty sdílí aplikace s doplňkem pro Kodi). Osobní stav – historie
+Profily nemění tabulky katalogu (ty jsou ve sdíleném modulu db.py). Osobní stav – historie
 přehrávání, oblíbené, předvolby – patří vždy právě aktivnímu profilu; při přepnutí se uloží do
 souboru ``profile_<id>.json`` a nahradí ho stav profilu, na který se přepíná. Katalog, stažené
 soubory a přihlášení jsou společné.
