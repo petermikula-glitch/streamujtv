@@ -516,10 +516,40 @@ def _fresh(kind=None):
     return found[:FRESH_LIMIT]
 
 
-def _fresh_cards(kind=None, limit=None):
+FRESH_SORTER = (("added", "Podle data přidání"), ("rating", "Podle hodnocení"), ("new", "Podle roku (nejnovější)"))
+INDEX_SORTER = (("best", "Doporučené (jazyk a kvalita)"), ("rating", "Podle hodnocení"),
+                ("new", "Podle roku (nejnovější)"))
+
+
+def _sorted_rows(rows, sort):
+    """Řádky ``(…, druh, číslo, záznam)`` podle hodnocení (procenta z karty) nebo roku uvedení;
+    jiné řazení nechá pořadí, jak je. Řazení je stabilní: při shodě zůstává původní pořadí."""
+    if sort == "rating":
+        return sorted(rows, key=lambda row: int(row[-1].get("v") or 0), reverse=True)
+    if sort == "new":
+        return sorted(rows, key=lambda row: row[-1].get("rd") or "%04d" % int(row[-1].get("y") or 0), reverse=True)
+    return rows
+
+
+def _sort_card(call, params, sorter, current):
+    """Dlaždice Seřadit na začátku výpisu (stejná jako v Objevuj)."""
+    base = {key: value for key, value in params.items() if key != "offset"}
+    return api._card("Seřadit", {"type": "filter", "call": call, "params": base},
+                     dict(sorter).get(current, ""), icon="settings:search")
+
+
+def fresh_sorts(params):
+    return discover.sort_choices(params, FRESH_SORTER, FRESH_SORTER[0][0])
+
+
+def index_sorts(params):
+    return discover.sort_choices(params, INDEX_SORTER, INDEX_SORTER[0][0])
+
+
+def _fresh_cards(kind=None, limit=None, sort=""):
     with api._library() as lib:
         state = api._state(lib)
-    rows = _fresh(kind)[:limit]
+    rows = _sorted_rows(_fresh(kind), sort)[:limit]
     known = {"%s:%s" % (item_kind, tmdb_id): {"n": entry.get("n") or 0, "iv": entry.get("iv") or None,
                                                "d": entry.get("d") or "", "q": int(entry.get("q") or 0),
                                                "s": int(entry.get("s") or 0)}
@@ -538,7 +568,11 @@ def _fresh_cards(kind=None, limit=None):
 def discover_fresh(params):
     """Výpis „Nově na Přehraj.to“: tituly, které se tam objevily v posledních týdnech."""
     kind = params.get("kind") if params.get("kind") in ("movie", "tv") else None
-    return {"items": _fresh_cards(kind), "next": None,
+    sort = params.get("sort") if params.get("sort") in dict(FRESH_SORTER) else FRESH_SORTER[0][0]
+    cards = _fresh_cards(kind, sort=sort)
+    if cards:
+        cards.insert(0, _sort_card("fresh_sorts", params, FRESH_SORTER, sort))
+    return {"items": cards, "next": None,
             "empty": "Zatím tu nic není. Seznam se plní sám na pozadí – nové tituly se objeví, "
                      "jakmile je aplikace na Přehraj.to najde."}
 
@@ -577,9 +611,11 @@ def discover_index(params):
     with api._library() as lib:
         state = api._state(lib)
     prefer = (state.get("prefs") or {}).get("language")
+    sort = params.get("sort") if params.get("sort") in dict(INDEX_SORTER) else INDEX_SORTER[0][0]
     rows = _catalogued(kind)
     rows.sort(key=lambda row: (_tier(row[2], prefer), -int(row[2].get("q") or 0), -int(row[2].get("v") or 0),
                                row[2].get("t") or "", row[1]))
+    rows = _sorted_rows(rows, sort)
     window = rows[offset:offset + INDEX_PAGE]
     discover._mark_known(state, {
         "%s:%s" % (item_kind, tmdb_id): {"n": entry.get("n") or 0, "iv": entry.get("iv") or None,
@@ -595,6 +631,8 @@ def discover_index(params):
             rating=int(entry.get("v") or 0)))
     following = {"call": "discover_index", "params": dict(params, offset=offset + INDEX_PAGE)} \
         if offset + INDEX_PAGE < len(rows) else None
+    if offset == 0 and cards:
+        cards.insert(0, _sort_card("index_sorts", params, INDEX_SORTER, sort))
     return {"items": cards, "next": following,
             "empty": "Zatím tu nic není. Seznam se plní sám na pozadí, když je aplikace otevřená – "
                      "první tituly se objeví během pár minut."}
@@ -611,4 +649,5 @@ def catalogue_tile(kind):
 
 
 ACTIONS = {"discover_fresh": discover_fresh, "discover_fresh_row": discover_fresh_row,
+           "fresh_sorts": fresh_sorts, "index_sorts": index_sorts,
            "discover_index": discover_index, "index_keepalive": keepalive}

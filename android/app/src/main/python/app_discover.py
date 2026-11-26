@@ -27,7 +27,7 @@ AVAILABLE_PREFIX = "avail:"      # kolik verzí titulu se na Přehraj.to naposle
 AVAILABLE_RULES = 2              # pravidla, podle kterých se počítá „je k mání“ (2 = štítek HD není „pod Full HD“)
 AVAILABLE_TTL = 14 * 24 * 3600   # nalezený titul: soubory mizí zřídka (a stránka titulu údaj opraví sama)
 MISS_TTL = 6 * 3600              # nalezený titul, který se při novém ověření nenašel: zkusit znovu po této době
-MISSES_TO_DROP = 2               # po tolika nepovedených ověřeních za sebou se titul přestane nabízet
+MISSES_TO_DROP = 3               # po tolika nepovedených ověřeních za sebou (s odstupem) se titul přestane nabízet
 TV_MISSING_TTL = 7 * 24 * 3600   # „v iVysílání není“ platí déle: seznam titulů se prochází celý a ČT přidává pomalu
 MISSING_TTL = 2 * 24 * 3600      # nenalezený titul se ověří znovu dřív: nové soubory přibývají
 # … a tím dřív, čím je titul novější (rok uvedení → za jak dlouho znovu): novinky přibývají ze dne na den
@@ -46,9 +46,11 @@ LIMIT_WAIT_MAX = 1800            # s: nejdelší přestávka
 LIMIT_FORGET = 1800              # s bez odmítnutí, po kterých se zase začíná krátkou přestávkou
 LIMIT_DISTRUST = 900             # s po odmítnutí: „nenašlo se“ u titulu, který tam byl, se nepočítá
 CHECK_WORKERS = 4                # kolik titulů se ověřuje souběžně
-ONLY_ENOUGH = 12                 # výpis „jen dostupné“: tolik titulů stačí na jedno načtení…
-ONLY_PAGES = 3                   # …a víc stránek TMDB kvůli nim najednou neprojde,
-ONLY_SECONDS = 12                # ani když ověřování trvá déle než tolik sekund
+ONLY_ENOUGH = 12                 # (dřívější hranice načtení; výpis teď prochází vždy celý svůj úsek)
+ONLY_PAGES = 3                   # výpis „jen dostupné“: jedno načtení = vždy tytéž tři stránky TMDB
+SORT_PAGES = 15                  # seřazený výpis: tolik stránek TMDB v původním pořadí se seřadí (stejný výběr)
+SORT_WINDOW = 60                 # … a tolik karet z něj na jedno načtení
+SORT_VERIFY = 40                 # neověřených titulů seřazeného výpisu se najednou zařadí k ověření nejvýš tolik
 SEARCH_RETRY_WAIT = 2.5          # po dočasné chybě hledání se tolik sekund počká a zkusí se to jednou znovu
 SEARCH_HOLD = 20                 # tolik sekund po hledání, na které někdo čeká, ověřování na pozadí nezačíná další dávku
 CHECK_PAUSE = 120                # služba, která neodpovídá, se tolik sekund nezkouší (výpis na ni nečeká)
@@ -384,10 +386,11 @@ def _known(lib, kind, ids):
             continue
         count = int(entry.get("n") or 0)
         television = entry.get("iv") if isinstance(entry.get("iv"), str) else None
-        # údaj o iVysílání má vlastní stáří: záznam se přepisuje i tehdy, když se iVysílání neověřovalo
-        if television is not None and \
-                now - (entry.get("its") or entry.get("ts") or 0) >= (AVAILABLE_TTL if television else TV_MISSING_TTL):
-            television = None
+        # Údaj o iVysílání má vlastní stáří (záznam se přepisuje i tehdy, když se iVysílání neověřovalo).
+        # Prošlý údaj platí dál, jen se ověří znovu (``tv_stale``): dřív se zahodil a titul, který je jen
+        # v iVysílání, do nového ověření z výpisu zmizel.
+        tv_stale = television is not None and \
+            now - (entry.get("its") or entry.get("ts") or 0) >= (AVAILABLE_TTL if television else TV_MISSING_TTL)
         if not count and entry.get("r") != AVAILABLE_RULES:
             continue              # „není tam“ podle dřívějších pravidel kvality: jako by se neověřovalo
         if count:
@@ -395,6 +398,8 @@ def _known(lib, kind, ids):
         else:
             valid = AVAILABLE_TTL if television else entry.get("ttl") or MISSING_TTL
         known[key] = {"n": count, "iv": television}
+        if tv_stale:
+            known[key]["tv_stale"] = True
         if "d" in entry:   # souhrn verzí (od verze se seznamem dostupných titulů)
             known[key].update(d=entry.get("d") or "", q=int(entry.get("q") or 0), s=int(entry.get("s") or 0))
         if now - (entry.get("ts") or 0) >= valid or (count and "d" not in entry):
@@ -466,7 +471,7 @@ def reverify_all():
 def _fresh(known, key):
     """Je údaj o titulu čerstvý a úplný (není ho třeba ověřovat)?"""
     entry = known.get(key)
-    return bool(entry) and not entry.get("stale") and entry["iv"] is not None
+    return bool(entry) and not entry.get("stale") and not entry.get("tv_stale") and entry["iv"] is not None
 
 
 def _availability(lib, kind, ids):
@@ -807,26 +812,27 @@ def _dubbed(known, kind, item):
 def _collect(params, state, enough=ONLY_ENOUGH, pages_max=ONLY_PAGES):
     """Tituly výpisu od stránky ``page``: ``(tituly, poslední prošlá stránka, stránek celkem)``.
 
-    Běžně jen ty, o kterých se ví, že jsou k mání na Přehraj.to nebo v iVysílání; protože jich na
-    stránce TMDB může být málo, projde se jich víc (nejvýš ``pages_max``), dokud není titulů ``enough``.
+    Běžně jen ty, o kterých se ví, že jsou k mání na Přehraj.to nebo v iVysílání. Jedno načtení
+    projde vždy celý úsek ``pages_max`` stránek TMDB (stránky 1–3, 4–6, …), ať se v něm najde titulů
+    kolik chce: hranice načtení se tak nikdy neposouvají. Dřív se načítání zastavilo, jakmile bylo
+    titulů dost (nebo na stránce, která se ještě ověřovala) – a při obnově výpisu během ověřování pak
+    stejný počet načtení pokryl jiný kus seznamu: tituly z konce mizely a zase se objevovaly.
     S ``avail=all`` vrací celou stránku bez ověřování.
 
     Titul, o kterém se zatím nic neví, se ve výpisu neukáže: ověří se na pozadí (``BACKGROUND``), jeho
     klíč je ve ``state["checking"]`` a obrazovka si za chvíli řekne znovu – výpis se tak plní postupně
-    a je v něm jen to, co opravdu je k mání. Dál než na stránku, která se ještě ověřuje, se nejde:
-    jinak by se ověřovaly desítky titulů z dalších stránek dřív než ty, na které se člověk dívá.
+    a je v něm jen to, co opravdu je k mání. Další úsek se nenabízí, dokud se tento ověřuje (``discover``).
     Co se ověřit nepodařilo (služba neodpovídá), počítá ``state["unverified"]``.
     """
     kind = _kind(params)
     page = max(1, api._offset({"offset": params.get("page")}))
     everything = params.get("avail") == "all"
-    found, started = [], time.time()
+    found = []
     checking = state.setdefault("checking", set())
     state.setdefault("unverified", 0)
     for current in range(page, page + (1 if everything else pages_max)):
         items, pages = _list_items(dict(params, page=current))
         items = [item for item in items if isinstance(item, dict) and item.get("id")]
-        waiting = False
         if everything or BACKGROUND:
             with api._library() as lib:
                 known = _known(lib, kind, [item["id"] for item in items])
@@ -837,7 +843,6 @@ def _collect(params, state, enough=ONLY_ENOUGH, pages_max=ONLY_PAGES):
                 pending = {"%s:%s" % key for key in _verify_later(kind, todo, state)}
                 fresh = {key for key in pending if key not in known}
                 checking.update(fresh)
-                waiting = bool(fresh)
                 state["rechecking"] = state.get("rechecking", 0) + len(pending - fresh)
                 state["unverified"] += len([item for item in todo if "%s:%s" % (kind, item["id"]) not in known
                                             and "%s:%s" % (kind, item["id"]) not in pending])
@@ -847,8 +852,7 @@ def _collect(params, state, enough=ONLY_ENOUGH, pages_max=ONLY_PAGES):
         _mark_known(state, known)
         found += [item for item in items if everything or (
             _there(known, kind, item) and (not params.get("dub") or _dubbed(known, kind, item)))]
-        if current >= pages or not items or len(found) >= enough or waiting \
-                or time.time() - started > ONLY_SECONDS:
+        if current >= pages or not items:
             break
     if not everything:
         found = _preferred_first(found, kind, state)
@@ -913,19 +917,32 @@ def discover(params):
     everything = params.get("avail") == "all"
     with api._library() as lib:
         state = api._state(lib)
-    items, last, pages = _collect(params, state)
-    cards = [_item_card(item, kind, state) for item in items]
-    # „jen dostupné“: další stránka se nabízí, i když z těchto nevyšlo nic – aplikace pak hledá dál sama.
-    # Dokud se tato část ověřuje, dál se nejde: obrazovka se obnoví a pokračuje, až bude jasno.
-    following = {"call": "discover", "params": dict(params, page=last + 1)} \
-        if last < pages and (cards or not everything) and not state.get("checking") else None
+    sort = _explicit_sort(params)
+    if sort and not everything:
+        # Seřazený výpis: tytéž tituly jako bez řazení (prvních ``SORT_PAGES`` stránek v původním
+        # pořadí), jen jinak seřazené. Dřív se řazení posílalo TMDB, a to vrátilo úplně jiný výběr
+        # (třeba nejnovější premiéry, které na Přehraj.to ještě nejsou) – z dlouhého výpisu zbyly dva filmy.
+        offset = api._offset(params)
+        found = _collect_sorted(params, state, sort)
+        cards = [_item_card(item, kind, state) for item in found[offset:offset + SORT_WINDOW]]
+        following = {"call": "discover", "params": dict(params, offset=offset + SORT_WINDOW)} \
+            if offset + SORT_WINDOW < len(found) else None
+        first = offset == 0
+    else:
+        items, last, pages = _collect(params, state)
+        cards = [_item_card(item, kind, state) for item in items]
+        # „jen dostupné“: další úsek se nabízí, i když z tohoto nevyšlo nic – aplikace pak hledá dál sama.
+        # Dokud se tento úsek ověřuje, dál se nejde: obrazovka se obnoví a pokračuje, až bude jasno.
+        following = {"call": "discover", "params": dict(params, page=last + 1)} \
+            if last < pages and (cards or not everything) and not state.get("checking") else None
+        first = page == 1
     if everything and kind == "movie" and cards and len(state["available"]) < len(cards):
         # u výpisu všech titulů se dostupnost neověřuje sama, jen na požádání
         cards.insert(0, api._card("Ověřit dostupnost", api._target("command", "discover_check", dict(params, page=page)),
                                   "Které z těchto filmů jsou na Přehraj.to", icon="search"))
-    if page == 1:
+    if first:
         # Místo filtru jen řazení (žánr, rok, dabing a země mají vlastní dlaždice): vždy první, i u prázdného výběru
-        base = {key: value for key, value in params.items() if key != "page"}
+        base = {key: value for key, value in params.items() if key not in ("page", "offset")}
         current = dict(SORTER).get(base.get("sort") or _default_sort(base), "")
         cards.insert(0, api._card("Seřadit", {"type": "filter", "call": "discover_sorts", "params": base},
                                   current, icon="settings:search"))
@@ -1034,14 +1051,90 @@ def discover_filters(params):
 SORTER = (("rating", "Podle hodnocení"), ("new", "Podle roku (nejnovější)"), ("popular", "Podle oblíbenosti"))
 
 
-def discover_sorts(params):
-    """Řazení výpisu z Objevuj (dlaždice Seřadit místo filtru): stejný tvar jako ``discover_filters``."""
-    base = {key: value for key, value in params.items() if key != "page"}
-    current = base.get("sort") or _default_sort(base)
+def sort_choices(params, sorter, default):
+    """Volby dlaždice Seřadit (stejný tvar jako ``discover_filters``): každá nese celé parametry výpisu."""
+    base = {key: value for key, value in params.items() if key not in ("page", "offset")}
+    current = base.get("sort") or default
     options = [{"title": title, "current": value == current, "params": dict(base, sort=value)}
-               for value, title in SORTER]
-    return {"title": "Seřadit", "filters": [{"title": "Seřadit", "value": dict(SORTER).get(current, ""),
+               for value, title in sorter]
+    return {"title": "Seřadit", "filters": [{"title": "Seřadit", "value": dict(sorter).get(current, ""),
                                              "options": options}], "reset": None}
+
+
+def discover_sorts(params):
+    """Řazení výpisu z Objevuj (dlaždice Seřadit místo filtru)."""
+    return sort_choices(params, SORTER, _default_sort(params))
+
+
+def _explicit_sort(params):
+    """Řazení, které si uživatel vybral a které se liší od výchozího pořadí výpisu (jinak ``""``)."""
+    sort = str(params.get("sort") or "")
+    return sort if sort in dict(SORTER) and sort != _default_sort(params) else ""
+
+
+def _percent(item):
+    """Hodnocení tak, jak ho ukazuje karta (procenta)."""
+    return int(round((item.get("vote_average") or 0) * 10))
+
+
+def sort_items(items, sort):
+    """Seřadí tituly z TMDB: podle hodnocení (jak ho ukazuje karta, při shodě víc hlasů napřed),
+    podle data uvedení (nejnovější napřed) nebo podle oblíbenosti. Bez data uvedení až na konec."""
+    if sort == "rating":
+        return sorted(items, key=lambda item: (_percent(item), item.get("vote_count") or 0), reverse=True)
+    if sort == "new":
+        return sorted(items, key=lambda item: item.get("release_date") or item.get("first_air_date") or "",
+                      reverse=True)
+    return sorted(items, key=lambda item: item.get("popularity") or 0, reverse=True)
+
+
+def _collect_sorted(params, state, sort):
+    """Seřazený výpis: tituly k mání z prvních ``SORT_PAGES`` stránek výpisu v jeho výchozím pořadí.
+
+    Neověřené tituly se ověřují na pozadí po dávkách (``SORT_VERIFY``), výpis se mezitím obnovuje
+    a doplňuje; stav je ve ``state["checking"]`` a ``state["unverified"]`` jako u ``_collect``."""
+    kind = _kind(params)
+    base = {key: value for key, value in params.items() if key not in ("sort", "page", "offset")}
+    items, pages = _list_items(dict(base, page=1))
+    rest = list(range(2, min(int(pages or 1), SORT_PAGES) + 1))
+    if rest:
+        def load(number):
+            try:
+                return _list_items(dict(base, page=number))[0] or []
+            except TmdbError:
+                return []   # chybějící stránka jen zmenší výběr
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for more in pool.map(load, rest):
+                items = list(items) + list(more)
+    seen, unique = set(), []
+    for item in items:
+        if isinstance(item, dict) and item.get("id") and item["id"] not in seen:
+            seen.add(item["id"])
+            unique.append(item)
+    with api._library() as lib:
+        known = _known(lib, kind, [item["id"] for item in unique])
+    checking = state.setdefault("checking", set())
+    state.setdefault("unverified", 0)
+    now = time.time()
+    with _VERIFY_LOCK:
+        failed = dict(_VERIFY["failed"])
+    todo = [item for item in unique if not _fresh(known, "%s:%s" % (kind, item["id"]))]
+    unknown = [item for item in todo if "%s:%s" % (kind, item["id"]) not in known]
+    stale = [item for item in todo if "%s:%s" % (kind, item["id"]) in known]
+    waiting = [item for item in unknown if failed.get((kind, item["id"]), 0) <= now]
+    batch = waiting[:SORT_VERIFY] + stale[:SORT_VERIFY]
+    if BACKGROUND:
+        pending = {"%s:%s" % key for key in _verify_later(kind, batch, state)}
+        checking.update(key for key in pending if key not in known)
+        checking.update("%s:%s" % (kind, item["id"]) for item in waiting[SORT_VERIFY:])   # přijdou na řadu
+        state["rechecking"] = state.get("rechecking", 0) + len([key for key in pending if key in known])
+    elif batch:
+        known.update(_check_available(kind, batch, state) or {})
+    state["unverified"] += len([item for item in unknown if "%s:%s" % (kind, item["id"]) not in checking])
+    _mark_known(state, known)
+    found = [item for item in unique if _there(known, kind, item)
+             and (not params.get("dub") or _dubbed(known, kind, item))]
+    return sort_items(found, sort)
 
 
 def _list_items(params):
@@ -1050,6 +1143,9 @@ def _list_items(params):
     page = max(1, api._offset({"offset": params.get("page")}))
     client = _tmdb()
     category = params.get("category") or ""
+    if params.get("sort") and params["sort"] == _default_sort(params):
+        # výchozí pořadí vybrané v Seřadit: tentýž výpis jako bez řazení (ne jiný dotaz na TMDB)
+        params = {key: value for key, value in params.items() if key != "sort"}
     filtered = any(params.get(key) for key in FILTER_KEYS)
     if category in ("popular", "top_rated") and not filtered:
         return client.browse(kind, category, page)
@@ -1147,8 +1243,8 @@ def discover_czechoslovak(params):
     name = "Československé %s" % _plural(kind).lower()
     origin = {"kind": kind, "origin": CZECHOSLOVAK}
     cards = [
-        api._card("Všechny", api._target("list", "discover", dict(origin, sort=SORTER[0][0]), name),
-                  "Seřadit podle hodnocení nebo roku", icon="all"),
+        api._card("Všechny", api._target("list", "discover", origin, name),
+                  "Seřadit jde podle hodnocení nebo roku", icon="all"),
         api._card("Podle roku", api._target("list", "discover_years", origin, name + " podle roku"), icon="year"),
         api._card("Podle žánru", api._target("list", "discover_genres", origin, name + " podle žánru"),
                   icon="folder:series" if kind == "tv" else "folder:movies"),
