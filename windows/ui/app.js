@@ -179,12 +179,21 @@ const stack = [];          // obrazovky nad hlavní: {kind, call, params, title}
 let home = null;           // data hlavní obrazovky
 let section = 0;
 
+let homeStale = false;      // na hlubší obrazovce se mohlo něco změnit (oblíbené, zhlédnuté, stažené…)
+
 function setCrumbs() {
   $("#crumbs").textContent = stack.length ? stack[stack.length - 1].title || "" : "";
   $("#back").hidden = !stack.length;      // tlačítko Zpět jen tam, kam se dá vrátit
+  if (!stack.length && homeStale) {
+    // zpátky na hlavní obrazovce: data se načtou znovu (jako na televizi po návratu), jinak by
+    // třeba právě přidaný titul v Oblíbených chyběl až do dalšího spuštění
+    homeStale = false;
+    loadHome();
+  }
 }
 
 function show(screen) {
+  homeStale = true;
   stack.push(screen);
   setCrumbs();
   render();
@@ -892,6 +901,16 @@ async function restartPlayer(screen) {
 
 async function afterPlayback(screen, state) {
   const quick = Date.now() - screen.since < 20000 && !state.ended && (state.position || 0) < 5;
+  if (quick && state.error && !state.choice) {
+    // video se nerozběhlo a jinou verzi zkusit nejde (iVysílání, vlastní soubor): ukázat proč
+    stack.pop();
+    setCrumbs();
+    render(true);
+    api("log_error", {where: "přehrávač mpv", text: state.error});
+    info(screen.title || "Přehrávání", "Video se nepodařilo přehrát.\n\nPřehrávač hlásí:\n" + state.error +
+      "\n\n(Uloženo i v Nástroje → Diagnostika.)");
+    return;
+  }
   if (quick && state.choice && state.track) {
     // video se hned zavřelo: verze nejspíš nejde přehrát – zkusit jinou (jako na televizi)
     const other = await api("play_other", {track: state.track, choice: state.choice, tried: []});

@@ -333,3 +333,19 @@ def test_player_panel_switches_tracks_and_subtitle_style(tmp_path):
     assert ["set_property", "audio-delay", -0.15] in commands
     assert ["sub-add", "/tmp/cz.srt", "select"] in commands
     assert ["set_property", "window-minimized", True] in commands
+
+
+def test_failed_playback_reports_why_from_the_mpv_log(tmp_path):
+    """Video se nerozběhne: okno a Diagnostika dostanou důvod ze záznamu mpv (ne prázdné zavření okna)."""
+    from promitarna_win.player import build_args, failure
+    log = tmp_path / "mpv.log"
+    log.write_text("[cplayer] Playing: https://cdn.example/v.m3u8\n"
+                   "[ytdl_hook] youtube-dl failed: not found\n"
+                   "[ffmpeg] https: HTTP error 403 Forbidden\n"
+                   "[cplayer] Failed to open https://cdn.example/v.m3u8.\n", encoding="utf-8")
+    assert failure(str(log)) == ("[ffmpeg] https: HTTP error 403 Forbidden\n"
+                                 "[cplayer] Failed to open https://cdn.example/v.m3u8.")
+    assert failure(str(tmp_path / "zadny.log"), 2) == "Přehrávač mpv skončil s kódem 2."
+    assert failure(str(tmp_path / "zadny.log"), 0) == ""
+    args = build_args("mpv", {"url": "https://cdn.example/v.m3u8"}, 0, {}, log_file=str(log))
+    assert "--ytdl=no" in args and "--log-file=%s" % log in args

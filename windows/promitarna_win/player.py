@@ -54,13 +54,14 @@ def _langs(code, default):
     return ",".join(part for part in (first, default) if part)
 
 
-def build_args(mpv, stream, position, audio=None, ipc="", style=None, input_conf=""):
+def build_args(mpv, stream, position, audio=None, ipc="", style=None, input_conf="", log_file=""):
     """Příkazová řádka pro mpv. ``audio``: ``{"mode", "delay_ms", "night"}`` z nastavení zvuku,
     ``style``: vzhled titulků; zvuk a titulky naposledy zvolené u titulu jsou v ``stream["tracks"]``."""
     audio = audio or {}
     tracks = stream.get("tracks") or {}
     default = "cs,cze,ces,sk,slk,slo"
-    args = [mpv, "--force-window=immediate", "--fs", "--keep-open=no", "--no-terminal",
+    # --ytdl=no: adresy jsou přímé soubory a streamy, doplněk pro stahování z webů by jen zdržoval a chyboval
+    args = [mpv, "--force-window=immediate", "--fs", "--keep-open=no", "--no-terminal", "--ytdl=no",
             "--title=%s" % (stream.get("title") or "Promítárna"), "--osd-level=1",
             "--alang=%s" % _langs(tracks.get("audio"), default)]
     if tracks.get("subs") == "off":
@@ -70,6 +71,8 @@ def build_args(mpv, stream, position, audio=None, ipc="", style=None, input_conf
     args += ["--%s=%s" % (name, value) for name, value in sorted(style_properties(style).items())]
     if input_conf:
         args.append("--input-conf=%s" % input_conf)
+    if log_file:
+        args.append("--log-file=%s" % log_file)     # když video nejde přehrát, je z čeho poznat proč
     headers = stream.get("headers") or {}
     if headers.get("User-Agent"):
         args.append("--user-agent=%s" % headers["User-Agent"])
@@ -92,6 +95,28 @@ def build_args(mpv, stream, position, audio=None, ipc="", style=None, input_conf
         args.append("--input-ipc-server=%s" % ipc)
     args.append(stream["url"])
     return args
+
+
+FAILURE_WORDS = ("error", "failed", "fail", "cannot", "unable", "forbidden", "denied", "not found", "403", "404")
+
+
+def failure(log_file, returncode=None):
+    """Proč se video nepřehrálo: poslední chybové řádky ze záznamu mpv (nebo kód ukončení)."""
+    lines = []
+    try:
+        with open(log_file, encoding="utf-8", errors="replace") as log:
+            for line in log:
+                text = line.strip()
+                low = text.lower()
+                if any(word in low for word in FAILURE_WORDS) and "ytdl" not in low:
+                    lines.append(text[-200:])
+    except (OSError, TypeError):
+        pass
+    if lines:
+        return "\n".join(lines[-4:])
+    if returncode:
+        return "Přehrávač mpv skončil s kódem %s." % returncode
+    return ""
 
 
 class _Ipc(object):
@@ -188,6 +213,7 @@ class Player(object):
         self.lock = threading.Lock()
         self.process = None
         self.ipc = None
+        self.log_file = ""
         self.audio = {}
         self.state = {"playing": False}
 
@@ -218,7 +244,13 @@ class Player(object):
         ipc = r"\\.\pipe\%s" % name if sys.platform == "win32" else os.path.join(
             os.environ.get("TMPDIR", "/tmp"), name + ".sock")
         self.audio = dict(audio or {})
-        args = build_args(self.mpv, stream, position, audio, ipc, style, self._input_conf())
+        self.log_file = os.path.join(self.conf_dir, "mpv.log") if self.conf_dir else ""
+        if self.log_file:
+            try:
+                os.remove(self.log_file)          # záznam jen z tohoto přehrávání
+            except OSError:
+                pass
+        args = build_args(self.mpv, stream, position, audio, ipc, style, self._input_conf(), self.log_file)
         try:
             process = subprocess.Popen(args)
         except OSError as error:
@@ -331,9 +363,11 @@ class Player(object):
                 first, last = False, time.time()
         ended = ipc.eof or (ipc.duration > 0 and ipc.duration - ipc.time <= ENDED_WITHIN)
         self._save(stream, ipc, ended=ended)
+        # video se vůbec nerozběhlo (žádná délka): důvod ze záznamu mpv pro okno a Diagnostiku
+        error = "" if ended or ipc.duration > 0 else failure(self.log_file, process.returncode)
         with self.lock:
             if self.process is process:      # mezitím se nespustilo jiné přehrávání (nový výstup zvuku…)
-                self.state.update(playing=False, ended=ended, finished=True, position=ipc.time)
+                self.state.update(playing=False, ended=ended, finished=True, position=ipc.time, error=error)
             if self.ipc is ipc:
                 self.ipc = None
         if sys.platform != "win32":
