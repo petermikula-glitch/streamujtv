@@ -42,7 +42,7 @@ tlačítko Další → Hledat ručně."""),
 Sekce Objevuj nabízí filmy a seriály podle databáze TMDB. Potřebuje klíč TMDB (je zdarma, zadává se \
 v Nastavení).
 
-Dlaždice Filmy a Seriály vedou na výpisy: Vše na Přehraj.to, Nově na Přehraj.to, S dabingem, Novinky, \
+Dlaždice Filmy a Seriály vedou na výpisy: Vše na Přehraj.to, Nově na Přehraj.to, Novinky, \
 Populární, Nejlépe hodnocené, Podle roku, Podle žánru a Československé. Dlaždice Všechny filmy a seriály \
 ukáže všechno, co aplikace na Přehraj.to a v iVysílání našla, dohromady.
 

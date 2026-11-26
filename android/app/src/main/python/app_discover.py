@@ -1282,15 +1282,12 @@ def home_tiles(kind):
     """Dlaždice řady „Objevuj filmy / seriály“ na hlavní obrazovce."""
     name = _plural(kind)
     icon = "series" if kind == "tv" else "movies"
-    # tři řady po třech: co je na Přehraj.to, výběry a třídění
+    # co je na Přehraj.to, výběry a třídění (výpis „S dabingem“ vlastník nechce)
     return [
         api.app_index.catalogue_tile(kind),
         api._card("Nově na Přehraj.to", api._target("list", "discover_fresh", {"kind": kind},
                                                     "%s nově na Přehraj.to" % name), "Co přibylo v posledních týdnech",
                   icon="discover_new:" + icon),
-        api._card("S dabingem", api._target("list", "discover", {"kind": kind, "category": "popular", "dub": "1"},
-                                            "%s s dabingem" % name), "Česky nebo slovensky",
-                  icon="discover_popular:" + icon),
         api._card("Novinky", api._target("list", "discover", {"kind": kind, "category": "recent"},
                                          "%s – novinky" % name), "Právě vysílané" if kind == "tv" else "Poslední 3 měsíce",
                   icon="discover_new:" + icon),

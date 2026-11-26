@@ -100,20 +100,19 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
     assert list(series) == ["Objevuj seriály", "Moje seriály"]
     grid = [row for row in api("discover_home", kind="movie")["rows"] if row.get("tiles")]   # velké dlaždice po třech
     assert [(row["title"], len(row["items"])) for row in grid] == [
-        ("Objevuj filmy", 3), ("", 3), ("", 3), ("Moje filmy", 2)]
-    assert _titles(films["Objevuj filmy"])[:3] == ["Vše na Přehraj.to", "Nově na Přehraj.to", "S dabingem"]
+        ("Objevuj filmy", 3), ("", 3), ("", 2), ("Moje filmy", 2)]
+    assert _titles(films["Objevuj filmy"])[:3] == ["Vše na Přehraj.to", "Nově na Přehraj.to", "Novinky"]   # bez „S dabingem“
     assert films["Objevuj filmy"][0]["target"] == {"type": "list", "call": "discover_index", "params": {"kind": "movie"},
                                                    "title": "Filmy na Přehraj.to", "poster": True}
     assert films["Objevuj filmy"][0]["subtitle"] == "Seznam se plní sám na pozadí"
-    assert films["Objevuj filmy"][2]["target"]["params"] == {"kind": "movie", "category": "popular", "dub": "1"}
     assert _titles(films["Moje filmy"]) == ["Stažené filmy", "Hledat"]           # „z mého účtu“ vlastník nechce
     assert films["Moje filmy"][0]["target"] == {"type": "list", "call": "downloads", "params": {"kind": "movie"},
                                                 "title": "Stažené filmy", "poster": True}
     assert _titles(series["Moje seriály"]) == ["Stažené díly", "Hledat"]
-    assert _titles(films["Objevuj filmy"]) == ["Vše na Přehraj.to", "Nově na Přehraj.to", "S dabingem", "Novinky",
+    assert _titles(films["Objevuj filmy"]) == ["Vše na Přehraj.to", "Nově na Přehraj.to", "Novinky",
                                                 "Populární", "Nejlépe hodnocené", "Podle roku", "Podle žánru",
                                                 "Československé"]
-    assert series["Objevuj seriály"][6]["target"] == {"type": "list", "call": "discover_years",
+    assert series["Objevuj seriály"][5]["target"] == {"type": "list", "call": "discover_years",
                                                       "params": {"kind": "tv"}, "title": "Seriály podle roku"}
     assert _titles(_section(api, "favorites")["Oblíbené"]) == ["Zatím nic"]          # prázdné sekce napoví, co s nimi
     assert _titles(_section(api, "progress")["Rozkoukané"]) == ["Nic rozkoukaného"]
@@ -3788,7 +3787,7 @@ def test_guide_describes_the_app_with_the_names_it_really_uses(api, monkeypatch)
         if choice["id"] == "pcm_soft":
             assert choice["title"] in text
     for words in ("Odebrat z Rozkoukaných", "Opravit přiřazení", "Označit jako zhlédnuté", "Stáhnout na disk",
-                  "Verze na Přehraj.to", "Vše na Přehraj.to", "Nově na Přehraj.to", "S dabingem", "Hledat ručně",
+                  "Verze na Přehraj.to", "Vše na Přehraj.to", "Nově na Přehraj.to", "Hledat ručně",
                   "Kam stahovat", "Přesunout vše na jiný disk", "Zkouška Přehraj.to", "Zkontrolovat aktualizace",
                   "Povolit zálohu, která přežije odinstalaci", "Velikost a pozadí", "Výstup zvuku", "Posun zvuku",
                   app_api.app_discover.OWN_PREFS % "filmu", "Podle nastavení aplikace", "vlastní nastavení"):
