@@ -1,6 +1,7 @@
 package cz.petermikula.mojevidea
 
 import android.app.Activity
+import android.app.SearchManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -110,7 +111,7 @@ class SearchActivity : FragmentActivity() {
                 false
             }
         }
-        val prepared = JSONObject(intent.getStringExtra(Navigator.EXTRA_PARAMS) ?: "{}").optString("q").trim()
+        val prepared = preparedQuery(intent)
         if (prepared.isEmpty() && intent.getBooleanExtra(EXTRA_VOICE, false) && savedInstanceState == null) {
             input.post { listenNow() }
         }
@@ -126,6 +127,12 @@ class SearchActivity : FragmentActivity() {
             input.setText(prepared)
             search(prepared)
         }
+    }
+
+    /** Dotaz, se kterým se Hledat otevírá: z aplikace (parametr `q`), nebo od Asistenta Google a systému. */
+    private fun preparedQuery(intent: Intent): String {
+        val inApp = JSONObject(intent.getStringExtra(Navigator.EXTRA_PARAMS) ?: "{}").optString("q").trim()
+        return inApp.ifEmpty { intent.getStringExtra(SearchManager.QUERY).orEmpty().trim() }
     }
 
     /** Hlášení pod hledacím polem; s ilustrací (prázdný výsledek, výpadek spojení) se vystředí. */
