@@ -771,8 +771,12 @@ def test_title_page_cleans_and_orders_versions(api, monkeypatch):
 
     api(favourite["target"]["call"], **favourite["target"]["params"])        # oblíbený titul z Objevuj
     favorite = _section(api, "favorites")["Filmy"][0]
-    assert favorite["title"] == "Pelíšky" and favorite["target"]["type"] == "title"
-    assert favorite["target"]["params"]["id"] == 11 and favorite["menu"][-1]["title"] == "Odebrat z oblíbených"
+    # oblíbený film se klepnutím rovnou přehraje (stránka filmu je v nabídce karty)
+    assert favorite["title"] == "Pelíšky" and favorite["target"]["call"] == "discover_movie_play"
+    assert favorite["target"]["params"]["id"] == 11 and favorite["target"]["params"]["resume"] is True
+    assert [item["title"] for item in favorite["menu"]] == [
+        "Přehrát", "Přehrát od začátku", "Otevřít stránku filmu", "Odebrat z oblíbených"]
+    assert favorite["menu"][2]["target"]["type"] == "title"
     assert api("discover_title", **FILM)["actions"][3]["title"] == "Z oblíbených"
 
     nothing = api("discover_title", kind="movie", id=5, title="Neznámý film", year=2001)
@@ -1581,8 +1585,10 @@ def test_ivysilani_show_starts_with_where_to_continue(api):
     api("ivys_favorite", id="13")
     with app_api._library() as lib:
         card = next(card for card in app_api.ivys_favorite_cards(lib) if card["title"] == "Na plovárně")
-    shortcut = next(item for item in card["menu"] if item["title"] == "Pokračovat dalším dílem")["target"]
-    assert shortcut == {"type": "play", "call": "ivys_play", "params": {"show": "13", "following": True}}
+    # pořad, ze kterého už něco běželo: klepnutí pokračuje (díly jsou v nabídce karty)
+    shortcut = card["target"]
+    assert shortcut == {"type": "play", "call": "ivys_play", "params": {"show": "13", "following": True, "resume": True}}
+    assert [item["title"] for item in card["menu"]] == ["Pokračovat ve sledování", "Vybrat díl", "Odebrat z oblíbených"]
     assert api("ivys_play", **shortcut["params"])["track"] == "ivys:" + idecs[6]
     assert "nic nedokoukali" in api("ivys_play", show="12", following=True)["error"]
 
@@ -4172,3 +4178,37 @@ def test_clearing_history_forgets_searches_and_playback_but_keeps_the_rest(api, 
         assert lib.resume_points() == {} and lib.watched() == set() and lib.ivys_progress() == []
         assert lib.get_kv(app_api.app_discover.RECENT_SERIES) == "[]"
         assert lib.count_videos(visible_only=True) == videos                # katalog zůstal
+
+
+def test_favorites_play_at_once_downloaded_film_from_disk_and_series_where_it_stopped(api, monkeypatch, tmp_path):
+    """Oblíbené z Objevuj: klepnutí rovnou přehrává. Stažený film ze souboru (štítek „Staženo“, bez hledání
+    na Přehraj.to), seriál od dílu, na kterém se skončilo (totéž tlačítko jako na stránce seriálu)."""
+    _fill(1)
+    file = tmp_path / "pelisky.mkv"
+    file.write_bytes(b"x")
+    with app_api._library() as lib:
+        lib.set_kv(app_api.ART_PREFIX + REF, "movie:11")
+    app_api._save_downloads({REF: {"vid": REF, "title": "Pelíšky", "state": "done", "path": str(file),
+                                   "subtitles": [], "added": 1}})
+    api("favorite_toggle", **app_api.app_discover.tmdb_favorite("movie", 11, "Pelíšky", 1999, "", "Pelisky"))
+    api("favorite_toggle", **app_api.app_discover.tmdb_favorite("tv", 77, "Archa", 1996, "", ""))
+    rows = _section(api, "favorites")
+    film, series = rows["Filmy"][0], rows["Seriály"][0]
+    assert film["badges"][0] == "Staženo" and film["target"]["call"] == "discover_movie_play"
+    searched = []
+    monkeypatch.setattr(app_api.app_discover, "_find_versions", lambda *args, **kwargs: searched.append(args) or [])
+    stream = api(film["target"]["call"], **film["target"]["params"])
+    assert stream["local"] is True and stream["url"] == str(file) and stream["choice"] == "movie:11"
+    assert searched == []                                                   # stažený film se nehledá
+
+    assert series["target"]["call"] == "discover_series_play" and series["target"]["params"]["resume"] is True
+    assert [item["title"] for item in series["menu"]][:2] == ["Pokračovat ve sledování", "Vybrat díl"]
+    assert series["menu"][1]["target"]["type"] == "title"                  # výběr dílu na stránce seriálu
+    episode = {"type": "play", "call": "discover_episode_play",
+               "params": {"kind": "tv", "id": 77, "title": "Archa", "season": 2, "episode": 4, "resume": True}}
+    monkeypatch.setattr(app_api.app_discover, "_series_rows",
+                        lambda params, state, last=None: ([], {"title": "Pokračovat", "target": episode}, None))
+    played = []
+    monkeypatch.setattr(app_api.app_discover, "discover_episode_play", lambda params: played.append(params) or {"ok": 1})
+    api(series["target"]["call"], **series["target"]["params"])
+    assert played == [episode["params"]]                                    # rozkoukaný díl 2×04

@@ -250,10 +250,65 @@ def favorite_cards(lib, state, limit=None, kind=None):
         elif meta and versions.get(meta["key"]):
             cards.append(api._movie_card(meta, state, versions))
         else:  # titul z Objevuj, nebo položka, která už v katalogu není
-            cards.append(_title_card(entry.get("kind") or "movie", entry.get("tmdb_id") or 0, entry.get("title") or "",
-                                     entry.get("year") or 0, entry.get("poster") or "", entry.get("orig") or "",
-                                     state, favorite=entry))
+            card = _title_card(entry.get("kind") or "movie", entry.get("tmdb_id") or 0, entry.get("title") or "",
+                               entry.get("year") or 0, entry.get("poster") or "", entry.get("orig") or "",
+                               state, favorite=entry)
+            cards.append(_quick_play(lib, state, entry, card))
     return cards
+
+
+def _quick_play(lib, state, entry, card):
+    """Oblíbený titul z Objevuj se klepnutím rovnou přehraje, bez stránky titulu: film stažený na disku
+    ze souboru (štítek „Staženo“), jinak nejlepší verze podle nastavení filmu; seriál od dílu, kde se
+    skončilo (jinak další, nebo první díl). Stránka titulu (výběr verze, dílu) je v nabídce karty."""
+    tmdb_id = entry.get("tmdb_id") or 0
+    kind = entry.get("kind") or "movie"
+    if not tmdb_id:
+        return card                                  # bez čísla TMDB se díly ani verze nedají dohledat
+    page = card["target"]
+    params = dict(page["params"], resume=True)       # rozkoukané pokračuje bez dotazu (od začátku je v nabídce)
+    others = [item for item in card.get("menu") or [] if item["title"] not in ("Otevřít", "Přehrát hned")]
+    if kind == "tv":
+        card["target"] = api._target("play", "discover_series_play", params)
+        card["menu"] = [{"title": "Pokračovat ve sledování", "target": card["target"]},
+                        {"title": "Vybrat díl", "target": page}] + others
+        return card
+    card["target"] = api._target("play", "discover_movie_play", params)
+    card["menu"] = [{"title": "Přehrát", "target": card["target"]},
+                    {"title": "Přehrát od začátku", "target": api._target(
+                        "play", "discover_movie_play", dict(page["params"], restart=True))},
+                    {"title": "Otevřít stránku filmu", "target": page}] + others
+    if _downloaded(lib, state, "movie:%s" % tmdb_id):
+        card["badges"] = ["Staženo"] + [badge for badge in card.get("badges") or [] if badge != "Nenalezeno"]
+    return card
+
+
+def _downloaded(lib, state, choice):
+    """Stažený soubor titulu (``movie:<id>`` nebo díl ``tv:<id>:<řada>:<díl>``), který je na disku."""
+    for vid, item in (state.get("downloads") or {}).items():
+        if item.get("state") == "done" and os.path.exists(item.get("path") or "") \
+                and lib.get_kv(api.ART_PREFIX + vid) == choice:
+            return vid
+    return ""
+
+
+def discover_series_play(params):
+    """Oblíbený seriál klepnutím: díl, na kterém se skončilo (rozkoukaný od místa, kde se přestalo),
+    jinak díl po posledním zhlédnutém, jinak první – totéž, co tlačítko na stránce seriálu."""
+    tmdb_id = params.get("id") or 0
+    if not tmdb_id:
+        raise api.ApiError("U tohoto seriálu nejde zjistit díly. Otevřete jeho stránku a zkuste „Hledat ručně“.")
+    with api._library() as lib:
+        state = api._title_state(lib, api._state(lib), "tv:%s" % tmdb_id)
+        last = lib.get_kv("last_season:%s" % tmdb_id)
+    _rows, play, _focus = _series_rows(params, state, last)
+    if not play:
+        raise api.ApiError("Díly tohoto seriálu se nepodařilo zjistit. Zkuste „Vybrat díl“ v nabídce karty.")
+    request = dict(play["target"]["params"])
+    for key in ("restart", "fresh", "online"):
+        if params.get(key):
+            request[key] = params[key]
+    return discover_episode_play(request)
 
 
 def favorites(params):
@@ -1912,6 +1967,15 @@ def discover_episode_play(params):
         if tmdb_id:
             _remember_title(lib, "tv", params)
     choice = "tv:%s:%s:%s" % (tmdb_id, season, episode) if tmdb_id else ""
+    with api._library() as lib:
+        saved = _downloaded(lib, state, choice) if choice else ""
+    if saved:
+        # díl je stažený na disku: hraje ze souboru, bez hledání a bez internetu
+        request = {"vid": saved, "choice": choice}
+        request.update({key: params[key] for key in ("restart", "online") if params.get(key)})
+        stream = api.play(request)
+        stream["choice"] = choice
+        return stream
     versions = [version for version in _find_versions(_names(params, "tv"), 0, (season, episode), state, choice=choice)
                 if not version["short"]]
     if not versions:
@@ -1936,6 +2000,15 @@ def discover_movie_play(params):
     with api._library() as lib:
         state = api._title_state(lib, api._state(lib), "movie:%s" % tmdb_id)
     choice = "movie:%s" % tmdb_id if tmdb_id else ""
+    with api._library() as lib:
+        saved = _downloaded(lib, state, choice) if choice else ""
+    if saved:
+        # film je stažený na disku: hraje ze souboru, bez hledání a bez internetu
+        request = {"vid": saved, "choice": choice}
+        request.update({key: params[key] for key in ("restart", "online") if params.get(key)})
+        stream = api.play(request)
+        stream["choice"] = choice
+        return stream
     versions = [version for version in _find_versions(_names(params, "movie"), int(params.get("year") or 0), None, state,
                                                       choice=choice) if not version["short"]]
     if not versions:
@@ -2581,5 +2654,5 @@ ACTIONS = {
     "play_next": play_next, "play_other": play_other, "title_csfd": title_csfd, "favorites_check": favorites_check,
     "discover_download_season": discover_download_season, "discover_filters": discover_filters,
     "discover_person": discover_person, "discover_episode_play": discover_episode_play,
-    "discover_movie_play": discover_movie_play, "discover_row": discover_row, "next_up_hide": next_up_hide,
+    "discover_movie_play": discover_movie_play, "discover_series_play": discover_series_play, "discover_row": discover_row, "next_up_hide": next_up_hide,
 }

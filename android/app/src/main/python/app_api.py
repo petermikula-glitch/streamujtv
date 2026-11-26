@@ -723,16 +723,20 @@ def _ivys_is_film(lib, show_id, title="", show_title=""):
     return bool(title or show_title) and (not title or not show_title or title == show_title)
 
 
-def _ivys_favorite_card(item, film):
-    """Oblíbený pořad z iVysílání v sekci Oblíbené: film se rovnou přehraje, pořad otevře své díly."""
+def _ivys_favorite_card(item, film, watched=False):
+    """Oblíbený pořad z iVysílání v sekci Oblíbené: film se rovnou přehraje; pořad, ze kterého už něco
+    běželo, pokračuje tam, kde se skončilo (rozkoukaný díl, jinak další) – jinak otevře své díly."""
+    episodes = _target("list", "ivys_show", {"id": item["show_id"]}, item["title"])
+    following = _target("play", "ivys_play", {"show": item["show_id"], "following": True, "resume": True})
     if film:
         target = _target("play", "ivys_play", {"show": item["show_id"]})
+        menu = [{"title": "Přehrát", "target": target}]
+    elif watched:
+        target = following
+        menu = [{"title": "Pokračovat ve sledování", "target": following}, {"title": "Vybrat díl", "target": episodes}]
     else:
-        target = _target("list", "ivys_show", {"id": item["show_id"]}, item["title"])
-    menu = [{"title": "Přehrát" if film else "Otevřít", "target": target}]
-    if not film:
-        menu.append({"title": "Pokračovat dalším dílem",
-                     "target": _target("play", "ivys_play", {"show": item["show_id"], "following": True})})
+        target = episodes
+        menu = [{"title": "Otevřít", "target": episodes}]
     menu += [{"title": "Odebrat z oblíbených",
               "target": _target("command", "ivys_favorite", {"id": item["show_id"], "remove": True})}]
     return _card(item["title"], target, "iVysílání", item["poster"] or item["image"], wide=not item["poster"],
@@ -742,7 +746,8 @@ def _ivys_favorite_card(item, film):
 def ivys_favorite_cards(lib, kind=None, limit=None):
     """Oblíbené pořady z iVysílání; ``kind`` (``movie`` / ``tv``) vybere jen filmy, nebo jen pořady s díly."""
     items = [(item, _ivys_is_film(lib, item["show_id"])) for item in lib.ivys_favorites()]
-    cards = [_ivys_favorite_card(item, film) for item, film in items
+    watched = {row[0] for row in lib.conn.execute("SELECT DISTINCT show_id FROM ivys_history WHERE show_id != ''")}
+    cards = [_ivys_favorite_card(item, film, item["show_id"] in watched) for item, film in items
              if kind is None or film == (kind == "movie")]
     return cards[:limit] if limit else cards
 
