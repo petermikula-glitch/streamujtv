@@ -35,8 +35,9 @@ kompresor `acompressor` (stejné hodnoty jako `NightAudioProcessor`).
 Hlavní nabídka je stále nahoře (sekce vedle sebe), obsah má celou šířku okna; dlaždice bez plakátu
 (kategorie, nástroje) jsou na šířku přes celé okno. Každé heslo nabídky má rozbalovací podnabídku
 (řady dané sekce s jejich položkami): myší najetím, klávesnicí šipkou dolů. Položky se šipkou › (stránky
-a výpisy) se rozbalují o úroveň dál, až do čtyř úrovní; obsah se načte z logiky při prvním najetí
-a pět minut se pamatuje. Na hlubší obrazovce je
+a výpisy kategorií – roky, žánry) se rozbalují o úroveň dál, nejvýš do tří úrovní; jednotlivé filmy ne.
+Obsah se načte z logiky při prvním najetí a pět minut se pamatuje. Nabídka se otevírá a přepíná se
+zpožděním (přejetí myší nic neotevře, šikmý pohyb do podnabídky ji nezavře). Na hlubší obrazovce je
 vlevo nahoře tlačítko Zpět.
 
 Ovládání: myš (boční tlačítko Zpět funguje), nebo klávesnice – šipky, Enter, Esc nebo Backspace (zpět), podržený Esc (hlavní nabídka), klávesa Menu,

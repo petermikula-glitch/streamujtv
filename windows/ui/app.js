@@ -245,8 +245,12 @@ async function loadHome() {
 
 const DROP_ROW = 10;        // tolik položek jedné řady nejvýš v podnabídce
 const SUB_ITEMS = 12;       // tolik položek výpisu nejvýš v podnabídce další úrovně (pak „Zobrazit vše“)
-const DROP_DEPTH = 4;       // úrovně podnabídek (např. Objevuj → Filmy → Podle žánru → Akční → filmy)
+const DROP_DEPTH = 3;       // úrovně podnabídek (Objevuj → Filmy → Podle žánru); jednotlivé filmy se nerozbalují
 const SUB_TTL = 5 * 60 * 1000;
+// Klidné ovládání myší: podnabídka se otevře, až se nad položkou chvíli zůstane; přepnutí na jinou, když už
+// nějaká otevřená je, čeká déle (šikmý pohyb myši do otevřené podnabídky ji nezavře); nabídka se zavře až
+// chvíli po odjetí myši.
+const OPEN_DELAY = 180, SWITCH_DELAY = 450, NAV_OPEN_DELAY = 120, CLOSE_DELAY = 450;
 const subCache = new Map();
 let hoverTimer = 0;
 
@@ -255,8 +259,12 @@ function closeDrops(except) {
 }
 
 const panelItems = (panel) => [...panel.querySelectorAll(":scope > .drop-item")];
-// rozbalit jde stránka nebo výpis (ne přehrání, příkaz ani nic, co se nejdřív potvrzuje)
-const expandable = (target) => !!target && (target.type === "page" || target.type === "list") && !target.confirm;
+// rozbalit jde stránka (Filmy, Seriály…) a výpis kategorií (roky, žánry); výpisy filmů a pořadů ne
+const CATEGORY_LISTS = ["discover_years", "discover_genres"];
+const expandable = (target) => !!target && !target.confirm &&
+  (target.type === "page" || (target.type === "list" && CATEGORY_LISTS.includes(target.call)));
+// do podnabídek patří jen kategorie (stránky a výpisy), ne jednotlivé filmy, díly ani přehrání
+const navigation = (card) => !!card.target && !["title", "play", "filter"].includes(card.target.type);
 
 // Položky podnabídky: {head}, {card} nebo {all} (celý výpis) a {note}.
 function fillPanel(panel, entries, index, depth) {
@@ -275,8 +283,14 @@ function fillPanel(panel, entries, index, depth) {
     button.onmouseenter = () => {
       clearTimeout(hoverTimer);
       if (button.classList.contains("opened")) return;
-      hoverTimer = setTimeout(() => { closeSubs(panel); if (button.sub) openSub(button, panel, index, depth); }, 140);
+      const switching = !!panel.querySelector(":scope > .drop.sub");
+      if (!switching && !button.sub) return;      // nic otevřeného ani k otevření: není co dělat
+      hoverTimer = setTimeout(() => {
+        closeSubs(panel);
+        if (button.sub) openSub(button, panel, index, depth);
+      }, switching ? SWITCH_DELAY : OPEN_DELAY);
     };
+    button.onmouseleave = () => clearTimeout(hoverTimer);   // jen přejetí přes položku nic neotevře
     panel.append(button);
   }
   if (!panel.querySelector(".drop-item, .drop-empty")) panel.append(el("div", "drop-empty", "Nic tu zatím není"));
@@ -297,17 +311,20 @@ async function subEntries(target) {
   const entries = [];
   if (target.type === "page") {
     for (const row of answer.data.rows || []) {
-      const items = (row.items || []).filter((card) => card.target).slice(0, DROP_ROW);
+      const items = (row.items || []).filter(navigation).slice(0, DROP_ROW);
       if (!items.length) continue;
       if (row.title) entries.push({head: row.title});
       for (const card of items) entries.push({card});
     }
   } else {
-    const items = (answer.data.items || []).filter((card) => card.target && card.target.type !== "filter");
-    for (const card of items.slice(0, SUB_ITEMS)) entries.push({card});
-    if (items.length > SUB_ITEMS || answer.data.next) entries.push({all: target});
+    // výpis rozbalit jen tehdy, když jsou v něm další kategorie (žánry, roky), ne filmy
+    const all = (answer.data.items || []).filter((card) => card.target && card.target.type !== "filter");
+    const items = all.filter(navigation);
+    if (items.length && items.length === all.length) {
+      for (const card of items.slice(0, SUB_ITEMS)) entries.push({card});
+      if (items.length > SUB_ITEMS || answer.data.next) entries.push({all: target});
+    }
   }
-  if (!entries.length) entries.push({note: answer.data.empty || "Nic tu zatím není"});
   if (!answer.data.refresh) subCache.set(key, {at: Date.now(), entries});   // plnící se výpis se načte příště znovu
   return entries;
 }
@@ -324,8 +341,16 @@ async function openSub(button, panel, index, depth) {
   sub.append(el("div", "drop-empty", "Načítám…"));
   panel.append(sub);
   button.classList.add("opened");
+  sub.onmouseenter = () => clearTimeout(hoverTimer);   // myš dojela do podnabídky: nic se nepřepíná
   const entries = await subEntries(button.sub);
   if (!sub.isConnected) return null;          // mezitím se ukázalo jinam
+  if (!entries.length) {
+    // nejsou tu další kategorie (jen filmy): položka se už nerozbaluje, klepnutím se otevře
+    sub.remove();
+    button.classList.remove("opened", "more");
+    button.sub = null;
+    return null;
+  }
   sub.innerHTML = "";
   fillPanel(sub, entries, index, depth + 1);
   const bottom = sub.getBoundingClientRect().bottom;
@@ -342,15 +367,14 @@ function openDrop(navitem, index) {
   if (!data) return null;
   drop.innerHTML = "";
   const entries = [];
-  if (data.hero && data.hero.target) {
-    entries.push({head: "Pokračovat ve sledování"}, {card: {title: "▶  " + data.hero.title, target: data.hero.target}});
-  }
   for (const row of data.rows || []) {
-    const items = (row.items || []).filter((card) => card.target).slice(0, DROP_ROW);
+    const items = (row.items || []).filter(navigation).slice(0, DROP_ROW);
     if (!items.length) continue;
     if (row.title) entries.push({head: row.title});
     for (const card of items) entries.push({card});
   }
+  // sekce jen s filmy (Oblíbené, Rozkoukané): nic se nerozbaluje, heslo otevře sekci
+  if (!entries.length) { closeDrops(); return null; }
   fillPanel(drop, entries, index, 1);
   const rect = navitem.querySelector("button").getBoundingClientRect();
   drop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 390)) + "px";
@@ -386,8 +410,18 @@ function renderSide() {
       button.append(icon, el("span", "", item.title));
       button.index = index;
       navitem.append(button, el("div", "drop"));
-      navitem.onmouseenter = () => { if (!dialogs.length) openDrop(navitem, index); };
-      navitem.onmouseleave = () => navitem.classList.remove("open");
+      // nabídka se otevře po krátkém zastavení nad heslem a zavře se až chvíli po odjetí myši
+      navitem.onmouseenter = () => {
+        clearTimeout(navitem.closeTimer);
+        if (dialogs.length || navitem.classList.contains("open")) return;
+        clearTimeout(navitem.openTimer);
+        navitem.openTimer = setTimeout(() => openDrop(navitem, index), NAV_OPEN_DELAY);
+      };
+      navitem.onmouseleave = () => {
+        clearTimeout(navitem.openTimer);
+        clearTimeout(navitem.closeTimer);
+        navitem.closeTimer = setTimeout(() => navitem.classList.remove("open"), CLOSE_DELAY);
+      };
       navitem.addEventListener("focusout", (event) => {
         if (!navitem.contains(event.relatedTarget)) navitem.classList.remove("open");
       });
