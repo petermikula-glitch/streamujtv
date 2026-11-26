@@ -525,10 +525,13 @@ async function showFilters(target, screen) {
   if (!answer.ok) { toast(answer.error || "Filtr se nepodařilo načíst."); return; }
   const data = answer.data;
   const apply = (params) => { screen.params = params; render(); };
-  const items = (data.filters || []).map((group) => ({label: group.title + ": " + group.value, action: () => dialog({
+  const choose = (group) => dialog({
     title: group.title, buttons: [{label: "Zpět"}],
     items: (group.options || []).map((option) => ({label: option.title, current: option.current, action: () => apply(option.params)})),
-  })}));
+  });
+  const groups = data.filters || [];
+  if (groups.length === 1 && !data.reset) return choose(groups[0]);     // jediná volba (Seřadit): rovnou možnosti
+  const items = groups.map((group) => ({label: group.title + ": " + group.value, action: () => choose(group)}));
   if (data.reset) items.push({label: "Zrušit filtry", action: () => apply(data.reset)});
   dialog({title: data.title || "Filtr", items, buttons: [{label: "Zpět"}]});
 }

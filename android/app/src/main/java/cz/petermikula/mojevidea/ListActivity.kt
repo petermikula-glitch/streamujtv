@@ -395,6 +395,8 @@ class ListFragment : VerticalGridSupportFragment() {
             // Okna drží obrazovku, ne tuhle mřížku: výpis, který se právě plní, může mřížku mezitím
             // vyměnit za jinou (jiný tvar karet) a volba pak patří té nové.
             val host = requireActivity()
+            // jediná volba (Seřadit): rovnou možnosti, bez mezikroku
+            if (groups.size == 1 && reset == null) return@call chooseFilter(host, groups[0])
             android.app.AlertDialog.Builder(host)
                 .setTitle(data.optString("title").ifEmpty { "Filtr" })
                 .setAdapter(Dialogs.items(host, names)) { _, which ->

@@ -924,13 +924,14 @@ def discover(params):
         cards.insert(0, api._card("Ověřit dostupnost", api._target("command", "discover_check", dict(params, page=page)),
                                   "Které z těchto filmů jsou na Přehraj.to", icon="search"))
     if page == 1:
-        # filtr je vždy první – i u prázdného výběru, aby šel změnit
+        # Místo filtru jen řazení (žánr, rok, dabing a země mají vlastní dlaždice): vždy první, i u prázdného výběru
         base = {key: value for key, value in params.items() if key != "page"}
-        cards.insert(0, api._card("Filtr", {"type": "filter", "call": "discover_filters", "params": base},
-                                  _filter_summary(base) or "Žánr, období, hodnocení, dostupnost", icon="settings:search"))
+        current = dict(SORTER).get(base.get("sort") or _default_sort(base), "")
+        cards.insert(0, api._card("Seřadit", {"type": "filter", "call": "discover_sorts", "params": base},
+                                  current, icon="settings:search"))
     return dict(_checking_note(state), items=cards, next=following,
                 empty="V tomto výběru TMDB nic nenabízí." if everything else
-                "Z tohoto výběru teď není nic na Přehraj.to ani v iVysílání. Ve Filtru jde zapnout Všechny tituly.")
+                "Z tohoto výběru teď není nic na Přehraj.to ani v iVysílání.")
 
 
 def discover_row(params):
@@ -947,7 +948,7 @@ def discover_row(params):
     if cards:
         name = "%s – populární" % _plural(kind)
         cards.append(api._card("Zobrazit vše", api._target("list", "discover", dict(params), name),
-                               "A filtr podle žánru, období a hodnocení", icon="all"))
+                               "A řazení podle hodnocení, roku nebo oblíbenosti", icon="all"))
     return dict(note, items=cards)
 
 
@@ -1030,6 +1031,19 @@ def discover_filters(params):
     return {"title": "Filtr", "filters": filters, "reset": reset}
 
 
+SORTER = (("rating", "Podle hodnocení"), ("new", "Podle roku (nejnovější)"), ("popular", "Podle oblíbenosti"))
+
+
+def discover_sorts(params):
+    """Řazení výpisu z Objevuj (dlaždice Seřadit místo filtru): stejný tvar jako ``discover_filters``."""
+    base = {key: value for key, value in params.items() if key != "page"}
+    current = base.get("sort") or _default_sort(base)
+    options = [{"title": title, "current": value == current, "params": dict(base, sort=value)}
+               for value, title in SORTER]
+    return {"title": "Seřadit", "filters": [{"title": "Seřadit", "value": dict(SORTER).get(current, ""),
+                                             "options": options}], "reset": None}
+
+
 def _list_items(params):
     """Tituly jedné stránky seznamu (stejný výběr jako ``discover``)."""
     kind = _kind(params)
@@ -1059,7 +1073,8 @@ def _list_items(params):
     today = time.strftime("%Y-%m-%d")
     if sort == "rating":
         filters["sort_by"] = "vote_average.desc"
-        filters["vote_count.gte"] = 200
+        # česká a slovenská tvorba má v TMDB méně hlasujících: nižší práh, ať v seznamu nechybí
+        filters["vote_count.gte"] = 30 if params.get("origin") == CZECHOSLOVAK else 200
     elif sort == "new":
         filters["sort_by"] = date + ".desc"
         filters.setdefault(date + ".lte", today)   # bez titulů ohlášených na příští roky
@@ -1127,12 +1142,13 @@ def discover_genres(params):
 
 
 def discover_czechoslovak(params):
-    """Česká a slovenská tvorba: nejoblíbenější, podle roku a podle žánru."""
+    """Česká a slovenská tvorba: všechny (seřazené podle hodnocení nebo roku), podle roku a podle žánru."""
     kind = _kind(params)
     name = "Československé %s" % _plural(kind).lower()
     origin = {"kind": kind, "origin": CZECHOSLOVAK}
     cards = [
-        api._card("Nejoblíbenější", api._target("list", "discover", origin, name), icon="rating"),
+        api._card("Všechny", api._target("list", "discover", dict(origin, sort=SORTER[0][0]), name),
+                  "Seřadit podle hodnocení nebo roku", icon="all"),
         api._card("Podle roku", api._target("list", "discover_years", origin, name + " podle roku"), icon="year"),
         api._card("Podle žánru", api._target("list", "discover_genres", origin, name + " podle žánru"),
                   icon="folder:series" if kind == "tv" else "folder:movies"),
@@ -2649,7 +2665,7 @@ def discover_person(params):
 ACTIONS = {
     "favorites": favorites, "favorite_toggle": favorite_toggle,
     "discover": discover, "discover_years": discover_years, "discover_genres": discover_genres,
-    "discover_czechoslovak": discover_czechoslovak, "discover_title": discover_title,
+    "discover_czechoslovak": discover_czechoslovak, "discover_sorts": discover_sorts, "discover_title": discover_title,
     "discover_season": discover_season, "discover_episode": discover_episode, "discover_check": discover_check,
     "play_next": play_next, "play_other": play_other, "title_csfd": title_csfd, "favorites_check": favorites_check,
     "discover_download_season": discover_download_season, "discover_filters": discover_filters,
