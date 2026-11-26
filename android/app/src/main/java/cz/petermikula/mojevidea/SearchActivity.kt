@@ -25,6 +25,16 @@ import org.json.JSONObject
 
 /** Hledání: výsledky z místního katalogu, iVysílání a Přehraj.to. */
 class SearchActivity : FragmentActivity() {
+    companion object {
+        const val EXTRA_VOICE = "voice"   // otevřeno tlačítkem mikrofonu na ovladači: rovnou poslouchat
+    }
+
+    /** Mikrofon na ovladači, když je Hledat už otevřené. */
+    fun listenNow() {
+        val button = findViewById<View>(R.id.search_voice) ?: return
+        if (button.visibility == View.VISIBLE) listen(button)
+    }
+
     /** Podržené Zpět: rovnou do hlavní nabídky (viz [Home]). */
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
         Home.dispatch(this, event) || super.dispatchKeyEvent(event)
@@ -101,6 +111,9 @@ class SearchActivity : FragmentActivity() {
             }
         }
         val prepared = JSONObject(intent.getStringExtra(Navigator.EXTRA_PARAMS) ?: "{}").optString("q").trim()
+        if (prepared.isEmpty() && intent.getBooleanExtra(EXTRA_VOICE, false) && savedInstanceState == null) {
+            input.post { listenNow() }
+        }
         if (prepared.isEmpty()) {
             input.requestFocus()
             // prázdná obrazovka: nabídnout naposledy hledané

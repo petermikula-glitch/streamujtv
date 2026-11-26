@@ -864,13 +864,12 @@ def _counted(title, count):
 
 
 def _movie_rows(lib, state):
-    """Složka Filmy: mřížka dlaždic (objevování, stažené, vlastní filmy, hledání) a nově přidané filmy z účtu."""
+    """Složka Filmy: mřížka dlaždic (objevování, stažené, hledání) a nově přidané filmy z účtu, jsou-li nějaké.
+    Dlaždice „Filmy z mého účtu“ tu není (vlastník účet na nahrávání nepoužívá)."""
     rows = _tile_rows("Objevuj filmy", app_discover.home_tiles("movie"))
     rows += _tile_rows("Moje filmy", [
         _card(_counted("Stažené filmy", _saved_count(lib, state, False)),
               _target("list", "downloads", {"kind": "movie"}, "Stažené filmy"), "Hrají i bez internetu", icon="download"),
-        _card(_counted("Filmy z mého účtu", lib.count_movies()),
-              _target("list", "movies", {"order": "added"}, "Filmy z mého účtu"), "Nahrané na Přehraj.to", icon="movies"),
         _card("Hledat", _target("search"), "Film, herec nebo režisér", icon="search"),
     ])
     movies = lib.movies(order="added", limit=HOME_ROW)
@@ -881,14 +880,12 @@ def _movie_rows(lib, state):
 
 
 def _show_rows(lib, state):
-    """Složka Seriály: mřížka dlaždic (objevování, stažené díly, vlastní seriály, hledání) a seriály z účtu."""
+    """Složka Seriály: mřížka dlaždic (objevování, stažené díly, hledání) a nově přidané seriály z účtu, jsou-li."""
     rows = _tile_rows("Objevuj seriály", app_discover.home_tiles("tv"))
     shows = lib.shows(order="added", limit=HOME_ROW)
     rows += _tile_rows("Moje seriály", [
         _card(_counted("Stažené díly", _saved_count(lib, state, True)),
               _target("list", "downloads", {"kind": "episode"}, "Stažené díly"), "Hrají i bez internetu", icon="download"),
-        _card("Seriály z mého účtu", _target("list", "shows", {"order": "title"}, "Seriály z mého účtu"),
-              "Nahrané na Přehraj.to", icon="series"),
         _card("Hledat", _target("search"), "Seriál, herec nebo režisér", icon="search"),
     ])
     if shows:

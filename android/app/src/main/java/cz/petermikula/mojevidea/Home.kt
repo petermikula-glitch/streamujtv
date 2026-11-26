@@ -39,6 +39,7 @@ object Home {
      * podržené Zpět = hlavní nabídka. Krátký stisk projde dál a vrací o krok jako dřív.
      */
     fun dispatch(activity: Activity, event: KeyEvent): Boolean {
+        if (voice(activity, event)) return true
         if (event.keyCode != KeyEvent.KEYCODE_BACK || activity is MainActivity) return false
         return when (event.action) {
             KeyEvent.ACTION_DOWN -> when {
@@ -55,6 +56,19 @@ object Home {
             KeyEvent.ACTION_UP -> if (held) { held = false; true } else false
             else -> false
         }
+    }
+
+    /**
+     * Tlačítko mikrofonu na ovladači: v aplikaci otevře Hledat a rovnou poslouchá (na obrazovce Hledat
+     * jen začne poslouchat). Bez toho by stisk převzal Asistent Google a hledal mimo aplikaci.
+     */
+    private fun voice(activity: Activity, event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_SEARCH && event.keyCode != KeyEvent.KEYCODE_VOICE_ASSIST) return false
+        if (event.action == KeyEvent.ACTION_UP) {
+            if (activity is SearchActivity) activity.listenNow()
+            else activity.startActivity(Intent(activity, SearchActivity::class.java).putExtra(SearchActivity.EXTRA_VOICE, true))
+        }
+        return true
     }
 
     /** Hloubka obrazovky, kterou `activity` právě otevírá. */

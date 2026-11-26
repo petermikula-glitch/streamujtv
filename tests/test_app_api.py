@@ -100,16 +100,16 @@ def test_empty_home_leads_to_login_and_always_offers_television_and_tools(api):
     assert list(series) == ["Objevuj seriály", "Moje seriály"]
     grid = [row for row in api("discover_home", kind="movie")["rows"] if row.get("tiles")]   # velké dlaždice po třech
     assert [(row["title"], len(row["items"])) for row in grid] == [
-        ("Objevuj filmy", 3), ("", 3), ("", 3), ("Moje filmy", 3)]
+        ("Objevuj filmy", 3), ("", 3), ("", 3), ("Moje filmy", 2)]
     assert _titles(films["Objevuj filmy"])[:3] == ["Vše na Přehraj.to", "Nově na Přehraj.to", "S dabingem"]
     assert films["Objevuj filmy"][0]["target"] == {"type": "list", "call": "discover_index", "params": {"kind": "movie"},
                                                    "title": "Filmy na Přehraj.to", "poster": True}
     assert films["Objevuj filmy"][0]["subtitle"] == "Seznam se plní sám na pozadí"
     assert films["Objevuj filmy"][2]["target"]["params"] == {"kind": "movie", "category": "popular", "dub": "1"}
-    assert _titles(films["Moje filmy"]) == ["Stažené filmy", "Filmy z mého účtu", "Hledat"]
+    assert _titles(films["Moje filmy"]) == ["Stažené filmy", "Hledat"]           # „z mého účtu“ vlastník nechce
     assert films["Moje filmy"][0]["target"] == {"type": "list", "call": "downloads", "params": {"kind": "movie"},
                                                 "title": "Stažené filmy", "poster": True}
-    assert _titles(series["Moje seriály"]) == ["Stažené díly", "Seriály z mého účtu", "Hledat"]
+    assert _titles(series["Moje seriály"]) == ["Stažené díly", "Hledat"]
     assert _titles(films["Objevuj filmy"]) == ["Vše na Přehraj.to", "Nově na Přehraj.to", "S dabingem", "Novinky",
                                                 "Populární", "Nejlépe hodnocené", "Podle roku", "Podle žánru",
                                                 "Československé"]
@@ -151,8 +151,7 @@ def test_catalogue_rows_lists_and_search(api):
     assert [item["title"] for item in film["menu"]] == [
         "Přehrát", "Přehrát od začátku", "Stáhnout na disk", "Označit jako zhlédnuté", "Odebrat z Rozkoukaných",
         "Opravit přiřazení", "Přidat do oblíbených"]
-    assert rows["Moje filmy"][1]["title"] == "Filmy z mého účtu (1)" and rows["Moje filmy"][1]["target"]["call"] == "movies"
-    assert rows["Moje filmy"][1]["icon"] == "movies"                  # dlaždice bez obrázku nese ikonu
+    assert rows["Moje filmy"][0]["icon"] == "download"                # dlaždice bez obrázku nese ikonu
     assert _section(api, "series")["Nově přidané z účtu"][0]["target"] == {"type": "list", "call": "show", "params": {"key": "show:archa"},
                                             "title": "Archa"}
 

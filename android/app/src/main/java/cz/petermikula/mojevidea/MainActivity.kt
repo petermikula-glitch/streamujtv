@@ -19,6 +19,10 @@ import androidx.leanback.widget.PresenterSelector
 import org.json.JSONArray
 
 class MainActivity : FragmentActivity() {
+    /** Mikrofon na ovladači: hledání v aplikaci (viz [Home.dispatch]); Zpět tu zůstává beze změny. */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
+        Home.dispatch(this, event) || super.dispatchKeyEvent(event)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) {

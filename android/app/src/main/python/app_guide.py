@@ -15,7 +15,7 @@ Aplikace se ovládá ovladačem televize: šipkami se vybírá, OK potvrzuje, Zp
 Podržením tlačítka Zpět se z kterékoli obrazovky vrátíte rovnou do hlavní nabídky.
 
 Vlevo je pět sekcí: Oblíbené, Rozkoukané, Objevuj, iVysílání a Nástroje. Nahoře vlevo je lupa (hledání) \
-a vedle ní profil, který se právě dívá.
+a vedle ní profil, který se právě dívá. Tlačítko mikrofonu na ovladači otevře hledání a rovnou poslouchá.
 
 Podržení OK na kartě otevře její nabídku. Podle toho, co je to za kartu, v ní je: Přehrát od začátku, \
 Stáhnout na disk, přidat do oblíbených nebo odebrat, Označit jako zhlédnuté, Odebrat z Rozkoukaných \
