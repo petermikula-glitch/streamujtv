@@ -2059,8 +2059,11 @@ def test_discover_lists_can_be_filtered(api, monkeypatch):
     # TMDB dostane výběr ve výchozím pořadí výpisu (tady nejlépe hodnocené); podle roku se řadí až v aplikaci
     assert (sent["vote_average.gte"], sent["sort_by"]) == (7.0, "vote_average.desc")
     assert sent["with_origin_country"] == "CZ|SK|XC"
+    count = len(calls)
     api("discover", kind="movie", origin="CZ|SK|XC", sort="rating")       # Československé → Všechny → podle hodnocení
-    assert calls[-1][1]["sort_by"] == "popularity.desc"                      # tytéž tituly jako bez řazení (podle oblíbenosti)
+    orders = [sent.get("sort_by") for path, sent in calls[count:] if path == "/discover/movie"]
+    assert orders[0] == "popularity.desc"                                    # tytéž tituly jako bez řazení (podle oblíbenosti)
+    assert "primary_release_date.desc" in orders                             # … a k nim i nejnovější
     again = api("discover_filters", **chosen)
     assert [group["value"] for group in again["filters"]] == [
         "Komedie", "1990–1999", "70 % a víc", "Česko a Slovensko", "Nejnovější", "Vše",
@@ -4321,3 +4324,33 @@ def test_title_only_in_ivysilani_stays_listed_while_it_is_rechecked(api, monkeyp
         known = discover._known(lib, "tv", [77])
     assert known["tv:77"]["iv"] == "12" and known["tv:77"]["tv_stale"]
     assert discover._there(known, "tv", {"id": 77}) and not discover._fresh(known, "tv:77")
+
+
+def test_newest_titles_join_a_list_chosen_by_country(api, monkeypatch):
+    # Letošní československý seriál má v TMDB zatím malou oblíbenost a mezi prvními stránkami výběru
+    # by chyběl; do výpisu „Všechny“ se dostane z nejnovějších titulů a zařadí se podle oblíbenosti.
+    api("settings_set", tmdb_key="k" * 32, prefer_language="any")
+    monkeypatch.setattr(app_api.app_discover, "_ivys_match", lambda kind, names, year: "")
+    year = __import__("time").strftime("%Y")
+    old = [{"id": 1, "name": "Vyprávěj", "first_air_date": "2009-08-31", "popularity": 30.0},
+           {"id": 2, "name": "Arabela", "first_air_date": "1979-01-01", "popularity": 10.0}]
+    new = {"id": 3, "name": "Novinka", "first_air_date": year + "-02-01", "popularity": 20.0}
+    asked = []
+
+    def fetch(self, path, timeout, params):
+        asked.append(dict(params))
+        if path != "/discover/tv":
+            raise app_api.TmdbError("TMDB: HTTP 404")
+        newest = params.get("sort_by") == "first_air_date.desc"
+        return {"results": [new] if newest else old, "total_pages": 1}
+
+    monkeypatch.setattr(app_api.Tmdb, "_fetch", fetch)
+    _catalogue_search(monkeypatch, {"Vyprávěj": [_web(1, "Vypravej S01E01 CZ", 3000)],
+                                    "Arabela": [_web(2, "Arabela S01E01 CZ", 3000)],
+                                    "Novinka": [_web(3, "Novinka S01E01 CZ", 3000)]})
+    listing = api("discover", kind="tv", origin="CZ|SK|XC")
+    assert _titles(listing["items"]) == ["Seřadit", "Vyprávěj", "Novinka", "Arabela"]   # podle oblíbenosti
+    assert listing["items"][0]["subtitle"] == "Podle oblíbenosti · 3 tituly"
+    assert any(params.get("first_air_date.lte") for params in asked)         # jen uvedené do dneška
+    newest = api("discover", kind="tv", origin="CZ|SK|XC", sort="new")
+    assert _titles(newest["items"])[1] == "Novinka"

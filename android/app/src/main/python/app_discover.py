@@ -51,6 +51,7 @@ ONLY_PAGES = 3                   # výpis „jen dostupné“: jedno načtení =
 SORT_PAGES = 15                  # seřazený výpis: tolik stránek TMDB v původním pořadí se seřadí (stejný výběr)
 SORT_WINDOW = 60                 # … a tolik karet z něj na jedno načtení
 SORT_VERIFY = 40                 # neověřených titulů seřazeného výpisu se najednou zařadí k ověření nejvýš tolik
+NEWEST_PAGES = 3                 # výběr podle země, žánru nebo roku: navíc tolik stránek nejnovějších titulů
 SEARCH_RETRY_WAIT = 2.5          # po dočasné chybě hledání se tolik sekund počká a zkusí se to jednou znovu
 SEARCH_HOLD = 20                 # tolik sekund po hledání, na které někdo čeká, ověřování na pozadí nezačíná další dávku
 CHECK_PAUSE = 120                # služba, která neodpovídá, se tolik sekund nezkouší (výpis na ni nečeká)
@@ -1107,16 +1108,25 @@ def _collect_sorted(params, state, sort):
     kind = _kind(params)
     base = {key: value for key, value in params.items() if key not in ("sort", "page", "offset")}
     items, pages = _list_items(dict(base, page=1))
-    rest = list(range(2, min(int(pages or 1), SORT_PAGES) + 1))
-    if rest:
-        def load(number):
+    requests = [dict(base, page=number) for number in range(2, min(int(pages or 1), SORT_PAGES) + 1)]
+    # Výběr podle země, žánru nebo roku (ne žebříček kategorie): nejnovější tituly mají v TMDB zatím
+    # malou oblíbenost a mezi prvními stránkami by chyběly – třeba letošní československé seriály,
+    # které Přehraj.to už má. Proto se přidá i pár stránek nejnovějších (uvedených do dneška).
+    newest = not base.get("category") and _default_sort(base) == "popular"
+    requests += [dict(base, sort="new", page=number) for number in range(1, NEWEST_PAGES + 1)] if newest else []
+    if requests:
+        def load(request):
             try:
-                return _list_items(dict(base, page=number))[0] or []
+                return _list_items(request)[0] or []
             except TmdbError:
                 return []   # chybějící stránka jen zmenší výběr
         with ThreadPoolExecutor(max_workers=4) as pool:
-            for more in pool.map(load, rest):
+            for more in pool.map(load, requests):
                 items = list(items) + list(more)
+    if newest:
+        # výchozí pořadí je podle oblíbenosti: nejnovější tituly se zařadí tam, kam podle ní patří
+        items = sorted((item for item in items if isinstance(item, dict)),
+                       key=lambda item: item.get("popularity") or 0, reverse=True)
     seen, unique = set(), []
     for item in items:
         if isinstance(item, dict) and item.get("id") and item["id"] not in seen:
