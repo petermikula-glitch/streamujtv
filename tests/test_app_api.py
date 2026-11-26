@@ -469,7 +469,12 @@ def test_download_queue_progress_local_playback_and_removal(api, tmp_path):
     card = api("downloads")["items"][0]
     assert (card["subtitle"], card["progress"]) == ("Stahuje se · 25 % z 0 MB", 25)
     assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zrušit stahování", "Označit jako zhlédnuté",
-                                                        "Opravit přiřazení"]
+                                                        "Opravit přiřazení", "Přidat do oblíbených"]
+    favorite = card["menu"][-1]["target"]                                    # stažené video jde dát do oblíbených
+    assert api(favorite["call"], **favorite["params"])["message"] == "Přidáno do oblíbených: Pelíšky"
+    assert api("downloads")["items"][0]["menu"][-1]["title"] == "Odebrat z oblíbených"
+    assert "Pelíšky" in _titles(api("favorites")["items"])
+    api(favorite["call"], **favorite["params"])
     rows = _section(api, "movies")                                           # dlaždice vede na stažené filmy
     assert rows["Moje filmy"][0]["title"] == "Stažené filmy (1)" and rows["Moje filmy"][0]["icon"] == "download"
     assert _section(api, "series")["Moje seriály"][0]["title"] == "Stažené díly"
@@ -527,7 +532,8 @@ def test_download_failures_and_cancel(api, tmp_path, monkeypatch):
     card = api("downloads")["items"][0]
     assert card["subtitle"].startswith("Chyba: Video už na Přehraj.to není")
     assert [item["title"] for item in card["menu"]] == ["Přehrát", "Zkusit stáhnout znovu", "Odebrat ze stahování",
-                                                        "Označit jako zhlédnuté", "Opravit přiřazení"]
+                                                        "Označit jako zhlédnuté", "Opravit přiřazení",
+                                                        "Přidat do oblíbených"]
     api("download_add", vid=REF)                                             # znovu do fronty
     _link(REF, "https://cdn.x/stream?id=5")
     job = api("download_next", dir=disk)
@@ -920,6 +926,8 @@ def test_downloaded_version_comes_first_and_film_plays_without_its_page(api, mon
     assert page["detail"]["file"] == "Soubor na disku: Pelisky 1999 EN 720p · 1 GB · 2 h 00 min"
     assert "Stáhnout na disk" not in _titles(page["actions"])
     assert api("discover_movie_play", **FILM)["local"] is True               # a hraje z disku
+    favorite = api("downloads")["items"][0]["menu"][-1]                      # stažený film z Objevuj → oblíbené
+    assert favorite["title"] == "Přidat do oblíbených" and favorite["target"]["params"]["id"] == "tmdb:movie:11"
 
     del found["Pelíšky 1999"]                                                # z hledání zmizela, na disku zůstala
 

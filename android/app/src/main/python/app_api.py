@@ -2575,9 +2575,10 @@ def _download_cards(lib, state, limit=None, episodes=None):
             if poster is not None:
                 posters[vid] = poster
         image = poster or (entry.get("image") if not entry.get("wide") else "")
+        menu = _video_menu(state, {"vid": vid}, point) + _download_favorite(lib, state, entry, videos.get(vid), poster)
         cards.append(_card(entry.get("title") or vid, _target("play", "play", {"vid": vid}), _download_status(entry),
                            image or entry.get("image"), percent or _percent(point), wide=not image,
-                           watched=vid in state["watched"], menu=_video_menu(state, {"vid": vid}, point), icon="download"))
+                           watched=vid in state["watched"], menu=menu, icon="download"))
     if posters:
         with _DOWNLOADS_LOCK:
             saved = _downloads()
@@ -2586,6 +2587,23 @@ def _download_cards(lib, state, limit=None, episodes=None):
                     saved[vid]["poster"] = poster
             _save_downloads(saved)
     return cards
+
+
+def _download_favorite(lib, state, entry, video, poster):
+    """Položka „Přidat do oblíbených“ u staženého videa: titul z Objevuj, ze kterého se stahovalo (film,
+    u dílu celý seriál), jinak film nebo seriál z katalogu, ke kterému video patří."""
+    if "favorites" not in state:
+        return []
+    title = _title_of(lib.get_kv(ART_PREFIX + (entry.get("vid") or "")))
+    if title:
+        kind, tmdb_id = title.split(":")
+        info = app_discover._title_info(lib, kind, tmdb_id) or {}
+        favorite = app_discover.tmdb_favorite(
+            kind, int(tmdb_id), info.get("title") or entry.get("title") or "", info.get("year") or 0,
+            info.get("poster") or poster or "", info.get("orig") or "")
+        return [app_discover.favorite_item(state["favorites"], favorite)]
+    meta = lib.get_meta(video["meta_key"]) if video and video.get("meta_key") else None
+    return _favorite_menu(state, meta) if meta else []
 
 
 def downloads(params):
