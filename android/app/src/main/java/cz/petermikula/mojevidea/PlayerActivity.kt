@@ -81,6 +81,7 @@ class PlayerActivity : FragmentActivity() {
     private var subtitleUrls = emptyList<String>()
     private var withoutSubtitles = false // titulky se nepodařilo načíst: video běží bez nich
     private var subtitleSearch = false   // jde hledat titulky na OpenSubtitles (vyplněný klíč, video z Přehraj.to)
+    private var subtitleOffer = false    // video z Přehraj.to: tlačítko Titulky je vždy (i bez vlastních titulků)
     private var unattended = 0           // kolik dílů po sobě se spustilo samo, aniž kdo sáhl na ovladač
 
     /** Přehrávání chvíli běží bez potíží: další výpadek má zase nárok na nový pokus. */
@@ -299,8 +300,9 @@ class PlayerActivity : FragmentActivity() {
         track = stream.optString("track")
         choice = stream.optString("choice").ifEmpty { params.optString("choice") }
         local = stream.optBoolean("local")  // soubor stažený na disku: cesta místo adresy
-        subtitleSearch = stream.optBoolean("subtitle_search") && !stream.optBoolean("live") &&
-            track.isNotEmpty() && !track.startsWith("ivys:")
+        // OpenSubtitles se nabízí u každého videa z Přehraj.to; bez klíče v Nastavení volba řekne, co vyplnit
+        subtitleOffer = !stream.optBoolean("live") && track.isNotEmpty() && !track.startsWith("ivys:")
+        subtitleSearch = stream.optBoolean("subtitle_search") && subtitleOffer
         fun source(value: String): Uri = if (local) Uri.fromFile(File(value)) else Uri.parse(value)
         heading.text = stream.optString("title")
         live = stream.optBoolean("live")
@@ -383,7 +385,7 @@ class PlayerActivity : FragmentActivity() {
         if (carriedTracks != null) userChangedTracks = carriedChanged
         carriedTracks = null
         audioButton.visibility = View.GONE
-        subtitleButton.visibility = if (subtitleSearch) View.VISIBLE else View.GONE
+        subtitleButton.visibility = if (subtitleOffer) View.VISIBLE else View.GONE
         restartButton.visibility = if (live) View.GONE else View.VISIBLE
         player = exo
         playerView.player = exo
@@ -431,7 +433,7 @@ class PlayerActivity : FragmentActivity() {
                 // zvuk: i u jediné stopy, kvůli volbě výstupu (prostorový zvuk / stereo)
                 audioButton.visibility = if (groups(C.TRACK_TYPE_AUDIO).isNotEmpty()) View.VISIBLE else View.GONE
                 subtitleButton.visibility =
-                    if (groups(C.TRACK_TYPE_TEXT).isNotEmpty() || subtitleSearch) View.VISIBLE else View.GONE
+                    if (groups(C.TRACK_TYPE_TEXT).isNotEmpty() || subtitleOffer) View.VISIBLE else View.GONE
                 val (audio, subtitles) = selectedTracks()
                 if (userChangedTracks) {
                     userChangedTracks = false
@@ -603,7 +605,7 @@ class PlayerActivity : FragmentActivity() {
             chooseAudio(available)
             return
         }
-        val search = if (subtitleSearch) listOf("Najít titulky (OpenSubtitles)…") else emptyList()
+        val search = if (subtitleOffer) listOf("Najít titulky (OpenSubtitles)…") else emptyList()
         val names = listOf("Vypnuto") + available.map { label(it) } + search
         val current = available.indexOfFirst { it.isSelected } + 1
         AlertDialog.Builder(this)
@@ -612,7 +614,7 @@ class PlayerActivity : FragmentActivity() {
             .setSingleChoiceItems(Dialogs.choices(this, names), current) { dialog, which ->
                 dialog.dismiss()
                 if (search.isNotEmpty() && which == names.size - 1) {
-                    findSubtitles()
+                    if (subtitleSearch) findSubtitles() else explainSubtitleSearch()
                     return@setSingleChoiceItems
                 }
                 // přehrávač se mezitím mohl vyměnit (další díl, nový pokus): volba patří tomu, který hraje
@@ -629,6 +631,20 @@ class PlayerActivity : FragmentActivity() {
                 userChangedTracks = true
                 playing.trackSelectionParameters = builder.build()
             }
+            .showStyled()
+    }
+
+    /** Hledání na OpenSubtitles bez klíče: co a kde vyplnit (rovnou s cestou do Nastavení). */
+    private fun explainSubtitleSearch() {
+        AlertDialog.Builder(this)
+            .setTitle("Titulky z OpenSubtitles")
+            .setMessage("Hledání titulků potřebuje klíč k rozhraní OpenSubtitles. Je zdarma: na webu " +
+                "opensubtitles.com se zaregistrujte a v profilu (API Consumers) si vytvořte klíč. Pak ho " +
+                "vyplňte v Nastavení v položce „Klíč OpenSubtitles“, případně i jméno a heslo (víc stažení denně).")
+            .setPositiveButton("Otevřít Nastavení") { _, _ ->
+                startActivity(android.content.Intent(this, SettingsActivity::class.java))
+            }
+            .setNegativeButton("Zavřít", null)
             .showStyled()
     }
 

@@ -91,7 +91,8 @@ Posun zvuku – když zvuk nesedí na ústa. Posouvá se po 25 ms a změna plat�
 Noční režim – hlasité scény tišeji, tiché hlasitěji a řeč výrazněji, ať se v noci nemusí pořád \
 sahat na hlasitost. Zapíná se a vypíná klepnutím a platí pro všechna videa, dokud ho nevypnete.
 
-Titulky – výběr nebo vypnutí; „Velikost a pozadí“ mění jejich vzhled. „Najít titulky (OpenSubtitles)“ \
+Titulky – výběr nebo vypnutí; „Velikost a pozadí“ mění jejich vzhled. Tlačítko je u každého videa \
+z Přehraj.to, i když video vlastní titulky nemá. „Najít titulky (OpenSubtitles)“ \
 najde české a slovenské titulky na OpenSubtitles.com a hned je zapne; příště se přidají samy. Potřebuje \
 v Nastavení klíč k rozhraní OpenSubtitles (zdarma po registraci na opensubtitles.com), jméno a heslo \
 zvýší počet stažení za den.
