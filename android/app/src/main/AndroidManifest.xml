@@ -24,6 +24,9 @@
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <!-- hledání hlasem v aplikaci (mikrofon v ovladači); bez mikrofonu se píše klávesnicí -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <!-- Oficiální aplikace iVysílání ČT: chráněné pořady se předávají jí (IVYS_APPS v app_api.py).
          Bez tohoto zápisu by ji systém aplikaci neukázal. -->
@@ -33,6 +36,13 @@
         <!-- upoutávky se otevírají v aplikaci YouTube -->
         <package android:name="com.google.android.youtube.tv" />
         <package android:name="com.google.android.youtube" />
+        <!-- rozpoznávání řeči pro hledání hlasem (bez zápisu ho aplikace od Androidu 11 nevidí) -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
     </queries>
 
     <application

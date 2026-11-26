@@ -1,7 +1,12 @@
 package cz.petermikula.mojevidea
 
+import android.Manifest
 import android.app.Activity
 import android.app.SearchManager
+import android.content.pm.PackageManager
+import android.speech.RecognitionListener
+import android.speech.SpeechRecognizer
+import androidx.core.content.ContextCompat
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -54,7 +59,124 @@ class SearchActivity : FragmentActivity() {
         }
     }
 
+    private var recognizer: SpeechRecognizer? = null
+    private var listening = false
+
+    /** Povolení mikrofonu (ptá se jen poprvé); bez něj aplikace neslyší. */
+    private val microphone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startRecognizer()
+        else note("Bez povolení mikrofonu aplikace neslyší. Povolit ho jde v Nastavení televize → Aplikace → " +
+            "Promítárna → Oprávnění, nebo napište název klávesnicí.")
+    }
+
+    /**
+     * Hledání hlasem přímo v aplikaci (rozpoznávání řeči od Googlu, text se rovnou hledá). Dřív se volala
+     * hlasová obrazovka systému – na Google TV ji ale převzal Asistent a hledal mimo aplikaci. Když
+     * rozpoznávání v aplikaci není k dispozici, zkusí se ta systémová obrazovka.
+     */
     private fun listen(button: View) {
+        if (listening) {
+            recognizer?.stopListening()
+            return
+        }
+        if (SpeechRecognizer.isRecognitionAvailable(this)) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                startRecognizer()
+            } else {
+                microphone.launch(Manifest.permission.RECORD_AUDIO)
+            }
+            return
+        }
+        listenWithSystem(button)
+    }
+
+    private fun startRecognizer(language: Boolean = true) {
+        val speech = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
+        speech.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                listening = true
+                findViewById<View>(R.id.search_voice)?.isActivated = true
+                note("Poslouchám… řekněte název filmu, seriálu nebo herce.")
+            }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() = note("Rozpoznávám…")
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+
+            override fun onPartialResults(partialResults: Bundle?) {
+                spoken(partialResults)?.let { input.setText(it) }
+            }
+
+            override fun onResults(results: Bundle?) {
+                stopped()
+                val text = spoken(results)
+                if (text == null) note("Nerozuměl jsem. Zkuste to znovu, nebo napište název klávesnicí.")
+                else {
+                    input.setText(text)
+                    search(text)
+                }
+            }
+
+            override fun onError(error: Int) {
+                stopped()
+                android.util.Log.w("Promitarna", "rozpoznávání řeči: chyba $error")
+                // čeština jako jazyk rozpoznávání nejde: zkusit jazyk zařízení
+                if (language && (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)) {
+                    startRecognizer(language = false)
+                    return
+                }
+                note(voiceError(error))
+            }
+        })
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+        if (language) intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "cs-CZ")
+        try {
+            speech.startListening(intent)
+        } catch (error: RuntimeException) {
+            android.util.Log.w("Promitarna", "rozpoznávání řeči se nespustilo", error)
+            note(voiceError(SpeechRecognizer.ERROR_CLIENT))
+        }
+    }
+
+    private fun spoken(results: Bundle?): String? =
+        results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()?.ifEmpty { null }
+
+    private fun stopped() {
+        listening = false
+        findViewById<View>(R.id.search_voice)?.isActivated = false
+    }
+
+    private fun voiceError(error: Int): String = when (error) {
+        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+            "Nic jsem neslyšel nebo nerozuměl. Stiskněte mikrofon a mluvte do ovladače."
+        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER ->
+            "Rozpoznávání řeči teď nejde (potřebuje internet). Zkuste to za chvíli."
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+            "Aplikace nemá povolený mikrofon: Nastavení televize → Aplikace → Promítárna → Oprávnění."
+        SpeechRecognizer.ERROR_AUDIO -> "Mikrofon v ovladači se nepodařilo zapnout. Zkuste to znovu."
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Rozpoznávání řeči je zaneprázdněné. Zkuste to za chvíli."
+        else -> "Hledání hlasem se nezdařilo (chyba $error). Napište název klávesnicí."
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (listening) recognizer?.cancel()
+        stopped()
+    }
+
+    override fun onDestroy() {
+        recognizer?.destroy()
+        recognizer = null
+        super.onDestroy()
+    }
+
+    /** Záloha: hlasová obrazovka systému (zařízení bez rozpoznávání řeči pro aplikace). */
+    private fun listenWithSystem(button: View) {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "cs-CZ")
