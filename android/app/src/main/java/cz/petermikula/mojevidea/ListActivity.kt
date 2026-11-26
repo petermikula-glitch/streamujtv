@@ -20,7 +20,7 @@ import org.json.JSONObject
 class ListActivity : FragmentActivity() {
     /** Podržené Zpět: rovnou do hlavní nabídky (viz [Home]). */
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
-        Home.dispatch(this, event) || super.dispatchKeyEvent(event)
+        Home.dispatch(this, event) || current()?.downToShortRow(event) == true || super.dispatchKeyEvent(event)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +56,25 @@ class ListFragment : VerticalGridSupportFragment() {
 
     /** První stránka načtená předchozí mřížkou jiného tvaru (viz [ListActivity.show]). */
     var initial: JSONObject? = null
+
+    /**
+     * Šipka dolů nad sloupcem, pod kterým v (zatím) kratší poslední řadě nic není: výběr skočí na
+     * poslední kartu té řady. Mřížka knihovny se jinak nepohne a muselo by se doleva nad kartu, pod
+     * kterou něco je (výpis, který se teprve plní, má poslední řadu často skoro prázdnou).
+     */
+    fun downToShortRow(event: android.view.KeyEvent): Boolean {
+        if (event.keyCode != android.view.KeyEvent.KEYCODE_DPAD_DOWN) return false
+        val grid = view?.findViewById<androidx.leanback.widget.VerticalGridView>(androidx.leanback.R.id.browse_grid)
+            ?: return false
+        if (!grid.hasFocus()) return false
+        val columns = gridPresenter?.numberOfColumns ?: return false
+        val position = grid.selectedPosition
+        val last = cards.size() - 1
+        if (position < 0 || last < 0 || position + columns <= last) return false   // pod kartou něco je
+        if (last / columns <= position / columns) return false                      // už je v poslední řadě
+        if (event.action == android.view.KeyEvent.ACTION_DOWN) grid.setSelectedPositionSmooth(last)
+        return true
+    }
     private val presenter = CardPresenter(false) { card -> Navigator.menu(requireActivity(), card) { reload() } }
     private var emptyText = "Nic tu není."
     private var verifying = false   // tituly výpisu se právě ověřují na pozadí (výpis se sám obnoví)
