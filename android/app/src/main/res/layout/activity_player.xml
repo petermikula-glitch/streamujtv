@@ -83,6 +83,22 @@
             android:padding="10dp"
             android:scaleType="fitCenter"
             android:src="@drawable/ic_player_restart" />
+
+        <!-- ve videu je něco jiného než vybraný titul: zapamatovat a pustit jinou verzi -->
+        <Button
+            android:id="@+id/player_wrong"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/player_button_bg"
+            android:minWidth="0dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="Jiný obsah?"
+            android:textAllCaps="false"
+            android:textColor="@color/player_button_text"
+            android:textSize="15sp"
+            android:visibility="gone" />
     </LinearLayout>
 
     <!-- po dokoukání: nabídka dalšího dílu seriálu nebo dalšího filmu série -->

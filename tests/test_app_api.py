@@ -4360,3 +4360,38 @@ def test_newest_titles_join_a_list_chosen_by_country(api, monkeypatch):
     assert any(params.get("first_air_date.lte") for params in asked)         # jen uvedené do dneška
     newest = api("discover", kind="tv", origin="CZ|SK|XC", sort="new")
     assert _titles(newest["items"])[1] == "Novinka"
+
+
+def test_version_with_other_content_is_remembered_and_replaced(api, monkeypatch):
+    """„Tohle není ten film“: verze se k titulu už nenabídne (na stránce je až na konci jako „jiný
+    obsah“), zmizí z Rozkoukaných a hned se pustí další nejlepší verze – i opakovaně, bez limitu pokusů."""
+    api("settings_set", tmdb_key="k" * 32, username="a@b.cz", password="heslo")
+    _fake_tmdb(monkeypatch, {"/movie/11": FILM_DETAIL})
+    hour = 3600
+    found = {"Pelíšky 1999": [_web(71, "Pelisky 1999 CZ 1080p", 2 * hour, "4 GB"),
+                              _web(72, "Pelisky 1999 CZ 720p", 2 * hour, "2 GB"),
+                              _web(73, "Pelisky 1999 EN 720p", 2 * hour, "1 GB")]}
+    _catalogue_search(monkeypatch, found)
+    monkeypatch.setattr(app_api, "_stream_link", lambda vid, fresh=False: ("https://cdn.x/%s.mp4" % vid.split(":")[0], {}))
+    first = api("discover_movie_play", **FILM)
+    assert first["track"] == _web(71, "")["id"]
+    api("progress_save", track=first["track"], position=600, total=7200, started=True)
+    second = api("play_wrong", track=first["track"], choice=first["choice"])
+    assert second["track"] == _web(72, "")["id"] and second["switched"]
+    assert second["again"]["params"]["vid"] == second["track"]
+    with app_api._library() as lib:
+        assert first["track"] not in lib.resume_points([first["track"]])     # z Rozkoukaných pryč
+        assert first["track"] not in app_api._bad_videos(lib)               # nejde o chybu přehrávání
+    assert api("discover_movie_play", **FILM)["track"] == second["track"]   # „Přehrát hned“ ji vynechá
+    page = api("discover_title", **FILM)
+    assert first["track"] not in [card["target"]["params"].get("vid") for card in page["rows"][0]["items"]]
+    rest = next(row for row in page["rows"] if row["title"] == "Ukázky, neúplné soubory a jiný obsah")
+    assert rest["items"][-1]["target"]["params"]["vid"] == first["track"]    # na stránce až na konci
+    assert rest["items"][-1]["subtitle"].startswith("jiný obsah")
+    third = api("play_wrong", track=second["track"], choice="movie:11", tried=[])
+    assert third["track"] == _web(73, "")["id"]                              # klidně znovu
+    nothing = api.raw("play_wrong", track=third["track"], choice="movie:11")
+    assert nothing["ok"] is False and "není" in nothing["error"]           # jiná verze už není
+    assert app_api.app_discover.wrong_versions("movie:11") == {_web(n, "")["id"] for n in (71, 72, 73)}
+    assert app_api.app_discover.wrong_versions("movie:12") == set()          # platí jen pro tento titul
+    assert api.raw("play_wrong", track="1:x:0000000000000001", choice="")["ok"] is False   # video mimo Objevuj

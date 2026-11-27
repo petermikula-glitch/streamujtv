@@ -97,6 +97,10 @@ najde české a slovenské titulky na OpenSubtitles.com a hned je zapne; příš
 v Nastavení klíč k rozhraní OpenSubtitles (zdarma po registraci na opensubtitles.com), jméno a heslo \
 zvýší počet stažení za den.
 
+Jiný obsah? – když ve videu hraje něco úplně jiného než vybraný film nebo díl. Aplikace si tu verzi \
+zapamatuje, k tomuto titulu ji už nenabídne (na stránce titulu je až na konci jako „jiný obsah“) \
+a hned pustí jinou verzi.
+
 Co zvolíte u jednoho dílu, platí pro celý seriál.
 
 Rozkoukané video se zeptá, jestli navázat, nebo začít znovu. Po dokoukání dílu se nabídne další \

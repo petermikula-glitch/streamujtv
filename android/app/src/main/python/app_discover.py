@@ -1519,6 +1519,7 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
         queries += ["%s %dx%02d" % (name, position[0], position[1]) for name in names if name]
     queries = queries[:queries_max]
     prefs, bad = state.get("prefs") or api._prefs(), state.get("bad", ())
+    wrong = wrong_versions(choice)       # verze, u kterých uživatel řekl „tohle není ten film“
     found, failed, reason = {}, 0, ""
     retries = [0 if strict else 1]
     if not strict:
@@ -1579,9 +1580,11 @@ def _find_versions(names, year, position, state, runtime=0, pages=2, choice="", 
             continue  # tentýž soubor nahraný vícekrát
         seen.add(same)
         versions.append({"video": video, "result": result,
-                         # ukázka nebo část: výrazně kratší než film, nebo se tak soubor sám jmenuje (trailer…)
+                         # ukázka nebo část: výrazně kratší než film, nebo se tak soubor sám jmenuje (trailer…);
+                         # verze označená „jiný obsah“ se bere stejně – nenabízí se a jde až na konec
                          "short": bool(runtime and video["duration"] and video["duration"] < runtime * 60 * 0.6)
-                         or search_results.is_preview(video["raw_title"], names),
+                         or search_results.is_preview(video["raw_title"], names) or video["id"] in wrong,
+                         "wrong": video["id"] in wrong,
                          "cam": bool(api.CAM_RE.search(video["raw_title"])), "bad": video["id"] in bad,
                          "chosen": bool(chosen) and video["id"] == chosen, "saved": api._saved(state, video["id"])})
     return _arrange(versions, state)
@@ -1661,8 +1664,10 @@ def _version_card(version, state, choice=""):
     video, result = version["video"], version["result"]
     quality = _version_quality(version, state)
     title = _version_label(version, state)
-    notes = [note for flag, note in (("chosen", "naposledy zvolená"), ("short", "ukázka nebo část"),
-                                     ("cam", "kino kopie"), ("bad", "nešlo přehrát")) if version[flag]]
+    notes = ["jiný obsah"] if version.get("wrong") else []
+    notes += [note for flag, note in (("chosen", "naposledy zvolená"), ("short", "ukázka nebo část"),
+                                      ("cam", "kino kopie"), ("bad", "nešlo přehrát"))
+              if version[flag] and not (flag == "short" and version.get("wrong"))]
     subtitle = " · ".join(part for part in notes + [video.get("size"), _duration_text(video.get("duration")),
                                                     video["raw_title"]] if part)
     params = {"vid": video["id"], "web_result": result}
@@ -2000,7 +2005,9 @@ def _title_page(params, kind):
         detail["plot"] = (NOT_FOUND + "\n\n" + detail["plot"]).strip()
     rest = [version for version in versions if version["short"]]
     if rest:
-        rows.append({"title": "Ukázky a neúplné soubory", "items": [_version_card(v, state, choice) for v in rest]})
+        heading = "Ukázky, neúplné soubory a jiný obsah" if any(v.get("wrong") for v in rest) \
+            else "Ukázky a neúplné soubory"
+        rows.append({"title": heading, "items": [_version_card(v, state, choice) for v in rest]})
     page = {"detail": detail, "actions": actions, "rows": rows + _related_rows(kind, params, info, state)}
     if failed:
         page["retry"] = True   # obrazovka to za chvíli zkusí sama znovu (výpadek bývá krátký)
@@ -2170,6 +2177,46 @@ def play_other(params):
     if len(parts) < 2 or parts[0] not in ("movie", "tv") or not parts[1].isdigit() or len(tried) > OTHER_VERSIONS:
         raise api.ApiError("Jinou verzi se nepodařilo najít.")
     api.play_failed({"track": track})        # příště se tahle verze nenabídne jako první
+    return _next_version(choice, tried)
+
+
+WRONG_PREFIX = "wrong:"   # + volba titulu („movie:603“, „tv:1399:1:5“): verze, které jsou jiný obsah
+WRONG_KEEP = 200          # tolik takových verzí si titul pamatuje nejvýš
+
+
+def wrong_versions(choice):
+    """Verze titulu (``choice``), u kterých uživatel řekl „tohle není ten film / díl“."""
+    if not choice:
+        return set()
+    with api._library() as lib:
+        try:
+            wrong = json.loads(lib.get_kv(WRONG_PREFIX + choice) or "[]")
+        except ValueError:
+            wrong = []
+    return {str(vid) for vid in wrong} if isinstance(wrong, list) else set()
+
+
+def play_wrong(params):
+    """Ve verzi ``track`` je něco úplně jiného než titul ``choice``: zapamatuje si ji (k tomuto titulu se
+    už nenabídne, na stránce titulu je až na konci s poznámkou „jiný obsah“), vyřadí ji z Rozkoukaných
+    a pustí další nejlepší verzi. Vrací totéž co ``play_other``."""
+    track, choice = str(params.get("track") or ""), str(params.get("choice") or "")
+    parts = choice.split(":")
+    if not track or len(parts) < 2 or parts[0] not in ("movie", "tv") or not parts[1].isdigit():
+        raise api.ApiError("U tohoto videa jinou verzi hledat nejde.")
+    with api._library() as lib:
+        wrong = [vid for vid in sorted(wrong_versions(choice)) if vid != track][-(WRONG_KEEP - 1):] + [track]
+        lib.set_kv(WRONG_PREFIX + choice, json.dumps(wrong))
+        lib.remove_history(track)             # rozkoukaný jiný obsah do Rozkoukaných nepatří
+        if lib.get_kv(api.CHOICE_PREFIX + choice) == track:
+            lib.set_kv(api.CHOICE_PREFIX + choice, "")   # a příště se nepustí jako „naposledy zvolená“
+    tried = {str(vid) for vid in params.get("tried") or []} | {track}
+    return _next_version(choice, tried)
+
+
+def _next_version(choice, tried):
+    """Nejlepší verze titulu ``choice`` kromě ``tried``, puštěná přehrávačem (viz ``play_other``)."""
+    parts = choice.split(":")
     kind, tmdb_id = parts[0], int(parts[1])
     position = None
     if kind == "tv":
@@ -2782,7 +2829,7 @@ ACTIONS = {
     "discover": discover, "discover_years": discover_years, "discover_genres": discover_genres,
     "discover_czechoslovak": discover_czechoslovak, "discover_sorts": discover_sorts, "discover_title": discover_title,
     "discover_season": discover_season, "discover_episode": discover_episode, "discover_check": discover_check,
-    "play_next": play_next, "play_other": play_other, "title_csfd": title_csfd, "favorites_check": favorites_check,
+    "play_next": play_next, "play_other": play_other, "play_wrong": play_wrong, "title_csfd": title_csfd, "favorites_check": favorites_check,
     "discover_download_season": discover_download_season, "discover_filters": discover_filters,
     "discover_person": discover_person, "discover_episode_play": discover_episode_play,
     "discover_movie_play": discover_movie_play, "discover_series_play": discover_series_play, "discover_row": discover_row, "next_up_hide": next_up_hide,

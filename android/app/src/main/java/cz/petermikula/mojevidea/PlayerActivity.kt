@@ -92,6 +92,7 @@ class PlayerActivity : FragmentActivity() {
     private lateinit var endTime: TextView
     private lateinit var audioButton: ImageButton
     private lateinit var subtitleButton: ImageButton
+    private lateinit var wrongButton: Button
     private lateinit var restartButton: ImageButton
     private var tracksKey = ""       // pod čím se pamatuje zvuk a titulky (seriál, film)
     private var audioChoice = ""
@@ -158,6 +159,8 @@ class PlayerActivity : FragmentActivity() {
         restartButton = findViewById(R.id.player_restart)
         audioButton = findViewById(R.id.player_audio)
         subtitleButton = findViewById(R.id.player_subtitles)
+        wrongButton = findViewById(R.id.player_wrong)
+        wrongButton.setOnClickListener { confirmWrong() }
         val tint = ContextCompat.getColorStateList(this, R.color.player_button_text)
         for (button in listOf(restartButton, audioButton, subtitleButton)) ImageViewCompat.setImageTintList(button, tint)
         restartButton.setOnClickListener { player?.seekTo(0) }
@@ -303,6 +306,8 @@ class PlayerActivity : FragmentActivity() {
         // OpenSubtitles se nabízí u každého videa z Přehraj.to; bez klíče v Nastavení volba řekne, co vyplnit
         subtitleOffer = !stream.optBoolean("live") && track.isNotEmpty() && !track.startsWith("ivys:")
         subtitleSearch = stream.optBoolean("subtitle_search") && subtitleOffer
+        // „Jiný obsah?“ jen u titulu z Objevuj (ví se, co mělo hrát, a dá se vybrat jiná verze)
+        wrongButton.visibility = if (subtitleOffer && choice.isNotEmpty()) View.VISIBLE else View.GONE
         fun source(value: String): Uri = if (local) Uri.fromFile(File(value)) else Uri.parse(value)
         heading.text = stream.optString("title")
         live = stream.optBoolean("live")
@@ -632,6 +637,44 @@ class PlayerActivity : FragmentActivity() {
                 playing.trackSelectionParameters = builder.build()
             }
             .showStyled()
+    }
+
+    /** „Jiný obsah?“: ve videu je něco jiného než vybraný film nebo díl. */
+    private fun confirmWrong() {
+        val episode = choice.startsWith("tv:")
+        AlertDialog.Builder(this)
+            .setTitle(if (episode) "Tohle není ten díl?" else "Tohle není ten film?")
+            .setMessage("Aplikace si tuto verzi zapamatuje jako jiný obsah, k tomuto " +
+                (if (episode) "dílu" else "filmu") + " ji už nenabídne a hned pustí jinou verzi.")
+            .setPositiveButton("Pustit jinou verzi") { _, _ -> playWrong() }
+            .setNegativeButton("Zpět", null)
+            .showStyled()
+    }
+
+    private fun playWrong() {
+        val request = JSONObject().put("track", track).put("choice", choice)
+            .put("tried", org.json.JSONArray(failedVersions))
+        release()   // pozice se neukládá: jiný obsah do Rozkoukaných nepatří
+        message.text = "Hledám jinou verzi…"
+        message.visibility = View.VISIBLE
+        spinner.visibility = View.VISIBLE
+        Api.call("play_wrong", request) { result ->
+            if (isFinishing || isDestroyed) return@call
+            val other = result.data
+            if (other == null) {
+                fail(result.error ?: "Jiná verze na Přehraj.to není.")
+                return@call
+            }
+            android.widget.Toast.makeText(this, "Pouštím jinou verzi: ${other.optString("switched")}",
+                android.widget.Toast.LENGTH_LONG).show()
+            other.optJSONObject("again")?.let { again ->
+                call = again.optString("call").ifEmpty { call }
+                params = again.optJSONObject("params") ?: params
+            }
+            retried = false
+            forcedPosition = 0   // jiná verze od začátku
+            if (!handOver(other)) play(other)
+        }
     }
 
     /** Hledání na OpenSubtitles bez klíče: co a kde vyplnit (rovnou s cestou do Nastavení). */

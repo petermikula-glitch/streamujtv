@@ -772,6 +772,13 @@ function renderPlaying(screen) {
   const leave = el("button", "f btn", "Zpět do aplikace");
   leave.onclick = back;
   actions.append(resume, stop, leave);
+  const stream = screen.stream;
+  if (stream.choice && stream.track && !stream.live && !String(stream.track).startsWith("ivys:")) {
+    // ve videu je něco jiného než vybraný titul: zapamatovat a pustit jinou verzi (jako na televizi)
+    const wrong = el("button", "f btn", "Jiný obsah?");
+    wrong.onclick = () => confirmWrong(screen);
+    actions.append(wrong);
+  }
   const options = el("div", "options");
   panel.append(actions, options);
   box.append(panel);
@@ -893,6 +900,29 @@ async function findSubtitles(screen, audioLang) {
       toast(got.data.toast);
       fillOptions(screen);
     }}))});
+}
+
+function confirmWrong(screen) {
+  const episode = String(screen.stream.choice).startsWith("tv:");
+  dialog({title: episode ? "Tohle není ten díl?" : "Tohle není ten film?",
+    message: "Aplikace si tuto verzi zapamatuje jako jiný obsah, k tomuto " + (episode ? "dílu" : "filmu") +
+      " ji už nenabídne a hned pustí jinou verzi.",
+    buttons: [{label: "Pustit jinou verzi", primary: true, action: () => playWrong(screen)}, {label: "Zpět"}]});
+}
+
+async function playWrong(screen) {
+  screen.restarting = true;            // zavření přehrávače teď není konec sledování
+  await local("player_stop");
+  const other = await api("play_wrong", {track: screen.stream.track, choice: screen.stream.choice});
+  stack.pop();
+  if (!other.ok) {
+    setCrumbs();
+    render(true);
+    info(screen.title || "Přehrávání", other.error || "Jiná verze na Přehraj.to není.");
+    return;
+  }
+  toast("Pouštím jinou verzi: " + (other.data.switched || ""));
+  return startPlayer(other.data, 0, screen.title);
 }
 
 // Nový výstup zvuku: přehrávač se spustí znovu na stejném místě.
