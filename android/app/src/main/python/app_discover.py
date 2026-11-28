@@ -261,9 +261,10 @@ def favorite_cards(lib, state, limit=None, kind=None):
 
 
 def _quick_play(lib, state, entry, card):
-    """Oblíbený titul z Objevuj se klepnutím rovnou přehraje, bez stránky titulu: film stažený na disku
-    ze souboru (štítek „Staženo“), jinak nejlepší verze podle nastavení filmu; seriál od dílu, kde se
-    skončilo (jinak další, nebo první díl). Stránka titulu (výběr verze, dílu) je v nabídce karty."""
+    """Oblíbený film z Objevuj se klepnutím rovnou přehraje, bez stránky titulu: stažený na disku ze
+    souboru (štítek „Staženo“), jinak nejlepší verze podle nastavení filmu. Oblíbený seriál otevře svou
+    stránku se všemi řadami a díly (pokračovat tam, kde se skončilo, jde z nabídky karty – a z karty
+    seriálu v Rozkoukaných)."""
     tmdb_id = entry.get("tmdb_id") or 0
     kind = entry.get("kind") or "movie"
     if not tmdb_id:
@@ -272,9 +273,9 @@ def _quick_play(lib, state, entry, card):
     params = dict(page["params"], resume=True)       # rozkoukané pokračuje bez dotazu (od začátku je v nabídce)
     others = [item for item in card.get("menu") or [] if item["title"] not in ("Otevřít", "Přehrát hned")]
     if kind == "tv":
-        card["target"] = api._target("play", "discover_series_play", params)
-        card["menu"] = [{"title": "Pokračovat ve sledování", "target": card["target"]},
-                        {"title": "Vybrat díl", "target": page}] + others
+        card["menu"] = [{"title": "Otevřít řady a díly", "target": page},
+                        {"title": "Pokračovat ve sledování", "target": api._target(
+                            "play", "discover_series_play", params)}] + others
         return card
     card["target"] = api._target("play", "discover_movie_play", params)
     card["menu"] = [{"title": "Přehrát", "target": card["target"]},
@@ -2409,8 +2410,10 @@ def _searched_next_episode(lib, video, state):
                       _version_card(versions[0], state)["target"], auto=True)
 
 
-def _tmdb_next_episode(lib, choice, state):
-    """Další díl seriálu z Objevuj: stejná řada, nebo první díl následující."""
+def _tmdb_next_episode(lib, choice, state, early=False):
+    """Další díl seriálu z Objevuj: stejná řada, nebo první díl následující. Když další díl není
+    (dokoukaný poslední díl poslední řady), seriál zmizí z Rozkoukaných – jen po dokoukání, ne když se
+    přehrávač ptá předem (``early``)."""
     _prefix, tmdb_id, season, episode = (choice.split(":") + ["", "", ""])[:4]
     info = _title_info(lib, "tv", tmdb_id)
     if not info or not season.isdigit() or not episode.isdigit():
@@ -2420,6 +2423,8 @@ def _tmdb_next_episode(lib, choice, state):
     following, episodes = (season, episode + 1), client.season_episodes(int(tmdb_id), season)
     if str(episode + 1) not in episodes:
         if not any(item["number"] == season + 1 for item in client.seasons(int(tmdb_id))):
+            if not early:
+                _series_done(lib, tmdb_id)
             return None
         following, episodes = (season + 1, 1), client.season_episodes(int(tmdb_id), season + 1)
         if "1" not in episodes:
@@ -2488,7 +2493,8 @@ def play_next(params):
             video = lib.find_video(track) if track else None
             if choice.startswith("tv:"):
                 # další díl se vybírá podle předvoleb seriálu, pokud nějaké vlastní má
-                return {"next": _tmdb_next_episode(lib, choice, api._title_state(lib, state, choice))}
+                return {"next": _tmdb_next_episode(lib, choice, api._title_state(lib, state, choice),
+                                                   early=bool(params.get("early")))}
             if video and video["kind"] == "episode" and video["episode"]:
                 found = _catalogue_next_episode(lib, video, state)
                 gap = _missing_between(video, found[0]) if found else None
@@ -2549,16 +2555,44 @@ def next_up_entries(lib, state, limit=10):
                 "command", "next_up_hide", {"key": video["meta_key"]})}]
             entries.append({"time": video.get("last_played") or 0, "key": series_key(lib, video), "card": card,
                             "page": False})
+    # Seriál z Objevuj: jedna karta s jeho plakátem, dokud se nedokouká poslední díl poslední řady.
+    # Klepnutí pokračuje rozkoukaným dílem, jinak pustí další v pořadí (``discover_series_play``).
+    latest = {}
+    for video in lib.history_videos(limit=100, include_search=True):
+        if video["kind"] == "episode":
+            latest.setdefault(series_key(lib, video), video)   # naposledy přehraný díl každého seriálu
     for tmdb_id in _recent_series(lib):
         info = _title_info(lib, "tv", tmdb_id)
-        if info:
-            card = _title_card("tv", info.get("id") or tmdb_id, info["title"], int(info.get("year") or 0),
-                               info.get("poster") or "", info.get("orig") or "", state)
-            card["subtitle"] = "Pokračovat ve sledování"
-            card["menu"] = (card.get("menu") or []) + [{"title": "Nenabízet další díly", "target": api._target(
-                "command", "next_up_hide", {"tmdb": tmdb_id})}]
-            entries.append({"time": 0, "key": "tv:%s" % tmdb_id, "card": card, "page": True})
+        if not info:
+            continue
+        key = "tv:%s" % tmdb_id
+        card = _title_card("tv", info.get("id") or tmdb_id, info["title"], int(info.get("year") or 0),
+                           info.get("poster") or "", info.get("orig") or "", state)
+        page = card["target"]
+        last = latest.get(key)
+        place = "%d×%02d" % (last["season"] or 1, last["episode"]) if last and last.get("episode") else ""
+        if last and state["resume"].get(last["id"]):
+            card["subtitle"] = "Pokračovat · %s" % place if place else "Pokračovat ve sledování"
+        else:
+            card["subtitle"] = "Další díl po %s" % place if place else "Pokračovat ve sledování"
+        card["target"] = api._target("play", "discover_series_play", dict(page["params"], resume=True))
+        card["menu"] = [{"title": "Pokračovat ve sledování", "target": card["target"]},
+                        {"title": "Otevřít řady a díly", "target": page},
+                        favorite_item(state.get("favorites", {}), tmdb_favorite(
+                            "tv", info.get("id") or tmdb_id, info["title"], int(info.get("year") or 0),
+                            info.get("poster") or "", info.get("orig") or "")),
+                        {"title": "Odebrat z Rozkoukaných", "target": api._target(
+                            "command", "next_up_hide", {"tmdb": tmdb_id})}]
+        # karta seriálu má přednost před kartou jeho rozkoukaného dílu (stejný klíč, o chlup později)
+        played = (last.get("last_played") or 0) + 0.5 if last else 0
+        entries.append({"time": played, "key": key, "card": card, "page": False})
     return entries[:limit]
+
+
+def _series_done(lib, tmdb_id):
+    """Dokoukaný poslední díl poslední řady: seriál z Rozkoukaných zmizí."""
+    recent = [item for item in _recent_series(lib) if str(item) != str(tmdb_id)]
+    lib.set_kv(RECENT_SERIES, json.dumps(recent))
 
 
 def next_up_cards(lib, state, limit=10):
@@ -2576,7 +2610,7 @@ def next_up_hide(params):
             lib.set_kv(RECENT_SERIES, json.dumps(recent))
         else:
             raise api.ApiError("Chybí seriál.")
-    return {"message": "", "toast": "Další díly tohoto seriálu se nabízet nebudou, dokud si z něj něco nepustíte."}
+    return {"message": "", "toast": "Seriál z Rozkoukaných zmizel; vrátí se, až si z něj zase něco pustíte."}
 
 
 def search_titles(query):

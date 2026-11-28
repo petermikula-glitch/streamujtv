@@ -103,8 +103,10 @@ a hned pustí jinou verzi.
 
 Co zvolíte u jednoho dílu, platí pro celý seriál.
 
-Rozkoukané video se zeptá, jestli navázat, nebo začít znovu. Po dokoukání dílu se nabídne další \
-a po deseti sekundách se pustí sám; přechodem na Zavřít odpočet zastavíte."""),
+Rozkoukané video se zeptá, jestli navázat, nebo začít znovu. U dílu seriálu je s ovládáním vpravo \
+dole tlačítko „Další díl“: pustí další díl hned (tento se počítá jako zhlédnutý). Při závěrečných \
+titulcích se další díl nabídne sám a po deseti sekundách se pustí; přechodem na Zavřít odpočet \
+zastavíte a díváte se dál."""),
 
     ("Jazyk a kvalita", "Dabing, titulky, 4K", "settings:movies", """\
 Dlaždice „Jazyk a kvalita přehrávání“ v Nástrojích nastavuje pro celou aplikaci tři věci:
@@ -128,13 +130,15 @@ aplikace pozná až ze stránky videa nebo při přehrání, a pak ji ukazuje p�
 
     ("Oblíbené a Rozkoukané", "Co sledujete", "favorites", """\
 Oblíbené: titul přidáte tlačítkem „Do oblíbených“ na jeho stránce, nebo podržením OK na kartě. \
+Oblíbený film se klepnutím rovnou pustí; oblíbený seriál otevře přehled všech řad a dílů. \
 Film, který na Přehraj.to zatím není v jazyce a kvalitě, jakou chcete, aplikace hlídá a dá vědět, \
 až se objeví.
 
 Rozkoukané: všechno, co jste nedokoukali, s ukazatelem, kde jste skončili. Nahoře je velký panel \
 s tím posledním. Klepnutí na kartu pustí film nebo díl rovnou od místa, kde jste skončili; od začátku \
-ho pustíte podržením OK → Přehrát od začátku. Každý seriál tu má jednu kartu: rozkoukaný díl, a když \
-jste díl dokoukali, rovnou ten další.
+ho pustíte podržením OK → Přehrát od začátku. Každý seriál tu má jednu kartu se svým plakátem, \
+dokud nedokoukáte poslední díl poslední řady: klepnutí pokračuje rozkoukaným dílem, jinak pustí \
+další díl v pořadí.
 
 Odebrat z Rozkoukaných: podržte OK na kartě a zvolte „Odebrat z Rozkoukaných“. Stejně jde video \
 označit jako zhlédnuté nebo nezhlédnuté.

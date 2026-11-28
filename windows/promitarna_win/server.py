@@ -84,6 +84,9 @@ class Backend(object):
         if action == "player_stop":
             self.player.stop()
             return {"ok": True}
+        if action == "player_finish":
+            self.player.finish()
+            return {"ok": True}
         if action == "open":
             url = str(params.get("url") or "")
             if url.startswith(("http://", "https://")):

@@ -1419,13 +1419,15 @@ def play(params):
                 "subtitles": [path for path, _lang in own] + files,
                 "subtitle_langs": [lang for _path, lang in own] + ["cs"] * len(files),
                 "position": position, "title": title, "track": vid, "live": False, "hls": False, "tracks": tracks,
+                "episode": video["kind"] == "episode",
                 "subtitle_search": search}
     url, subtitles = _stream_link(vid, bool(params.get("fresh")))
     return {"url": url, "local": False, "headers": {"User-Agent": provider.USER_AGENT},
             "subtitles": [path for path, _lang in own] + list(subtitles.values()),
             "subtitle_langs": [lang for _path, lang in own] + [_subtitle_lang(key) for key in subtitles],
             "position": position, "title": title,
-            "track": vid, "live": False, "hls": False, "tracks": tracks, "subtitle_search": search}
+            "track": vid, "live": False, "hls": False, "tracks": tracks, "subtitle_search": search,
+            "episode": video["kind"] == "episode"}
 
 
 def _episode_code(video, separator="×"):

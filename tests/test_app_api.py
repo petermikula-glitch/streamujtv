@@ -1115,17 +1115,28 @@ def test_next_episode_of_a_discovered_series_is_searched(api, monkeypatch):
     crossing = api("play_next", track=following["target"]["params"]["vid"], choice="tv:77:1:2")["next"]
     assert crossing["subtitle"] == "Archa 2×01 · Návrat"                     # po posledním dílu řady první díl další
     assert crossing["target"]["params"]["choice"] == "tv:77:2:1"
-    assert api("play_next", track="x", choice="tv:77:2:1")["next"] is None   # konec seriálu
     assert api("play_next", track="x", choice="tv:99:1:1")["next"] is None   # neznámý seriál
 
-    row = _section(api, "progress")["Další díly"]                            # rozkoukaný seriál z Objevuj
-    assert _titles(row) == ["Archa"] and row[0]["subtitle"] == "Pokračovat ve sledování"
-    assert row[0]["target"]["type"] == "title" and row[0]["target"]["params"]["id"] == 77
+    # rozkoukaný seriál z Objevuj: v Rozkoukaných jedna karta s plakátem, klepnutí hraje dál
+    row = _section(api, "progress")["Seriály"]
+    assert _titles(row) == ["Archa"] and row[0]["image"] == "https://img/a.jpg"
+    assert row[0]["subtitle"] == "Pokračovat ve sledování"                  # z dílů se zatím nic nepřehrávalo
+    assert row[0]["target"]["call"] == "discover_series_play" and row[0]["target"]["params"]["id"] == 77
+    assert [item["title"] for item in row[0]["menu"]][:2] == ["Pokračovat ve sledování", "Otevřít řady a díly"]
+    assert "Další díly" not in _section(api, "progress")
     resume = api("discover_title", kind="tv", id=77, title="Archa")["actions"][0]
     assert (resume["title"], resume["subtitle"]) == ("Přehrát", "1×01 · Pilot")   # nic rozkoukaného ani zhlédnutého
     api("progress_save", track=following["target"]["params"]["vid"], position=400, total=1200)
     resume = api("discover_title", kind="tv", id=77, title="Archa")["actions"][0]
     assert (resume["title"], resume["subtitle"]) == ("Pokračovat", "1×02 · Druhý")   # navazuje na rozkoukaný díl
+    assert _section(api, "progress")["Seriály"][0]["subtitle"] == "Pokračovat · 1×02"
+    api("progress_save", track=following["target"]["params"]["vid"], position=1200, total=1200, ended=True)
+    assert _section(api, "progress")["Seriály"][0]["subtitle"] == "Další díl po 1×02"   # dokoukaný: dál
+    # přehrávač se na další díl ptá předem: seriál zůstává; po dokoukaném posledním dílu zmizí
+    assert api("play_next", track="x", choice="tv:77:2:1", early=True)["next"] is None
+    assert _titles(_section(api, "progress")["Seriály"]) == ["Archa"]
+    assert api("play_next", track="x", choice="tv:77:2:1")["next"] is None   # konec seriálu
+    assert "Archa" not in _titles(_section(api, "progress").get("Seriály", []))
 
 
 def test_next_film_of_a_series_follows_a_finished_one(api, monkeypatch):
@@ -4264,9 +4275,11 @@ def test_favorites_play_at_once_downloaded_film_from_disk_and_series_where_it_st
     assert stream["local"] is True and stream["url"] == str(file) and stream["choice"] == "movie:11"
     assert searched == []                                                   # stažený film se nehledá
 
+    # oblíbený seriál otevře svou stránku se všemi řadami a díly; pokračovat jde z nabídky karty
+    assert series["target"]["type"] == "title" and series["target"]["call"] == "discover_title"
+    assert [item["title"] for item in series["menu"]][:2] == ["Otevřít řady a díly", "Pokračovat ve sledování"]
+    series = dict(series, target=series["menu"][1]["target"])
     assert series["target"]["call"] == "discover_series_play" and series["target"]["params"]["resume"] is True
-    assert [item["title"] for item in series["menu"]][:2] == ["Pokračovat ve sledování", "Vybrat díl"]
-    assert series["menu"][1]["target"]["type"] == "title"                  # výběr dílu na stránce seriálu
     episode = {"type": "play", "call": "discover_episode_play",
                "params": {"kind": "tv", "id": 77, "title": "Archa", "season": 2, "episode": 4, "resume": True}}
     monkeypatch.setattr(app_api.app_discover, "_series_rows",

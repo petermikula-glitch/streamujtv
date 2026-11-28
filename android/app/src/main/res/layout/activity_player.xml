@@ -101,6 +101,24 @@
             android:visibility="gone" />
     </LinearLayout>
 
+    <!-- díl seriálu: přejít na další díl kdykoli během přehrávání (ukazuje se s ovládáním) -->
+    <Button
+        android:id="@+id/player_next_episode"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="48dp"
+        android:layout_marginBottom="120dp"
+        android:background="@drawable/player_button_bg"
+        android:minWidth="0dp"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:text="Další díl ▶"
+        android:textAllCaps="false"
+        android:textColor="@color/player_button_text"
+        android:textSize="17sp"
+        android:visibility="gone" />
+
     <!-- po dokoukání: nabídka dalšího dílu seriálu nebo dalšího filmu série -->
     <LinearLayout
         android:id="@+id/next_panel"

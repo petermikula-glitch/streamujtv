@@ -212,6 +212,7 @@ class Player(object):
         self.conf_dir = conf_dir         # kam se zapíše input.conf s klávesou panelu
         self.lock = threading.Lock()
         self.process = None
+        self.skipped = None          # přehrávání ukončené tlačítkem „Další díl“: počítá se jako dokoukané
         self.ipc = None
         self.log_file = ""
         self.audio = {}
@@ -275,6 +276,12 @@ class Player(object):
                 process.wait(5)
             except (OSError, subprocess.TimeoutExpired):
                 pass
+
+    def finish(self):
+        """Ukončí přehrávání a díl započítá jako zhlédnutý (tlačítko „Další díl“ v panelu)."""
+        with self.lock:
+            self.skipped = self.process
+        self.stop()
 
     def _save(self, stream, ipc, ended=False, first=False):
         track = stream.get("track") or ""
@@ -361,7 +368,8 @@ class Player(object):
             if ipc.duration > 0 and (first or time.time() - last >= SAVE_EVERY):
                 self._save(stream, ipc, first=first)
                 first, last = False, time.time()
-        ended = ipc.eof or (ipc.duration > 0 and ipc.duration - ipc.time <= ENDED_WITHIN)
+        ended = ipc.eof or (ipc.duration > 0 and ipc.duration - ipc.time <= ENDED_WITHIN) or \
+            (self.skipped is process and ipc.duration > 0)
         self._save(stream, ipc, ended=ended)
         # video se vůbec nerozběhlo (žádná délka): důvod ze záznamu mpv pro okno a Diagnostiku
         error = "" if ended or ipc.duration > 0 else failure(self.log_file, process.returncode)

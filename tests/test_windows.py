@@ -167,6 +167,33 @@ def test_player_saves_progress_and_reports_the_end(tmp_path):
     assert not last["ended"]
 
 
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="náhradní mpv potřebuje unixový soket")
+def test_next_episode_button_counts_the_episode_as_watched(tmp_path):
+    # „Další díl“ v panelu: přehrávání skončí a díl se uloží jako dokoukaný (jako na televizi)
+    from promitarna_win.player import Player
+    script = tmp_path / "fake_mpv.py"
+    script.write_text(FAKE_MPV.replace("time.sleep(1.3)", "time.sleep(5)"), encoding="utf-8")
+    launcher = tmp_path / "mpv"
+    launcher.write_text("#!/bin/sh\nexec %s %s \"$@\"\n" % (sys.executable, script), encoding="utf-8")
+    launcher.chmod(0o755)
+    saved = []
+    player = Player(lambda action, params: saved.append((action, params)), str(launcher))
+    player.start({"url": "https://cdn.example/d.mkv", "track": "2:archa:02", "choice": "tv:77:1:2",
+                  "title": "Archa 1×02", "episode": True}, 0)
+    for _ in range(50):
+        if player.status().get("position"):
+            break
+        time.sleep(0.1)
+    player.finish()
+    for _ in range(100):
+        if player.status().get("finished"):
+            break
+        time.sleep(0.1)
+    assert player.status()["ended"]
+    last = saved[-1][1]
+    assert last["ended"] and last["position"] == last["total"] == 1200.0
+
+
 def test_downloads_resume_a_partial_file_and_report_to_the_logic(tmp_path):
     from promitarna_win.downloads import Downloads
     payload = b"x" * 300000

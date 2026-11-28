@@ -773,6 +773,8 @@ function renderPlaying(screen) {
   leave.onclick = back;
   actions.append(resume, stop, leave);
   const stream = screen.stream;
+  const episode = stream.episode || String(stream.choice || "").startsWith("tv:");
+  if (episode && stream.track && !stream.live) offerNextEpisode(screen, actions);
   if (stream.choice && stream.track && !stream.live && !String(stream.track).startsWith("ivys:")) {
     // ve videu je něco jiného než vybraný titul: zapamatovat a pustit jinou verzi (jako na televizi)
     const wrong = el("button", "f btn", "Jiný obsah?");
@@ -900,6 +902,23 @@ async function findSubtitles(screen, audioLang) {
       toast(got.data.toast);
       fillOptions(screen);
     }}))});
+}
+
+// Díl seriálu: tlačítko „Další díl“ je v panelu po celou dobu přehrávání (další díl se zjistí hned).
+async function offerNextEpisode(screen, actions) {
+  const stream = screen.stream;
+  const answer = await api("play_next", {track: stream.track, choice: stream.choice || "", early: true});
+  const next = answer.ok && answer.data.next;
+  if (!next || !next.target || next.target.type !== "play" || stack[stack.length - 1] !== screen) return;
+  const button = el("button", "f btn", "Další díl ▶");
+  button.title = next.subtitle || "";
+  button.onclick = async () => {
+    screen.restarting = true;            // konec přehrávání teď neznamená návrat do aplikace
+    await local("player_finish");        // tento díl se počítá jako zhlédnutý
+    stack.pop();
+    openTarget(next.target, next.subtitle || next.title);
+  };
+  actions.append(button);
 }
 
 function confirmWrong(screen) {

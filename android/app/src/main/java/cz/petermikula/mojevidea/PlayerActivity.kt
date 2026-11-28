@@ -53,6 +53,8 @@ class PlayerActivity : FragmentActivity() {
         const val ASK_RESUME_AFTER_MS = 60_000L  // kratší rozkoukání se naváže bez ptaní
         const val HEALTHY_AFTER_MS = 120_000L    // po takové době hraní se chyba bere jako nová, ne opakovaná
         const val STILL_WATCHING_AFTER = 3       // tolik dílů se spustí samo bez jediného stisku ovladače
+        const val CREDITS_MS = 120_000L          // tolik před koncem dílu (závěrečné titulky) se nabídne další díl
+        const val CREDITS_SHARE = 0.08           // … u krátkých dílů nejvýš tato část jejich délky
     }
 
     private var player: ExoPlayer? = null
@@ -125,6 +127,18 @@ class PlayerActivity : FragmentActivity() {
     private lateinit var nextPlay: Button
     private var nextTarget: Target? = null
     private var countdown = 0
+    // díl seriálu: další díl zjištěný hned po spuštění (tlačítko „Další díl“ a nabídka při titulcích)
+    private var earlyNext: JSONObject? = null
+    private var earlyFor = ""            // ke kterému dílu patří
+    private var creditsOffered = false   // nabídka při titulcích už byla (zavřená se znovu neotvírá)
+    private var panelEarly = false       // panel s dalším dílem je otevřený, zatímco díl ještě hraje
+    private lateinit var nextEpisodeButton: Button
+    private val credits = object : Runnable {
+        override fun run() {
+            checkCredits()
+            handler.postDelayed(this, 2000)
+        }
+    }
 
     /** Odpočet do samočinného spuštění dalšího dílu. */
     private val tick = object : Runnable {
@@ -169,8 +183,11 @@ class PlayerActivity : FragmentActivity() {
         nextPanel = findViewById(R.id.next_panel)
         nextPlay = findViewById(R.id.next_play)
         nextPlay.setOnClickListener { startNext() }
+        nextEpisodeButton = findViewById(R.id.player_next_episode)
+        nextEpisodeButton.setOnClickListener { playEarlyNext() }
         findViewById<Button>(R.id.next_close).apply {
-            setOnClickListener { finish() }
+            // panel při titulcích: zavřít a dívat se dál; po dokoukání: zavřít přehrávač
+            setOnClickListener { if (panelEarly) closeEarlyPanel() else finish() }
             // kdo přejde na Zavřít, chce se rozhodnout sám: odpočet se zastaví
             setOnFocusChangeListener { _, focused -> if (focused) stopCountdown() }
         }
@@ -182,6 +199,8 @@ class PlayerActivity : FragmentActivity() {
             PlayerView.ControllerVisibilityListener { visibility ->
                 val hadFocus = top.hasFocus()
                 top.visibility = if (nextPanel.visibility == View.VISIBLE) View.GONE else visibility
+                nextEpisodeButton.visibility = if (visibility == View.VISIBLE && earlyNext != null &&
+                    earlyFor == track && nextPanel.visibility != View.VISIBLE) View.VISIBLE else View.GONE
                 handler.removeCallbacks(clock)
                 if (visibility == View.VISIBLE) handler.post(clock) else if (hadFocus) playerView.requestFocus()
             }
@@ -425,6 +444,7 @@ class PlayerActivity : FragmentActivity() {
                     if (!started) {
                         started = true
                         saveProgress(ended = false, first = true)
+                        prefetchNext()
                     }
                 } else if (state == Player.STATE_ENDED) {
                     saveProgress(ended = true)
@@ -1038,6 +1058,76 @@ class PlayerActivity : FragmentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    /** Díl seriálu: hned po spuštění zjistit další díl (tlačítko vpravo dole a nabídka při titulcích). */
+    private fun prefetchNext() {
+        val episode = lastStream?.optBoolean("episode") == true || choice.startsWith("tv:")
+        if (live || track.isEmpty() || !episode || earlyFor == track) return
+        val asked = track
+        earlyFor = track
+        earlyNext = null
+        creditsOffered = false
+        Api.call("play_next", JSONObject().put("track", asked).put("choice", choice).put("early", true)) { result ->
+            if (isFinishing || isDestroyed || asked != track) return@call
+            val next = result.data?.optJSONObject("next") ?: return@call
+            if (next.optJSONObject("target")?.optString("type") != "play") return@call
+            earlyNext = next
+            handler.removeCallbacks(credits)
+            handler.post(credits)
+        }
+    }
+
+    /** Závěrečné titulky (poslední dvě minuty, u krátkých dílů méně): nabídnout další díl předem. */
+    private fun checkCredits() {
+        val exo = player ?: return
+        val next = earlyNext ?: return
+        if (creditsOffered || earlyFor != track || !exo.isPlaying || nextPanel.visibility == View.VISIBLE) return
+        val total = exo.duration
+        if (total == C.TIME_UNSET || total <= 0) return
+        val window = minOf(CREDITS_MS, (total * CREDITS_SHARE).toLong())
+        if (total - exo.currentPosition > window) return
+        creditsOffered = true
+        showNextPanel(next, early = true)
+    }
+
+    /** Tlačítko „Další díl“: tento díl se počítá jako zhlédnutý a hned se pustí další. */
+    private fun playEarlyNext() {
+        val next = earlyNext ?: return
+        nextTarget = Target.from(next.optJSONObject("target")) ?: return
+        saveProgress(ended = true)
+        panelEarly = false
+        startNext()
+    }
+
+    private fun closeEarlyPanel() {
+        stopCountdown()
+        panelEarly = false
+        nextTarget = null
+        nextPanel.visibility = View.GONE
+        playerView.useController = true
+        playerView.requestFocus()
+    }
+
+    /** Panel s dalším dílem; ``early`` = díl ještě hraje (titulky), jinak je dokoukaný. */
+    private fun showNextPanel(next: JSONObject, early: Boolean) {
+        val target = Target.from(next.optJSONObject("target")) ?: return
+        nextTarget = target
+        panelEarly = early
+        val plays = target.type == "play"
+        val asks = plays && next.optBoolean("auto") && unattended >= STILL_WATCHING_AFTER
+        findViewById<TextView>(R.id.next_label).text =
+            if (asks) "Ještě se díváte? Další díl se sám nespustí." else next.optString("title")
+        findViewById<TextView>(R.id.next_title).text = next.optString("subtitle")
+        nextPlay.text = if (plays) "Přehrát" else "Otevřít"
+        playerView.hideController()
+        top.visibility = View.GONE
+        nextEpisodeButton.visibility = View.GONE
+        nextPanel.visibility = View.VISIBLE
+        nextPlay.requestFocus()
+        countdown = if (plays && next.optBoolean("auto") && !asks) NEXT_COUNTDOWN else 0
+        handler.removeCallbacks(tick)
+        if (countdown > 0) handler.post(tick)
+    }
+
     /** Po dokoukání: logika navrhne další díl seriálu nebo další film série; jinak se přehrávač zavře. */
     private fun offerNext() {
         if (live || track.isEmpty()) {
@@ -1060,20 +1150,9 @@ class PlayerActivity : FragmentActivity() {
                 finish()
                 return@call
             }
-            nextTarget = target
-            val plays = target.type == "play"
             // Několik dílů se spustilo samo a nikdo nesáhl na ovladač: další se už sám nepustí, aby seriál
-            // nedohrál do konce při vypnuté televizi (a díly se neoznačily jako zhlédnuté).
-            val asks = plays && next.optBoolean("auto") && unattended >= STILL_WATCHING_AFTER
-            findViewById<TextView>(R.id.next_label).text =
-                if (asks) "Ještě se díváte? Další díl se sám nespustí." else next.optString("title")
-            findViewById<TextView>(R.id.next_title).text = next.optString("subtitle")
-            nextPlay.text = if (plays) "Přehrát" else "Otevřít"
-            top.visibility = View.GONE
-            nextPanel.visibility = View.VISIBLE
-            nextPlay.requestFocus()
-            countdown = if (plays && next.optBoolean("auto") && !asks) NEXT_COUNTDOWN else 0
-            if (countdown > 0) handler.post(tick)
+            // nedohrál do konce při vypnuté televizi (a díly se neoznačily jako zhlédnuté) – viz showNextPanel.
+            showNextPanel(next, early = false)
         }
     }
 
@@ -1085,6 +1164,13 @@ class PlayerActivity : FragmentActivity() {
 
     private fun startNext() {
         val target = nextTarget ?: return
+        if (panelEarly) {
+            saveProgress(ended = true)   // z titulků rovnou dál: díl se počítá jako zhlédnutý
+            panelEarly = false
+            playerView.useController = true
+        }
+        handler.removeCallbacks(credits)
+        nextEpisodeButton.visibility = View.GONE
         handler.removeCallbacks(tick)
         countdown = 0
         nextTarget = null
@@ -1155,6 +1241,7 @@ class PlayerActivity : FragmentActivity() {
 
     private fun release() {
         handler.removeCallbacks(saver)
+        handler.removeCallbacks(credits)
         handler.removeCallbacks(healthy)
         playerView.keepScreenOn = false
         val old = player
